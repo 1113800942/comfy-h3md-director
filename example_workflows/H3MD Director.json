@@ -389,7 +389,7 @@
      "strengthTwo": null
     },
     {
-     "on": false,
+     "on": true,
      "lora": "MiniMaxH3_Enhancer_0.5-1.0_3432130_epoch_10.safetensors",
      "strength": 0.5,
      "strengthTwo": null
@@ -451,7 +451,7 @@
      "strengthTwo": null
     },
     "lora_9": {
-     "on": false,
+     "on": true,
      "lora": "MiniMaxH3_Enhancer_0.5-1.0_3432130_epoch_10.safetensors",
      "strength": 0.5,
      "strengthTwo": null
@@ -538,9 +538,9 @@
      "strengthTwo": null
     },
     {
-     "on": false,
+     "on": true,
      "lora": "h3-realism-people-r34l1sm-1.0 strong 0.6-0.8 light.safetensors",
-     "strength": 0.7,
+     "strength": 0.5,
      "strengthTwo": null
     },
     {
@@ -600,9 +600,9 @@
      "strengthTwo": null
     },
     "lora_2": {
-     "on": false,
+     "on": true,
      "lora": "h3-realism-people-r34l1sm-1.0 strong 0.6-0.8 light.safetensors",
-     "strength": 0.7,
+     "strength": 0.5,
      "strengthTwo": null
     },
     "lora_3": {
@@ -1670,7 +1670,7 @@
    "outputs": [],
    "properties": {},
    "widgets_values": [
-    "Speed Slider1.1 武戏 5-8, 文戏 1.5-3. 视频复刻或是动作迁移,除了turbo全关."
+    "Speed Slider1.1 武戏 5-8, 文戏 1.5-3. 视频复刻或是动作迁移: 只开 turbo 和 enhancer(0.5 去油)."
    ],
    "widgets_values_named": {
     "text": "Speed Slider1.1 武戏 5-8, 文戏 1.5-3. 视频复刻或是动作迁移,除了turbo全关."
@@ -1725,7 +1725,7 @@
    "outputs": [],
    "properties": {},
    "widgets_values": [
-    "lms 高清-0.2, \n视频复刻或是动作迁移,除了turbo和lms全关."
+    "lms 高清-0.2, \n视频复刻或是动作迁移: 只开 turbo、realism people(0.5 去油) 和 lms(0.2)."
    ],
    "widgets_values_named": {
     "text": "lms 高清-0.2, \n视频复刻或是动作迁移,除了turbo和lms全关."
@@ -3512,7 +3512,7 @@
    "outputs": [],
    "properties": {},
    "widgets_values": [
-    "Low res Lora 推荐\n\nregular: turbo-0.5, motion repair-0.75, speed slider-(1.5-3), cinematic-0.5, VBVR-1, enhancer 0.55 reduce oil skin. \nhigh motion: turbo-0.5, motion repair-0.75, speed slider-(5-8), cinematic-0.5, VBVR-1, fightflow-0.65 or weapon_combat-0.45, enhancer 0.5 reduce oil skin.    \ncopycat: turbo-0.5. \n无审核那点事自己琢磨"
+    "Low res Lora 推荐\n\nregular: turbo-0.5, motion repair-0.75, speed slider-(1.5-3), cinematic-0.5, VBVR-1, enhancer 0.55 reduce oil skin. \nhigh motion: turbo-0.5, motion repair-0.75, speed slider-(5-8), cinematic-0.5, VBVR-1, fightflow-0.65 or weapon_combat-0.45, enhancer 0.5 reduce oil skin.    \ncopycat: turbo-0.5, enhancer-0.5 reduce oil skin. \n无审核那点事自己琢磨"
    ],
    "widgets_values_named": {
     "text": "Low res Lora 推荐\n\nregular: turbo-0.5, motion repair-0.75, speed slider-(1.5-3), cinematic-0.5, VBVR-1, enhancer 0.55 reduce oil skin. \nhigh motion: turbo-0.5, motion repair-0.75, speed slider-(5-8), cinematic-0.5, VBVR-1, fightflow-0.65 or weapon_combat-0.45, enhancer 0.5 reduce oil skin.    \ncopycat: turbo-0.5. \n无审核那点事自己琢磨"
@@ -3538,7 +3538,7 @@
    "outputs": [],
    "properties": {},
    "widgets_values": [
-    "high res Lora 推荐\n\nregular: turbo-0.7, motion repair-0.25, cinematic-0.2, VBVR-0.5, realism people-0.7 reduce oil skin. \nhigh motion: turbo-0.7, realism people-0.7 reduce oil skin, motion repair-0.25, cinematic-0.2, VBVR-0.5, fightflow-0.25 or weapon_combat-0.6, lms-0.2.    \ncopycat: turbo-0.7, lms-0.2. \n无审核那点事自己琢磨"
+    "high res Lora 推荐\n\nregular: turbo-0.7, motion repair-0.25, cinematic-0.2, VBVR-0.5, realism people-0.7 reduce oil skin. \nhigh motion: turbo-0.7, realism people-0.7 reduce oil skin, motion repair-0.25, cinematic-0.2, VBVR-0.5, fightflow-0.25 or weapon_combat-0.6, lms-0.2.    \ncopycat: turbo-0.7, realism people-0.5 reduce oil skin, lms-0.2. \n无审核那点事自己琢磨"
    ],
    "widgets_values_named": {
     "text": "high res Lora 推荐\n\nregular: turbo-0.7, motion repair-0.25, cinematic-0.2, VBVR-0.5, realism people-0.7 reduce oil skin. \nhigh motion: turbo-0.7, realism people-0.7 reduce oil skin, motion repair-0.25, cinematic-0.2, VBVR-0.5, fightflow-0.25 or weapon_combat-0.6, lms-0.2.    \ncopycat: turbo-0.7, lms-0.2. \n无审核那点事自己琢磨"
