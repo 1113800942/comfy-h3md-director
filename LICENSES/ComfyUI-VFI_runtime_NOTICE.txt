@@ -1,0 +1,11 @@
+H3MD Save Video Interp (h3md_stream_save.py) - third-party runtime use, no code copied
+
+ComfyUI-VFI ("RIFE Frame Interpolation", https://github.com/GACLove/ComfyUI-VFI; pyproject points to
+github.com/ModelTC/ComfyUI-VFI) ships no LICENSE file (checked 2026-10-18: GitHub API license = null; the
+installed copy has no LICENSE although pyproject.toml references one). Therefore none of its code is copied into
+H3MD. h3md_stream_save.py looks up the installed node class "RIFEInterpolation" in ComfyUI's node registry at run
+time and calls its own model loader (_get_or_load_model) and the returned wrapper's model.inference_batch and
+_calculate_target_frame_positions. ComfyUI-VFI must stay installed for interpolate = on.
+
+The RIFE network and weights (flownet.pkl) originate from hzwer/ECCV2022-RIFE / Practical-RIFE (MIT License,
+Copyright (c) Megvii Inc. / hzwer). They are loaded from ComfyUI-VFI's folders; H3MD does not redistribute them.

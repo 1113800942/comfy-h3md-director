@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Backups / development snapshots
+*.bak
+*.orig
+*.pre_*
+*.stage*
+*.tmp
+*.part
+
+# H3MD caches and run output
+H3MD_cache/
+resume_*/
+run_*/
+final_*/
+seg_*_frames.npy
+seg_*.pt
+
+# Test output
+tests/**/out/
+tests/**/*_result.json
+ui_shots/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

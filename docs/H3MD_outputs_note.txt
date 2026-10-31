@@ -1,0 +1,9 @@
+H3MD Loop Sampler - outputs / 输出说明
+
+输出说明：只有 'long video' → H3MD Save Video Interp 是按有限显存/内存设计的（从磁盘缓存一段一段流式处理）。'latent'（拼好的音视频 latent）和 'audio'（拼好的音频）也可以接到别的节点做放大或自定义处理，例如 Separate AV Latent → Hyper-VAE 或 VAE 解码器 → VHS Video Combine。'images' 只是 64x64 占位图（merge_images 已删除）：要拿到画面帧，请在外部解码 'latent'。警告：大/长视频走 latent / 解码图片 / audio 这些路径不保证显存/内存不爆——在外部解码整段 latent 会把整段视频放进内存。
+
+RIFE 插帧模型 flownet.pkl 不在下载弹窗里（弹窗只支持 models/ 下已注册的文件夹，而且不允许 .pkl），需要手动下载：节点包 ComfyUI-VFI（https://github.com/GACLove/ComfyUI-VFI）；模型来源 https://huggingface.co/hzwer/RIFE/resolve/main/RIFEv4.26_0921.zip ，解压后把其中的 flownet.pkl 放到 custom_nodes/ComfyUI-VFI/rife/train_log/flownet.pkl（相对 ComfyUI 根目录）。（ComfyUI-VFI 第一次运行时通常也会自动下载这个 zip。）
+
+Outputs: only 'long video' -> H3MD Save Video Interp is designed to stay within bounded VRAM/RAM (it streams chunk by chunk from the disk cache). 'latent' (the joined audio-video latent) and 'audio' (the joined audio) can also be connected to other nodes for upscaling / custom processing, e.g. Separate AV Latent -> Hyper-VAE or a VAE decoder -> VHS Video Combine. 'images' is only a 64x64 placeholder (merge_images was removed): to get frames, decode 'latent' externally. WARNING: for large / long videos the latent / decoded-image / audio paths do NOT guarantee against VRAM/RAM blowups - decoding the full latent externally holds the whole clip in memory.
+
+RIFE flownet.pkl is NOT in the missing-models download list (the popup only downloads into registered models/ folders and does not allow .pkl) - download it manually: node pack ComfyUI-VFI (https://github.com/GACLove/ComfyUI-VFI); model source https://huggingface.co/hzwer/RIFE/resolve/main/RIFEv4.26_0921.zip - extract flownet.pkl from it to custom_nodes/ComfyUI-VFI/rife/train_log/flownet.pkl (relative to the ComfyUI root). (ComfyUI-VFI normally also downloads this zip itself on first use.)

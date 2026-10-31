@@ -1,0 +1,3 @@
+# Kept in git but not shipped in the Comfy Registry archive
+tests/
+docs/dev/
