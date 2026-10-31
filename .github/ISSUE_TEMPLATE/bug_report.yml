@@ -1,0 +1,34 @@
+name: Bug report / 问题反馈
+description: Something does not work as expected / 运行出错或结果不对
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened? / 发生了什么？
+      description: What you did, what you expected, what you got. Screenshots or a short clip help. / 做了什么、期望什么、实际结果；截图或短视频更好。
+    validations:
+      required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU and VRAM / 显卡和显存
+      placeholder: e.g. RTX 4090 24 GB
+    validations:
+      required: true
+  - type: input
+    id: comfy
+    attributes:
+      label: ComfyUI version and H3MD version / ComfyUI 版本和 H3MD 版本
+      placeholder: e.g. ComfyUI 0.43.1, H3MD 0.1.0
+  - type: textarea
+    id: settings
+    attributes:
+      label: Settings / 设置
+      description: Resolution, number of segments, text encoder (32B / 4B + ClipProj), LoRAs, depth on/off, lowres_anchor, rerun_segments… / 分辨率、段数、编码器、LoRA、是否开深度、lowres_anchor、rerun_segments 等
+  - type: textarea
+    id: log
+    attributes:
+      label: Console log / 控制台日志
+      description: Paste the [H3MD] lines and the error. / 粘贴带 [H3MD] 的日志和报错。
+      render: text
