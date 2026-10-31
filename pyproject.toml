@@ -1,7 +1,7 @@
 [project]
-name = "h3md"  # registry node id; 待确认 (must be unique, no "ComfyUI" in it)
+name = "h3md-director"
 description = "H3MD Director: long multi-shot MiniMax H3 video - visual Director, segment-by-segment low-res/high-res generation with disk cache, streamed save with optional RIFE interpolation."
-version = "0.1.0"  # 待确认 first release version
+version = "0.1.0"
 license = { text = "AGPL-3.0-or-later" }
 authors = [{ name = "YJ" }]
 requires-python = ">=3.10"
@@ -18,6 +18,6 @@ Repository = "https://github.com/1113800942/comfy-h3md-director"
 
 #  Used by Comfy Registry https://registry.comfy.org
 [tool.comfy]
-PublisherId = "PUBLISHER_ID"  # 待确认 (your Comfy Registry publisher id)
+PublisherId = "yj1113800942"
 DisplayName = "H3MD Director (H3MD 导演台)"
-Icon = ""  # 待确认 optional: square PNG/SVG/JPG/GIF URL, max 400x400
+Icon = ""
