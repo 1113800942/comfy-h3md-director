@@ -203,9 +203,9 @@ the resume folder (`run.json`) is reused. Interrupt is checked between segments 
 
 With `decode_output` on, each segment is decoded **right after it is sampled** and written to
 `<cache root>/run_<time>_<pid>_<n>/`. The cache root is `cache_dir` when set; when empty it is picked automatically
-(no hard-coded drive): (1) the `H3MD_CACHE_DEFAULT` environment variable if set; (2) an existing `<drive>/H3MD_cache`
+(no hard-coded drive): (1) an existing `<drive>/H3MD_cache`
 that already holds `resume_*` folders (newest wins), so `resume_from_cache` finds its folder after a ComfyUI restart;
-(3) otherwise `<drive>/H3MD_cache` on the local drive with the most free space (Windows: fixed drives only, removable /
+(2) otherwise `<drive>/H3MD_cache` on the local drive with the most free space (Windows: fixed drives only, removable /
 network / optical skipped; Linux/macOS: home and real local mounts such as `/mnt/*`, `/media/*`, `/Volumes/*`), created on
 demand. The chosen path and its free GB are logged. If nothing is writable it falls back to `<ComfyUI temp>/h3md_cache`
 with a warning (temp may be moved or deleted on restart, so resume may not find it there). Files written:

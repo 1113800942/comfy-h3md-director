@@ -655,6 +655,27 @@ class H3MDDirectorRefMod(D.H3MDDirector):
 _RUN_SIG = inspect.signature(L.H3MDLoopSampler._run)
 
 
+def _run_arguments(args, kwargs) -> dict:
+    """Map a call of H3MDLoopSampler._run (self first) to {parameter name: value}, defaults filled in.
+    _run has only named parameters (no *args / **kwargs)."""
+    names = list(_RUN_SIG.parameters)
+    if len(args) > len(names):
+        raise TypeError(f"_run takes {len(names)} arguments, got {len(args)}")
+    out = dict(zip(names, args))
+    for k, v in kwargs.items():
+        if k not in _RUN_SIG.parameters:
+            raise TypeError(f"_run got an unexpected argument {k!r}")
+        if k in out:
+            raise TypeError(f"_run got multiple values for {k!r}")
+        out[k] = v
+    for name, p in _RUN_SIG.parameters.items():
+        if name not in out:
+            if p.default is inspect.Parameter.empty:
+                raise TypeError(f"_run missing argument {name!r}")
+            out[name] = p.default
+    return out
+
+
 class H3MDLoopSamplerRefMod(LS.H3MDLoopSampler2):
     """H3MD Loop Sampler, segments encoded with H3MDSegmentEncodeRefMod (identical when no RefMod is active)."""
 
@@ -668,22 +689,22 @@ class H3MDLoopSamplerRefMod(LS.H3MDLoopSampler2):
                    "(DiT refs + text encoder). Same inputs/outputs as H3MD Loop Sampler.")
 
     def _run(self, *args, **kwargs):
-        ba = _RUN_SIG.bind(self, *args, **kwargs)
-        plan = ba.arguments["plan"]
+        a = _run_arguments((self,) + args, kwargs)
+        plan = a["plan"]
         if plan_has_refmods(plan):
-            ba.arguments["encoder"] = H3MDSegmentEncodeRefMod()
+            a["encoder"] = H3MDSegmentEncodeRefMod()
             sig = refmod_cache_sig(plan)
-            old = ba.arguments["settings_hash"]
+            old = a["settings_hash"]
             new = {"base": C._sha({"base": old["base"], "refmods": sig}),
                    "full": C._sha({"full": old["full"], "refmods": sig})}
-            ba.arguments["settings_hash"] = new
-            cache = ba.arguments.get("cache")
-            if cache is not None and ba.arguments.get("resume"):
+            a["settings_hash"] = new
+            cache = a.get("cache")
+            if cache is not None and a.get("resume"):
                 # own resume folder: a RefMod run never overwrites the RefMod-off resume cache
-                ba.arguments["cache"] = C.SegmentCache(os.path.dirname(cache.dir), new["base"], True, cache.dtype)
+                a["cache"] = C.SegmentCache(os.path.dirname(cache.dir), new["base"], True, cache.dtype)
             LOG.info("%s loop: RefMod encode active (%d segment(s) with RefMods), cache key includes RefMods",
                      _TAG, sum(1 for s in plan["segments"] if s.get("refmods")))
-        return L.H3MDLoopSampler._run(*ba.args, **ba.kwargs)
+        return L.H3MDLoopSampler._run(**a)
 
 
 def register_routes() -> bool:

@@ -2,7 +2,19 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
-## [Unreleased]
+## [0.1.1] — 2026-10-31
+### Comfy Registry scan clean-up / 注册表安全扫描整改
+The registry scan flagged v0.1.0 with four info-level findings; all were harmless, but the code now avoids the patterns.
+注册表扫描对 0.1.0 标了 4 条 info 级提示，都是误报；这一版把相关写法换掉，功能不变。
+* `__init__.py`, `h3md_director.py`, `h3md_depth_control.py`: plain imports instead of `importlib.import_module`.
+  改用普通 import。
+* `h3md_director_refmod.py`: own argument mapping instead of `inspect.Signature.bind` (flagged as a network bind).
+  不再用 `.bind`。
+* `h3md_cache.py`: **removed** the `H3MD_CACHE_DEFAULT` environment variable; set `cache_dir` on the Loop instead.
+  删除环境变量 `H3MD_CACHE_DEFAULT`，需要固定位置请填 Loop 的 `cache_dir`。
+* Registry icon; README lists comfy-cli and ComfyUI-Manager install. 加注册表图标；README 加 comfy-cli / Manager 安装方式。
+
+## [0.1.0] — 2026-10-31
 ### 2026-10-31 — Release prep / 发布准备
 * Example workflow `example_workflows/H3MD Director.json` (the 133 s motion-copy sample H3MD_00072) with notes:
   model links, custom-node links, usage and how H3MD works. README: text-encoder choice (32B vs 4B + ClipProj),

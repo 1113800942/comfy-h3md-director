@@ -34,7 +34,6 @@ CHUNK = 16  # frames per conversion chunk (bounds the extra RAM of a write / rea
 
 
 FOLDER = "H3MD_cache"  # stable folder name placed on the chosen drive / mount
-DEFAULT_ENV = "H3MD_CACHE_DEFAULT"  # optional environment override of the auto-picked default root
 _REAL_FS = {"ext2", "ext3", "ext4", "xfs", "btrfs", "f2fs", "zfs", "jfs", "reiserfs", "ntfs", "ntfs3", "fuseblk",
             "exfat", "vfat", "apfs", "hfs"}
 _SKIP_MOUNTS = ("/boot", "/proc", "/sys", "/dev", "/run", "/snap", "/var/lib/docker", "/tmp")
@@ -123,16 +122,9 @@ def _usable(folder: str) -> bool:
 
 def default_root() -> str:
     """Root used when cache_dir is empty (no hard-coded drive, works for any user):
-    1. $H3MD_CACHE_DEFAULT if set;
-    2. sticky: an existing <base>/H3MD_cache that holds resume_* runs (newest one wins), so resume survives restarts;
-    3. otherwise <base>/H3MD_cache on the local fixed drive / mount with the most free space (created on demand);
-    4. nothing writable: the old temp location, with a warning."""
-    env = os.environ.get(DEFAULT_ENV)
-    if env:
-        if _usable(env):
-            LOG.info("%s cache root %s (from %s)", _TAG, env, DEFAULT_ENV)
-            return env
-        LOG.warning("%s %s=%s is not writable; auto-picking", _TAG, DEFAULT_ENV, env)
+    1. sticky: an existing <base>/H3MD_cache that holds resume_* runs (newest one wins), so resume survives restarts;
+    2. otherwise <base>/H3MD_cache on the local fixed drive / mount with the most free space (created on demand);
+    3. nothing writable: the old temp location, with a warning."""
     bases = _candidates()
     sticky = []
     for b in bases:

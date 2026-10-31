@@ -1155,8 +1155,8 @@ def pick_segment_media(plan: dict, index: int, ref_image_size: str = "match", ex
 # ----------------------------------------------------------------------------
 
 def _core_h3():
-    import importlib
-    return importlib.import_module("comfy_extras.nodes_minimax_h3")
+    from comfy_extras import nodes_minimax_h3
+    return nodes_minimax_h3
 
 
 def _unwrap_node_output(out):

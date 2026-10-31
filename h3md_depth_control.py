@@ -265,9 +265,8 @@ def ref_fit_frames(frames, dst_w: int, dst_h: int):
     """IMAGE [N,H,W,C] -> [N,dst_h,dst_w,3] with the reference-video path's own fit: core
     nodes_minimax_h3._resize(frames, w, h, "disabled") = common_upscale lanczos, crop disabled (full frame stretched
     edge to edge, no bars, no crop).  CPU float32."""
-    import importlib
     import torch
-    core = importlib.import_module("comfy_extras.nodes_minimax_h3")
+    from comfy_extras import nodes_minimax_h3 as core
     out = core._resize(frames.to("cpu", torch.float32), int(dst_w), int(dst_h), "disabled")
     return out.to("cpu", torch.float32).clamp_(0, 1).contiguous()
 
@@ -302,8 +301,7 @@ def load_control_patch(name: str):
 
 def apply_control(model, model_patch, vae, control, strength: float, start: float, end: float):
     """Same as core MiniMaxH3FunControlNetApply.execute with control_video only -> (patched clone, patch)."""
-    import importlib
-    core = importlib.import_module("comfy_extras.nodes_minimax_h3")
+    from comfy_extras import nodes_minimax_h3 as core
     ms = model.get_model_object("model_sampling")
     patch = core.MiniMaxH3FunControlPatch(model_patch, vae, control[..., :3].movedim(-1, 1), None, None, float(strength),
                                           float(ms.percent_to_sigma(start)), float(ms.percent_to_sigma(end)))

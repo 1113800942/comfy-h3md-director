@@ -31,6 +31,9 @@ generate them segment by segment, keep every finished segment on disk, and repai
 > cd ComfyUI/custom_nodes
 > git clone https://github.com/1113800942/comfy-h3md-director ComfyUI-H3MD-Director
 > ```
+>
+> Or with [comfy-cli](https://github.com/Comfy-Org/comfy-cli): `comfy node install comfyui-h3md-director`,
+> or ComfyUI-Manager → **Custom Nodes Manager** → search **H3MD Director**.
 
 1. No `pip install` is needed.
 2. You need a ComfyUI version with MiniMax H3 support (0.43 or newer recommended).
@@ -170,8 +173,8 @@ own result) as a slow shift of the 24 latent channels' mean and spread.
 
 **Disk cache**
 * Folders: `resume_<hash>` (stable with `resume_from_cache` on) or `run_<time>_<pid>`.
-* Location: with `cache_dir` empty it is chosen automatically (env `H3MD_CACHE_DEFAULT` → an existing `H3MD_cache` →
-  the local drive with the most free space).
+* Location: with `cache_dir` empty it is chosen automatically (an existing `H3MD_cache` → the local drive with the
+  most free space).
 * The Loop never deletes its cache before the video is saved; use `delete_cache_after_save` in
   `H3MD Save Video Interp`. A 243-frame 1088x1920 segment takes about 3 GB (fp16).
 

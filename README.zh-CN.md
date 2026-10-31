@@ -31,6 +31,9 @@
 > cd ComfyUI/custom_nodes
 > git clone https://github.com/1113800942/comfy-h3md-director ComfyUI-H3MD-Director
 > ```
+>
+> 也可以用 [comfy-cli](https://github.com/Comfy-Org/comfy-cli)：`comfy node install comfyui-h3md-director`，
+> 或者 ComfyUI-Manager → **Custom Nodes Manager** → 搜 **H3MD Director**。
 
 1. 不需要 `pip install`。
 2. ComfyUI 需要支持 MiniMax H3 的版本（建议 0.43 或更新）。
@@ -147,7 +150,7 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
 
 **硬盘缓存**
 * 缓存文件夹：`resume_<hash>`（打开 `resume_from_cache` 时固定，能断点续跑）或 `run_<时间>_<pid>`。
-* 位置：`cache_dir` 为空时自动选（环境变量 `H3MD_CACHE_DEFAULT` → 已有的 `H3MD_cache` → 剩余空间最大的本地盘）。
+* 位置：`cache_dir` 为空时自动选（已有的 `H3MD_cache` → 剩余空间最大的本地盘）。
 * Loop 自己不会在出片前删缓存。要删就在 `H3MD Save Video Interp` 打开 `delete_cache_after_save`（视频完整写好后才删）。
   1088x1920、243 帧一段大约 3 GB（fp16）。
 
