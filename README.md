@@ -1,125 +1,30 @@
-# H3MD Director · H3MD 导演台 (ComfyUI-H3MD-Director)
+# H3MD Director
 
-Long, multi-shot MiniMax H3 video in ComfyUI: plan shots in a visual Director, generate them segment by segment
-with a two-pass sampler (low-res → latent lift → full-res, bundled), keep every finished segment on disk, and write
-the final video chunk by chunk with optional RIFE frame interpolation — without holding the whole clip in RAM.
+**English** | [中文](README.zh-CN.md)
 
-在 ComfyUI 里用 MiniMax H3 做长视频、多镜头视频：在可视化的导演台里排镜头，用自带的两段式采样器逐段生成（先低清、
-潜空间放大、再高清），每段做完就存到硬盘缓存，最后一段一段读出来写成视频（可选 RIFE 插帧），整段视频不会一次放进内存。
+Long, multi-shot MiniMax H3 video in ComfyUI — **2+ minutes at 1080p in one run**. Plan shots in a visual Director,
+generate them segment by segment with a bundled two-pass sampler, keep every finished segment on disk, and write the
+final video chunk by chunk.
 
-Copyright (C) 2026 YJ · License: AGPL-3.0-or-later + 署名条款（见 [License / 许可证](#license--许可证)）
+Copyright (C) 2026 YJ · License: AGPL-3.0-or-later + attribution term (see [License](#license))
 
 > H3MD does **not** include any MiniMax H3 weights. The MiniMax H3 model has its own license — read [NOTICE.md](NOTICE.md)
 > before you download or use the model.
-> H3MD **不包含**任何 MiniMax H3 权重。H3 模型有它自己的许可证，下载或使用模型前请先看 [NOTICE.md](NOTICE.md)。
 
-Contents / 目录: [中文](#中文) · [English](#english) · [Low VRAM / 小显存](#low-vram--小显存) ·
-[Models / 模型清单](#models-manifest--模型清单) · [RIFE](#rife-model-manual-download--rife-模型手动下载) ·
-[Caveats / 注意事项](#caveats--注意事项) · [License / 许可证](#license--许可证) ·
-[Technical reference](#technical-reference-english)
+## Highlights
+- **Long video in one run**: 2–3 minutes, 1088×1920, automatic split into continued segments; latent continuation, no pixel round trips at the joins.
+- **Repair instead of re-render**: `rerun_segments` re-renders only the bad segments, locked to their neighbours at both ends.
+- **Motion copy**: a reference video drives the motion through depth + SAM3 + Fun ControlNet; the look comes from your photos.
+- **No long-video drift**: `lowres_anchor` keeps color and faces stable across a whole single-scene take.
+- **Fits your GPU**: automatic splitting by VRAM budget, high-res strip tiling with OOM retry, disk cache and resume, slow-step guard; 4B + ClipProj encoder option saves 10+ GB.
+- **Example workflow** with model links, node links, usage notes and the ideas behind it: [`example_workflows/H3MD Director.json`](example_workflows/H3MD%20Director.json).
 
----
-
-## 中文
-
-### 这个节点包做什么
-* **多段续接**：`H3MD Loop Sampler` 按导演台的计划把所有镜头/分段跑完。续接的镜头用上一段最终 latent 的尾巴做重叠
-  前缀（`overlapIn` 22 或 39 帧，drift 方式：采样中轻微重噪、最后精确还原），硬切（`overlapIn` 0）则独立生成。超过
-  token 预算的镜头会自动拆成子段。
-* **两段式采样（自带，不用另装）**：每段都走 `H3MD Sampler`，内置 Luna-H3-Sampler 引擎（GPL-3.0）：先低清跑前几步，
-  用学习型 H3 潜空间放大器放大，再高清跑完。音频在两遍里是同一条轨迹。
-* **高清自动分块**：`highres_tiling`（默认开）每段先测空闲显存，放得下就整帧跑，放不下就切成最少的条带；万一爆显存，
-  会自动多切几条重跑高清阶段（低清结果保留），并记住这台机器的情况。
-* **硬盘缓存 + 断点续跑**：`cache_mode = disk`（默认）时每段采样完立刻解码写进硬盘，内存里一次只有一段；打开
-  `resume_from_cache` 后重新排队会跳过已完成的段，seed 自动沿用上次那次运行的。
-* **流式出片**：`long video` 输出 → `H3MD Save Video Interp`，从缓存一段一段读帧、（可选）RIFE 插帧、编码写文件。
-* **导演台**：`H3MD Director` 自带可视化编辑器（素材库、时间线、镜头标签页、@ 引用素材，图片标签带缩略图）。
-* **动作复刻**：`H3MD Depth Control` 把参考视频转成深度图 / SAM3 人物剪影，走 Fun ControlNet + `<Video N>`。
-
-### 安装
-1. 把整个文件夹放到 `custom_nodes/ComfyUI-H3MD-Director`
-   （`git clone https://github.com/1113800942/comfy-h3md-director custom_nodes/ComfyUI-H3MD-Director`，或直接复制）。
-2. 安装依赖的节点包（见下），然后重启 ComfyUI。
-3. 不需要额外 `pip install`：H3MD 只用到 ComfyUI 自带的 torch、numpy、PyAV、Pillow、einops。
-4. 下载学习型潜空间放大器（推荐）放到 `models/latent_upscale_models/`：`minimax_h3_latent_upscaler_3d_fp16.safetensors`
-   或它的微调版（如 `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors`）。不放也能跑（`upscaler_model = none`，最近邻放大，效果差一些）。
-
-依赖：
-* **ComfyUI 本体**，需要带核心 MiniMax H3 节点（`comfy_extras.nodes_minimax_h3`），建议 0.43 或更新。
-* **不再需要 selflift-Avatar**：两段式采样引擎已经自带（`h3md_luna/`）。
-* **ComfyUI-ClipProj**（<https://github.com/nicolab28/ComfyUI-ClipProj>）——示例工作流里 clip projection 模型要用。
-* **ComfyUI-VFI**（<https://github.com/GACLove/ComfyUI-VFI>）——只有 `H3MD Save Video Interp` 打开 `interpolate` 时才需要。
-* 示例工作流另外还用到：ComfyUI-KJNodes、rgthree-comfy、MiniMax H3 Audio T8、CRT-Nodes、ComfyUI-YCNodes-MiniMax-H3。
-  缺哪个，ComfyUI 打开工作流时会提示。
-
-### 快速开始
-在 ComfyUI 的 **模板 / Templates** 里找到 `ComfyUI-H3MD-Director` → `H3MD alpha example`（文件在 `example_workflows/`）。
-模板不带素材：请自己上传图片/视频、写提示词。缺的模型会在“缺少模型”弹窗里列出，可以直接下载。
-
-```
-H3MD Director --plan--> H3MD Loop Sampler (+ H3MD Loop Options --options-->)
-H3MD Loop Sampler --long video--> H3MD Save Video Interp
-```
-
-第一次建议只跑第一段（`stop_after = 1`），确认画面和速度后改回 0 跑全片（第 1 段从缓存取）。
-
-### 只重跑有问题的段（`rerun_segments`）
-片子跑完后如果某几段有问题（跳变、穿帮），不用整片重做：
-1. 保持 `resume_from_cache` 打开，其他设置不变；可以改参考图、提示词（**总长和参考图像素尺寸保持不变**，否则自动拆段会变）。
-2. 在 Loop 节点最上面的 `rerun_segments` 填要重跑的段，从 1 数，和日志里的“segment 8/16”一致：如 `3`、`4-6`、`8-10, 13-14`。
-3. 每一块的开头接上一段的结尾；结尾的 39 帧锁成下一段的旧开头（高清、低清、音频都锁），所以下一段及以后一帧不动。
-   选了最后一段，或下一段是硬切时，不锁结尾。连续的几段请一起选（如 8-10），被锁的那一头必须是好的。
-4. 其余段直接从缓存取，输出仍是完整视频。被重跑段的旧文件挪到缓存文件夹里的 `_replaced_<时间>` 留底。
-5. `rerun_new_seed`（默认开）：重跑的段用新的随机种子，提示词和参考图没改也能抽到不同结果。
-开跑前日志会列出每段是“cache”还是“RERUN（head/tail）”；缺缓存时直接报错并列出缺哪几段。
-
-### 长视频越来越浓、越来越锐、人越来越老？
-这是 H3 一段接一段续写的共性问题（各家续写节点都有），只能压住、不能根除。实测 16 段：饱和度 0.32→0.46，锐度明显上升。
-颜色漂移在**低清阶段**就产生了（模型续写自己的结果），表现为 24 个 latent 通道的均值和幅度慢慢偏移。
-* 单一场景的长视频（动作复刻、长镜头）：`H3MD Loop Options` 最后一项 `lowres_anchor` 设 1。每个续接段低清跑完、放大前，
-  新画面的通道统计拉回本镜头第一段，低清接续数据也一起校正，偏差不会传到下一段。需要 `continue_lowres_prefix = native_lowres_carry`。
-  场景本该变色的叙事视频不要开（硬切后会以新镜头的第一段为准）。
-* 其他建议：每段都放参考照片锚定身份和颜色；参考照片不要太浓太锐；提示词少写打光形容词（glowing、radiant 等）；
-  特别长的片子在自然切点用参考照片重新起。
-
-### 动作复刻（depth）的规则
-* 视频勾了 depth，就**只驱动深度 ControlNet，不当 `<Video N>` 参考**（自动，没有开关）。导演台里它也不占 `<Video N>` 编号。
-  原因：黑底剪影当参考时，模型会把黑底或灰色影棚照搬进画面。勾了原声的深度视频例外，仍是 `<Video N>`（日志警告）。
-* 勾了 depth 却没接 `H3MD Depth Control`，开跑前直接报错。
-* **参考照片不要用纯色/灰色影棚背景**（实测：关掉 `<Video>` 参考后，灰底照片仍会把画面拉灰）。用真实场景照片，或把人物抠出来放在模糊的目标场景上；
-  全身照最好不露地板，地板在提示词里只写一种（纯色无纹理最稳）。
-
-### 主要功能怎么用
-**导演台 `H3MD Director`**
-* `plan_json` 是唯一的数据源，编辑器读它、改完写回它；右上角可在 Editor / JSON 之间切换。
-* 素材库（图片 / 视频 / 音频）：上传、或从 `input/` 文件夹选文件，拖到镜头上即可分配。
-* 镜头长度是 5+17n 帧（24 fps）。有参考视频的镜头，长度跟着视频走。宽高会对齐到 64 的倍数（低清阶段正好是一半）。
-* 提示词里输入 `@` 或点标签按钮插入素材标签（`<Picture N>` / `<Video N>` / `<Audio N>`），编号顺序就是后端实际用的顺序。
-* **写提示词前先看清每张 `<Picture N>` 是什么**（标签按钮上有缩略图）：人物、服装、场景要分别对应到真正包含它的那张图。
-  把空场景图写成“人物”会让画面中途跳到别的背景或服装。`skills/` 里有中英文写法说明。
-
-**`H3MD Loop Sampler` + `H3MD Loop Options`**
-* 主节点：模型、采样器、sigmas、seed、cfg、`transition_step`（低清跑几步）、`lowres_scale`、`rho` / `w_min` / `w_max`、
-  `upscaler_model`、`seed_mode`（默认 increment：第 k 段用 seed + k）、`highres_tiling`、最上面的 `rerun_segments` / `stop_after` / `rerun_new_seed`、
-  `cache_mode`、`resume_from_cache`。
-* 高级开关在 `H3MD Loop Options` 里，接到 `options`；不接 = 全部默认值。节点默认只显示常用项，勾“高级选项”显示全部。
-* 输出：`latent`、`images`（只是 64x64 占位图）、`audio`、`frame_count`、`summary`（每段的 seed、分块、每步耗时）、`long video`。
-* **`long video` 要接 `H3MD Save Video Interp`**——这是唯一按有限显存/内存设计的出片路径。
-
-**硬盘缓存**
-* 缓存文件夹：`resume_<hash>`（打开 `resume_from_cache` 时固定，能断点续跑）或 `run_<时间>_<pid>`。
-* 位置：`cache_dir` 为空时自动选（环境变量 `H3MD_CACHE_DEFAULT` → 已有的 `H3MD_cache` → 剩余空间最大的本地盘）。
-* Loop 自己不会在出片前删缓存。要删就在 `H3MD Save Video Interp` 打开 `delete_cache_after_save`（视频完整写好后才删）。
-  1088x1920、243 帧一段大约 3 GB（fp16）。
-
-**`H3MD Save Video Interp`**
-* H3 固定 24 fps。开插帧时从 24 插到 `target_fps`；不插帧又把 `target_fps` 设成非 24，声音会对不上（日志会警告）。
-* `format`：`video/h264-mp4`（默认）、`video/h265-mp4`、`image/gif`、`image/webp`、`image/png-sequence`（后三种没有声音）。
-* chunk 大小按空闲显存/内存自动决定；显存不够会自动减半重试，最后退到 CPU。
+Contents: [What it does](#what-it-does) · [Install](#install) · [Quick start](#quick-start) ·
+[Low VRAM](#low-vram) · [Models](#models-manifest) · [Caveats](#caveats) · [How H3MD works](#how-h3md-works-ideas-you-can-reuse) ·
+[License](#license) · [Technical reference](#technical-reference-english)
 
 ---
 
-## English
 
 ### What it does
 * **Multi-segment continuation**: `H3MD Loop Sampler` runs every shot/segment of the Director plan. Continued shots
@@ -160,7 +65,8 @@ Dependencies:
   ComfyUI-YCNodes-MiniMax-H3; ComfyUI lists any missing pack when the workflow opens.
 
 ### Quick start
-ComfyUI **Templates** → `ComfyUI-H3MD-Director` → `H3MD alpha example` (file in `example_workflows/`). The template
+ComfyUI **Templates** → `ComfyUI-H3MD-Director` → `H3MD Director` (the 133 s motion-copy sample, with notes on models,
+nodes and usage) or `H3MD alpha example` (files in `example_workflows/`). The templates
 ships without media: upload your own images/videos and write your prompts. Missing models are listed in the
 missing-models popup with download buttons.
 
@@ -243,23 +149,8 @@ own result) as a slow shift of the 24 latent channels' mean and spread.
   three have no audio).
 * Chunk size follows free VRAM/RAM; on CUDA OOM the chunk is halved and retried, finally on the CPU.
 
----
+## Low VRAM
 
-## Low VRAM / 小显存
-
-**中文**
-* **高清阶段**：`highres_tiling` 保持打开。它按空闲显存自动决定切几条（最多 12 条），放得下就整帧，不会白白变慢。
-  爆显存时会自动多切几条重跑；切到最多还不行，就再打开前馈分块重跑一次；仍然不行才报错，并提示怎么调。
-* **低清阶段**：没有分块。爆显存时会提示在 H3MD Loop Options 里把 `ff_chunk_rows` 设成 8192（前馈按行分块，结果不变，稍慢）。
-* **参考素材占的显存不会随切条变小**：参考图、参考视频、音频和文字在每一条里都是整份的。实测 1088x1920、带 2 张图 +
-  1 段参考视频，每条里约 3.7 万行是这些固定内容。所以 **16 GB 以下的卡请用较低分辨率**（如 768x1344 或更小）、
-  较短的段（`length` 小一些）、更少/更小的参考素材。
-* **模型权重**：交给 ComfyUI 自己的显存管理（DynamicVRAM、`--lowvram`、`--reserve-vram N`）。H3MD 的 LowVRAM LoRA Loader
-  可以按 token 分块加载 LoRA。
-* `unload_idle_models`（默认开）在两遍之间、每段之间卸载文本编码器 / VAE 等闲置模型；`vram_release = deep` 段间还会清理缓存。
-* 显存估算按 RTX 5090 32 GB 实测校准；你的机器第一次爆显存后会被记进 `user/h3md/tiling_calibration.json`，之后自动多切几条。
-
-**English**
 * **High-res pass**: keep `highres_tiling` on. It picks the strip count from the free VRAM (up to 12) and runs the full
   frame whenever it fits, so it costs nothing on large cards. On CUDA OOM it retries with more strips, then with
   feed-forward chunking, and only then stops with a readable error.
@@ -275,15 +166,9 @@ own result) as a slow shift of the 24 latent channels' mean and spread.
 * The estimate is calibrated on an RTX 5090 32 GB; after the first OOM on your machine it is recorded in
   `user/h3md/tiling_calibration.json` and later runs plan more strips automatically.
 
-## Models manifest / 模型清单
+## Models manifest
 
-**中文**：示例工作流顶层有一个 `models` 数组（ComfyUI 工作流规范，<https://docs.comfy.org/specs/workflow_json>），每条有
-`name`、`url`、`directory`（必填）和 `hash` / `hash_type`（可选）。ComfyUI 前端打开工作流时，如果 `models/<directory>/`
-里没有这个文件，就在“缺少模型”弹窗里显示下载按钮。限制：只接受 Hugging Face / Civitai 地址；扩展名只能是
-`.safetensors` / `.sft` / `.ckpt` / `.pth` / `.pt`；`directory` 必须是已注册的模型文件夹；**`name` 必须和节点里选的文件名
-完全一致**，否则那一条不会显示。
-
-**English**: the example workflow has a top-level `models` array (ComfyUI workflow spec,
+the example workflow has a top-level `models` array (ComfyUI workflow spec,
 <https://docs.comfy.org/specs/workflow_json>): `name`, `url`, `directory` (required), `hash` / `hash_type` (optional).
 When a listed file is missing from `models/<directory>/`, the frontend's missing-models popup offers a download button.
 Limits: Hugging Face / Civitai URLs only; extensions `.safetensors` / `.sft` / `.ckpt` / `.pth` / `.pt` only;
@@ -303,40 +188,14 @@ entry is not shown.
 | `minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors` | `loras` | huggingface.co/lightx2v/Minimax-h3-Turbo |
 | `minimax_h3_lms_v1.0_r64_r.safetensors` | `loras` | huggingface.co/RunningHubAI/rh-minimax-h3-lms-v1.0-r64-lora |
 
-Each model has its own license; check its model page before use. / 每个模型有自己的许可证，使用前请看它的模型页。
-The `ClipProjApply` entry only shows when ComfyUI-ClipProj is installed. / `ClipProjApply` 那条只有装了 ComfyUI-ClipProj 才显示。
+Each model has its own license; check its model page before use. The `ClipProjApply` entry only shows when ComfyUI-ClipProj is installed.
 
-## RIFE model (manual download) / RIFE 模型（手动下载）
+## RIFE model (manual download)
 
-* 中文：“缺少模型”弹窗只能下载到 `models/` 下已注册的文件夹，而且不允许 `.pkl`，所以 RIFE 的 `flownet.pkl` 不在
-  `models` 清单里，需要手动下载：节点包 ComfyUI-VFI（<https://github.com/GACLove/ComfyUI-VFI>）；模型
-  <https://huggingface.co/hzwer/RIFE/resolve/main/RIFEv4.26_0921.zip>，解压后把 `flownet.pkl` 放到
-  `custom_nodes/ComfyUI-VFI/rife/train_log/flownet.pkl`（相对 ComfyUI 根目录）。ComfyUI-VFI 第一次运行时通常也会自己下载。
-* English: the missing-models popup only downloads into registered `models/` folders and does not allow `.pkl`, so
-  RIFE `flownet.pkl` is not in the manifest. Download it manually: node pack ComfyUI-VFI
-  (<https://github.com/GACLove/ComfyUI-VFI>); model <https://huggingface.co/hzwer/RIFE/resolve/main/RIFEv4.26_0921.zip>
-  — extract `flownet.pkl` to `custom_nodes/ComfyUI-VFI/rife/train_log/flownet.pkl` (relative to the ComfyUI root).
-  ComfyUI-VFI normally downloads it itself on first use.
+the missing-models popup only downloads into registered `models/` folders and does not allow `.pkl`, so RIFE `flownet.pkl` is not in the manifest. Download it manually: node pack ComfyUI-VFI (<https://github.com/GACLove/ComfyUI-VFI>); model <https://huggingface.co/hzwer/RIFE/resolve/main/RIFEv4.26_0921.zip> — extract `flownet.pkl` to `custom_nodes/ComfyUI-VFI/rife/train_log/flownet.pkl` (relative to the ComfyUI root). ComfyUI-VFI normally downloads it itself on first use.
 
-## Caveats / 注意事项
+## Caveats
 
-**中文**
-* 走 `latent` / 外部解码出来的图片 / `audio` 这些路径处理大/长视频，**不保证**显存/内存不爆；外部一次解码整段 latent，
-  接缝处也可能和 `long video` 出的片子略有不同。只有 `long video` → `H3MD Save Video Interp` 是按有限显存/内存设计的。
-* `images` 输出只是 64x64 占位图（`cache_mode = ram` 例外）。
-* 旧工作流：已删除的选项（`merge_images`、Save Video Interp 的 `preset` / `cache_folder` / `pingpong` / `fps` 输出等）
-  加载时按名字对齐并丢弃，其他参数不错位；旧的 `H3MD Loop Sampler (legacy)` 节点保留，旧存档照常打开。
-* `video/h265-mp4` 和 10-bit（`yuv420p10le`）**还没测过**。
-* `resume_from_cache` 的缓存键不包括模型、LoRA 和放大器；换了这些请关掉 resume 或清掉缓存文件夹。
-* 这一版换了采样引擎，旧版留下的缓存不会被续跑使用；旧工作流里的 `H3MD Loop Options` 节点请删掉重新放一个（选项变了）。
-* **文本编码器怎么选**：32B（`qwen3vl_32b_minimax_h3_int8_convrot`）对提示词理解最准；显存不够就用 4B + ClipProj，能省十几 GB，
-  画质不受影响，只是理解稍弱、画面细节和 32B 略有不同。从零生成时完全可用。**同一部片子从头到尾用同一个编码器**，不要在
-  `rerun_segments` 重跑时中途换。
-* **快动作残影**：快速甩手、挥手时偶尔有一瞬间的残影（多只手）。原因是时间上 4 帧压成 1 帧，再加上少步数；可以用
-  `rerun_segments` 换种子重跑那一段。
-* 动作复刻的分镜总长会自动对齐到参考视频（5+17n 向上取整），导出后把超出参考视频的最后几帧剪掉。
-
-**English**
 * For large / long videos the `latent` / externally decoded images / `audio` paths do **not** guarantee against
   VRAM/RAM blowups; a one-pass external decode can also differ slightly at the seams. Only `long video` →
   `H3MD Save Video Interp` is designed for bounded VRAM/RAM.
@@ -358,18 +217,111 @@ The `ClipProjApply` entry only shows when ComfyUI-ClipProj is installed. / `Clip
 * A motion-copy plan is aligned to the reference video (rounded up to 5+17n); trim the frames past the reference video
   after export.
 
-## License / 许可证
+## How H3MD works (ideas you can reuse)
 
-**English**: ComfyUI-H3MD is Copyright (C) 2026 YJ and licensed under the GNU Affero General Public License v3.0 or
+MiniMax H3 makes at most ten-odd seconds per run. For a 2–3 minute video the hard part is not "can the clips join" but
+keeping a dozen joined segments **seamless, drift-free, within VRAM, and repairable**. These are the problems we hit and
+how we solved them — feel free to build on them.
+
+### 1. Continue in latent space, not pixels
+- **Problem**: decoding the previous clip and re-encoding it as the next reference softens and shifts color a little at
+  every join.
+- **Approach**: the next segment starts with the **last 39 frames of the previous segment's final latent** (held by
+  noise mask 0); only the first few frames are lightly re-noised during sampling and restored exactly at the end.
+  Overlaps are merged from the later segment.
+
+### 2. Two-pass sampling with a native low-res carry
+- Half resolution for 6 steps, a learned latent upscaler, then 3 steps at full resolution (engine from
+  Luna-H3-Sampler).
+- **Native low-res carry**: the next segment's low-res head is the previous segment's **own low-res result**, not a
+  downscale of the high-res output, so both chains stay continuous.
+
+### 3. Automatic splitting and tiling by VRAM
+- Every shot is estimated in tokens (canvas + reference videos + pictures); shots over the budget are split into equal
+  continuation parts, with cut points moved to quiet moments of the reference video.
+- The high-res pass runs the whole frame when it fits and the fewest strips when it does not; on OOM it retries with
+  more strips and remembers the machine.
+- Slow-step guard: a step 4× slower than usual means VRAM ran out (weights streaming), so the run stops with the cache
+  kept.
+
+### 4. Disk cache, resume, and re-rendering only the bad segments
+- Each segment is decoded and written to disk right away; only one segment is in RAM. A re-queue skips finished
+  segments.
+- **Re-render selected segments**: a selected segment's head continues the segment before it and its **tail is locked
+  to the next segment's old head** (high-res latent, low-res result and audio), so the replacement is seamless at both
+  ends and nothing else changes. No 5-hour rerun for one glitch.
+
+### 5. Motion copy: depth drives only the ControlNet
+- Reference video → Depth Anything V2 depth → SAM3 keeps only the person → Fun ControlNet, **on the low-res pass
+  only**.
+- **Lesson from testing**: feeding the white-on-black silhouette as a `<Video N>` reference as well made the model copy
+  the black background or a grey studio into the picture. Depth video now drives only the ControlNet.
+
+### 6. What reference photos leak into the video (measured)
+- Grey / plain studio backgrounds → the video drifts into a grey studio. Fix: cut the person out onto a blurred version
+  of the target location.
+- A wide toothy grin in the photo → a frozen grin in every frame. Fix: say "identity from the photo, not the
+  expression".
+- Wooden floors, tiles, mirrors → a different pattern in every segment. Fix: describe one plain floor.
+
+### 7. Long-video drift: pull the low-res pass back per channel (`lowres_anchor`)
+- **Problem**: segment after segment, colors deepen, sharpness grows and faces look older. Every chained H3 continuation
+  method in the community shows this.
+- **Diagnosis**: measuring the low-res and final latents of a 16-segment cache separately showed the color drift is
+  **born in the low-res pass** (saturation 0.39 → 0.58); the high-res pass only adds a constant offset. The drift is a
+  slow shift of the 24 latent channels' mean and spread.
+- **Fix**: after each low-res pass, before the upscale, the new frames' per-channel mean and spread are pulled back to
+  the **first segment of the shot**, and the low-res carry is corrected too, so the error never reaches the next segment.
+- **Result**: over a 133 s take saturation stays at 0.33–0.36 (0.34 → 0.48 without it); sharpness stops climbing and
+  faces stop aging.
+- **Dead end we took first**: grading new frames to the previous segment's held frames did nothing — those frames had
+  already drifted. **The anchor must be a source that has not drifted.**
+
+### 8. Text encoder: 32B vs 4B + ClipProj
+- 4B + ClipProj saves 10+ GB of VRAM with no loss in image quality, only slightly weaker prompt understanding. Fine for
+  generating from scratch; don't switch encoders in the middle of one piece.
+
+### 9. Method
+- **Search the community before testing**: a GPU runs only a few tests a day.
+- **Measure**: per-segment saturation and Laplacian sharpness plus face crops, not "it feels like".
+- **Analyze the cache offline**: it holds every segment's low-res and final latent, so you can find the guilty stage
+  without using the GPU.
+
+### Thanks 👍
+H3MD stands on many shoulders. Their code, models or openly shared findings gave us direct ideas:
+
+**Engine, models and nodes**
+- 👍 [MiniMax](https://huggingface.co/MiniMaxAI) for open-sourcing H3, and [Comfy-Org](https://huggingface.co/Comfy-Org/MiniMax-H3) for native ComfyUI support
+- 👍 [Luna-H3-Sampler](https://github.com/lunaaispace-eng/Luna-H3-Sampler): two-pass sampling engine (bundled, GPL-3.0)
+- 👍 [LBH-123-AI](https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler): learned latent upscaler (MIT)
+- 👍 [Alissonerdx](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI): sharpness upscaler and lms LoRA
+- 👍 [nkxx188/ComfyUI-MiniMaxH3-Easy](https://github.com/nkxx188/ComfyUI-MiniMaxH3-Easy): high-res strip tiling idea (MIT)
+- 👍 [Kijai](https://github.com/kijai/ComfyUI-KJNodes): SageAttention / feed-forward VRAM patches, DMAD conversion
+- 👍 [NicoLab28/ClipProj](https://github.com/nicolab28/ComfyUI-ClipProj): 4B encoder projection for small GPUs
+- 👍 [alibaba-pai Fun ControlNet](https://huggingface.co/alibaba-pai/MiniMax-H3-Fun-Controlnet-Union), [Depth Anything V2](https://github.com/DepthAnything/Depth-Anything-V2), [SAM3](https://huggingface.co/Comfy-Org/sam3.1): the three pillars of motion copy
+- 👍 [smhfacct](https://huggingface.co/smhfacct/Minimax-H3-fl2va-ref2va-hybrid-models) (fl2va × ref2va hybrid), [t8star](https://huggingface.co/t8star) (curveproj-compatible LoRAs), [lightx2v](https://huggingface.co/lightx2v/Minimax-h3-Turbo) (Turbo LoRA), [DMAD](https://huggingface.co/ZhengmingYu/DMAD), [fal](https://huggingface.co/fal/MiniMax-H3-Realism-People-LoRA) (realism people), [JOKER141](https://huggingface.co/JOKER141/MiniMax-H3-Combat-Base-V2) (Combat LoRA)
+
+**Long-video drift: people who shared their findings**
+- 👍 [tritant/ComfyUI_MiniMax_H3_Extender](https://github.com/tritant/ComfyUI_MiniMax_H3_Extender): documented "contrast rises at every extension" and that reference images carry color in
+- 👍 [NikoDemon80/ComfyUI-H3-Motion-Context](https://github.com/NikoDemon80/ComfyUI-H3-Motion-Context): latent continuation instead of pixel round trips, and "less sharpening in the last step"
+- 👍 [mark9009/ComfyUI-H3-LongTake](https://github.com/mark9009/ComfyUI-H3-LongTake): measured keyframe anchoring and seam color matching
+- 👍 [EchoHeadache/comfyui-aex-drift](https://github.com/EchoHeadache/comfyui-aex-drift): handoff matching and seam anchoring. We moved the anchor to the first segment, but it is what made us see that the anchor must not drift
+- 👍 [roycho87/clown_context_suite](https://github.com/roycho87/clown_context_suite): periodic clean anchors
+- 👍 The author of the [10-link chaining measurement](https://dev.to/nefayran/chaining-image-to-video-clips-from-the-last-frame-what-10-links-did-to-a-face-minimax-h3-46e0) on dev.to, who put numbers on aging faces and sharpness overshoot
+
+### Special thanks 👍
+t8star, JOKER141 (Bunny), TE MAN and many other creators, for their long-running free tutorials for the community — outstanding work and generously shared ideas and experience. Hats off to them!
+
+Thank you for sharing what you learned. H3MD will keep sharing its findings back with the community.
+
+
+## License
+
+ComfyUI-H3MD is Copyright (C) 2026 YJ and licensed under the GNU Affero General Public License v3.0 or
 later (SPDX `AGPL-3.0-or-later`) with one additional term: keep a visible attribution "Based on H3MD Director (ComfyUI-H3MD-Director) by
 YJ" when you distribute it or offer it as an online service. Commercial use is allowed; a modified version offered over
 a network must publish its source. Full text in [LICENSE](LICENSE), details in [NOTICE.md](NOTICE.md); the bundled
 Luna-H3-Sampler code in `h3md_luna/` is GPL-3.0 ([LICENSES/](LICENSES/)).
-
-**中文**：ComfyUI-H3MD 版权所有 (C) 2026 YJ，按 GNU Affero 通用公共许可证第 3 版或更新版本（SPDX `AGPL-3.0-or-later`）发布，
-附加一条：分发或作为在线服务提供时，必须保留明显的署名“基于 H3MD 导演台 / H3MD Director（ComfyUI-H3MD-Director），作者 YJ”。允许商用；修改后通过网络
-提供给别人用，必须公开修改版源码。全文见 [LICENSE](LICENSE)，说明见 [NOTICE.md](NOTICE.md)；`h3md_luna/` 里自带的
-Luna-H3-Sampler 代码是 GPL-3.0（[LICENSES/](LICENSES/)）。
 
 ---
 
@@ -890,3 +842,4 @@ See [NOTICE.md](NOTICE.md) (third-party sources, what was adapted vs. used as an
 ### Requirements
 ComfyUI with core MiniMax H3 nodes (`comfy_extras.nodes_minimax_h3`), PyAV, torch, numpy, Pillow, einops (all in a
 standard ComfyUI install). The two-pass engine is bundled in `h3md_luna/` (Luna-H3-Sampler, GPL-3.0).
+

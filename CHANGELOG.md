@@ -7,6 +7,8 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
 * Example workflow `example_workflows/H3MD Director.json` (the 133 s motion-copy sample H3MD_00072) with notes:
   model links, custom-node links, usage and how H3MD works. README: text-encoder choice (32B vs 4B + ClipProj),
   fast-motion ghosting, motion-copy length trim. / 动作复刻示例工作流（含模型、节点链接、注意事项和技术思路说明）。
+* README split into English (`README.md`, default) and Chinese (`README.zh-CN.md`); highlights and "How H3MD works" with
+  thanks. / README 拆成英文版（默认）和中文版，加上亮点和技术思路（含致谢）。
 
 ### 2026-10-30 (d) — Low-res anchor replaces the drift anchor / 低清锚定取代漂移锚定
 * **Removed / 删除**: `drift_handoff_match`, `drift_seam_anchor`, `drift_detail` (2026-10-30 (c)), `h3md_drift_anchor.py`,
