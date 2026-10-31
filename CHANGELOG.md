@@ -2,6 +2,10 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [Unreleased]
+* `skills/h3md-prompt/`: H3MD prompt skill (English SKILL.md + Chinese copy), linked from the README install steps.
+  H3MD 提示词 skill（英文 + 中文），README 安装步骤里加了说明。
+
 ## [0.1.1] — 2026-10-31
 ### Comfy Registry scan clean-up / 注册表安全扫描整改
 The registry scan flagged v0.1.0 with four info-level findings; all were harmless, but the code now avoids the patterns.

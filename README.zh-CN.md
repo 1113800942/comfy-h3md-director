@@ -40,9 +40,17 @@
 3. 打开示例工作流：ComfyUI **模板 / Templates** → `ComfyUI-H3MD-Director` → **H3MD Director**，或者把
    [`example_workflows/H3MD Director.json`](example_workflows/H3MD%20Director.json) 拖进 ComfyUI。
 4. 缺节点包：ComfyUI-Manager → **Install Missing Custom Nodes**。缺模型：看工作流里的 **模型下载** note，每个文件都有下载链接和存放文件夹。
+5. **提示词：请用 [H3MD 提示词 skill](skills/h3md-prompt/SKILL.zh-CN.md) 来写。** 每个镜头都是一份完整的官方 H3 提示词，
+   再加上 H3MD 的规则（5+17n 长度、重叠、自动拆段、标签编号、动作复刻）。在 Claude Code、Codex、Cursor 等能读
+   `SKILL.md` 的工具里安装，和 MiniMax 官方的 `h3-prompt-writing` 一起用：
+   ```bash
+   npx skills add https://github.com/1113800942/comfy-h3md-director --skill h3md-prompt
+   npx skills add https://github.com/MiniMax-AI/MiniMax-H3 --skill h3-prompt-writing
+   ```
+   没有这类工具：把 SKILL 文件内容贴给任意聊天 AI，让它照着写分镜。
 
 ## 快速开始
-1. 在导演台里放好照片、参考视频和音乐，每个镜头写好提示词。
+1. 在导演台里放好照片、参考视频和音乐，每个镜头写好提示词（用 [H3MD 提示词 skill](skills/h3md-prompt/SKILL.zh-CN.md)）。
 2. Loop 节点上 `stop_after = 1`，先只跑第 1 段，看画面和速度。
 3. 改回 `0`，`resume_from_cache` 打开：第 1 段从缓存取，其余段接着生成。
 4. 某段坏了？在 `rerun_segments` 填段号（如 `8-10`）再跑一次，只重跑这几段。

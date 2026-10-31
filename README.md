@@ -41,9 +41,18 @@ generate them segment by segment, keep every finished segment on disk, and repai
    [`example_workflows/H3MD Director.json`](example_workflows/H3MD%20Director.json) into ComfyUI.
 4. Missing node packs: ComfyUI-Manager → **Install Missing Custom Nodes**. Missing models: follow the
    **Model links** note inside the workflow (every file with its download link and folder).
+5. **Prompts: write them with the [H3MD prompt skill](skills/h3md-prompt/SKILL.md).** Each shot is a full official H3
+   prompt plus H3MD rules (5+17n lengths, overlaps, autosplit, tags, motion copy). Install it in Claude Code, Codex,
+   Cursor or any agent that reads `SKILL.md`, together with MiniMax's official `h3-prompt-writing`:
+   ```bash
+   npx skills add https://github.com/1113800942/comfy-h3md-director --skill h3md-prompt
+   npx skills add https://github.com/MiniMax-AI/MiniMax-H3 --skill h3-prompt-writing
+   ```
+   No agent? Paste the SKILL.md into any chat AI and ask it to write your shots.
 
 ## Quick start
-1. Put your photos, reference video and music into the Director, write the prompt per shot.
+1. Put your photos, reference video and music into the Director, write the prompt per shot (use the
+   [H3MD prompt skill](skills/h3md-prompt/SKILL.md)).
 2. Set `stop_after = 1` on the Loop node and run only the first segment to check the look and speed.
 3. Set it back to `0` with `resume_from_cache` on: segment 1 comes from the cache and the rest is generated.
 4. A segment went wrong? Type its number in `rerun_segments` (e.g. `8-10`) and run again; only those are re-rendered.
