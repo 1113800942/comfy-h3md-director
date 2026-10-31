@@ -12,8 +12,8 @@
 | 2K 单段直出（2560×1408，15 秒） | 1080p 长视频（1920×1088，2 分 29 秒，节选） |
 |:---:|:---:|
 | <img src="docs/media/coast_2k_one_segment.gif" width="420"> | <img src="docs/media/coast_1080p_long.gif" width="420"> |
-| **多镜头叙事**（1080p，2 分 19 秒，节选） | |
-| <img src="docs/media/palace_1080p_story.gif" width="420"> | |
+| **多镜头叙事**（1080p，2 分 19 秒，节选） | **动作复刻**：深度图 → 成片（1088×1920，2 分 13 秒，节选） |
+| <img src="docs/media/palace_1080p_story.gif" width="420"> | <img src="docs/media/motion_copy_depth_vs_result.gif" width="420"> |
 
 ## 亮点
 - **一次生成长视频**：2–3 分钟、1088×1920，自动拆成无缝续接的段。
