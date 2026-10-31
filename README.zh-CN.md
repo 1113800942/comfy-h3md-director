@@ -2,29 +2,44 @@
 
 [English](README.md) | **中文**
 
-在 ComfyUI 里用 MiniMax H3 做长视频、多镜头视频——**一次生成 2 分钟以上的 1080p**。在可视化导演台里排镜头，用自带的两段式
-采样器逐段生成，每段做完就存进硬盘缓存，最后一段一段写成视频。
+在 ComfyUI 里用 MiniMax H3 做长视频、多镜头视频——**一次生成 2 分钟以上的 1080p**。在可视化导演台里排镜头，逐段生成，
+每段做完就存进硬盘，哪段坏了只修哪段。
 
-版权所有 (C) 2026 YJ · 许可证：AGPL-3.0-or-later + 署名条款（见 [许可证](#许可证)）
-
-> H3MD **不包含**任何 MiniMax H3 权重。H3 模型有它自己的许可证，下载或使用模型前请先看 [NOTICE.md](NOTICE.md)。
+> H3MD **不包含**任何 MiniMax H3 权重；模型有它自己的许可证（见 [NOTICE.md](NOTICE.md)）。
 
 ## 亮点
-- **一次生成长视频**：2–3 分钟、1088×1920，自动拆成续接段；接缝处用 latent 接续，不走像素往返。
-- **坏了只修那几段**：`rerun_segments` 只重跑有问题的段，两头锁住前后段，无缝换进去。
-- **动作复刻**：参考视频经深度图 + SAM3 + Fun ControlNet 只提供动作，长相来自你的照片。
+- **一次生成长视频**：2–3 分钟、1088×1920，自动拆成无缝续接的段。
+- **坏了只修那几段**：`rerun_segments` 只重跑有问题的段，两头锁住前后段。
+- **动作复刻**：参考视频只提供动作（深度图 + SAM3 + Fun ControlNet），长相来自你的照片。
 - **长视频不漂色**：`lowres_anchor` 让单场景长镜头从头到尾颜色和人脸都稳定。
-- **按你的显卡来**：按显存预算自动拆段、高清条带分块和爆显存自动重试、硬盘缓存和断点续跑、慢步保护；4B + ClipProj 编码器能省十几 GB。
-- **示例工作流**：含模型链接、节点链接、注意事项和技术思路，见 [`example_workflows/H3MD Director.json`](example_workflows/H3MD%20Director.json)。
+- **按你的显卡来**：按显存自动拆段、高清条带分块、硬盘缓存和断点续跑；4B + ClipProj 编码器能省十几 GB。
 
-目录：[这个节点包做什么](#这个节点包做什么) · [安装](#安装) · [快速开始](#快速开始) · [小显存](#小显存) ·
-[模型清单](#模型清单) · [注意事项](#注意事项) · [技术思路](#h3md-用到的技术和思路给大家参考) · [许可证](#许可证) ·
-[技术参考（英文）](README.md#technical-reference-english)
+## 安装
+```
+cd ComfyUI/custom_nodes
+git clone https://github.com/1113800942/comfy-h3md-director ComfyUI-H3MD-Director
+```
+1. 重启 ComfyUI，不需要 `pip install`。
+2. ComfyUI 需要支持 MiniMax H3 的版本（建议 0.43 或更新）。
+3. 打开示例工作流：ComfyUI **模板 / Templates** → `ComfyUI-H3MD-Director` → **H3MD Director**，或者把
+   [`example_workflows/H3MD Director.json`](example_workflows/H3MD%20Director.json) 拖进 ComfyUI。
+4. 缺节点包：ComfyUI-Manager → **Install Missing Custom Nodes**。缺模型：看工作流里的 **模型下载** note，每个文件都有下载链接和存放文件夹。
 
----
+## 快速开始
+1. 在导演台里放好照片、参考视频和音乐，每个镜头写好提示词。
+2. Loop 节点上 `stop_after = 1`，先只跑第 1 段，看画面和速度。
+3. 改回 `0`，`resume_from_cache` 打开：第 1 段从缓存取，其余段接着生成。
+4. 某段坏了？在 `rerun_segments` 填段号（如 `8-10`）再跑一次，只重跑这几段。
 
+```
+H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--> H3MD Save Video Interp
+```
 
-### 这个节点包做什么
+## 更多内容（点开查看）
+
+<details>
+<summary><b>这个节点包做什么</b></summary>
+
 * **多段续接**：`H3MD Loop Sampler` 按导演台的计划把所有镜头/分段跑完。续接的镜头用上一段最终 latent 的尾巴做重叠
   前缀（`overlapIn` 22 或 39 帧，drift 方式：采样中轻微重噪、最后精确还原），硬切（`overlapIn` 0）则独立生成。超过
   token 预算的镜头会自动拆成子段。
@@ -38,7 +53,11 @@
 * **导演台**：`H3MD Director` 自带可视化编辑器（素材库、时间线、镜头标签页、@ 引用素材，图片标签带缩略图）。
 * **动作复刻**：`H3MD Depth Control` 把参考视频转成深度图 / SAM3 人物剪影，走 Fun ControlNet + `<Video N>`。
 
-### 安装
+</details>
+
+<details>
+<summary><b>安装细节和依赖</b></summary>
+
 1. 把整个文件夹放到 `custom_nodes/ComfyUI-H3MD-Director`
    （`git clone https://github.com/1113800942/comfy-h3md-director custom_nodes/ComfyUI-H3MD-Director`，或直接复制）。
 2. 安装依赖的节点包（见下），然后重启 ComfyUI。
@@ -54,18 +73,11 @@
 * 示例工作流另外还用到：ComfyUI-KJNodes、rgthree-comfy、MiniMax H3 Audio T8、CRT-Nodes、ComfyUI-YCNodes-MiniMax-H3。
   缺哪个，ComfyUI 打开工作流时会提示。
 
-### 快速开始
-在 ComfyUI 的 **模板 / Templates** 里找到 `ComfyUI-H3MD-Director` → `H3MD Director`（133 秒动作复刻示例，自带模型、节点链接和注意事项）或 `H3MD alpha example`（文件都在 `example_workflows/`）。
-模板不带素材：请自己上传图片/视频、写提示词。缺的模型会在“缺少模型”弹窗里列出，可以直接下载。
+</details>
 
-```
-H3MD Director --plan--> H3MD Loop Sampler (+ H3MD Loop Options --options-->)
-H3MD Loop Sampler --long video--> H3MD Save Video Interp
-```
+<details>
+<summary><b>只重跑有问题的段（rerun_segments）</b></summary>
 
-第一次建议只跑第一段（`stop_after = 1`），确认画面和速度后改回 0 跑全片（第 1 段从缓存取）。
-
-### 只重跑有问题的段（`rerun_segments`）
 片子跑完后如果某几段有问题（跳变、穿帮），不用整片重做：
 1. 保持 `resume_from_cache` 打开，其他设置不变；可以改参考图、提示词（**总长和参考图像素尺寸保持不变**，否则自动拆段会变）。
 2. 在 Loop 节点最上面的 `rerun_segments` 填要重跑的段，从 1 数，和日志里的“segment 8/16”一致：如 `3`、`4-6`、`8-10, 13-14`。
@@ -75,7 +87,11 @@ H3MD Loop Sampler --long video--> H3MD Save Video Interp
 5. `rerun_new_seed`（默认开）：重跑的段用新的随机种子，提示词和参考图没改也能抽到不同结果。
 开跑前日志会列出每段是“cache”还是“RERUN（head/tail）”；缺缓存时直接报错并列出缺哪几段。
 
-### 长视频越来越浓、越来越锐、人越来越老？
+</details>
+
+<details>
+<summary><b>长视频漂移和 lowres_anchor</b></summary>
+
 这是 H3 一段接一段续写的共性问题（各家续写节点都有），只能压住、不能根除。实测 16 段：饱和度 0.32→0.46，锐度明显上升。
 颜色漂移在**低清阶段**就产生了（模型续写自己的结果），表现为 24 个 latent 通道的均值和幅度慢慢偏移。
 * 单一场景的长视频（动作复刻、长镜头）：`H3MD Loop Options` 最后一项 `lowres_anchor` 设 1。每个续接段低清跑完、放大前，
@@ -84,14 +100,22 @@ H3MD Loop Sampler --long video--> H3MD Save Video Interp
 * 其他建议：每段都放参考照片锚定身份和颜色；参考照片不要太浓太锐；提示词少写打光形容词（glowing、radiant 等）；
   特别长的片子在自然切点用参考照片重新起。
 
-### 动作复刻（depth）的规则
+</details>
+
+<details>
+<summary><b>动作复刻（depth）的规则</b></summary>
+
 * 视频勾了 depth，就**只驱动深度 ControlNet，不当 `<Video N>` 参考**（自动，没有开关）。导演台里它也不占 `<Video N>` 编号。
   原因：黑底剪影当参考时，模型会把黑底或灰色影棚照搬进画面。勾了原声的深度视频例外，仍是 `<Video N>`（日志警告）。
 * 勾了 depth 却没接 `H3MD Depth Control`，开跑前直接报错。
 * **参考照片不要用纯色/灰色影棚背景**（实测：关掉 `<Video>` 参考后，灰底照片仍会把画面拉灰）。用真实场景照片，或把人物抠出来放在模糊的目标场景上；
   全身照最好不露地板，地板在提示词里只写一种（纯色无纹理最稳）。
 
-### 主要功能怎么用
+</details>
+
+<details>
+<summary><b>主要功能怎么用</b></summary>
+
 **导演台 `H3MD Director`**
 * `plan_json` 是唯一的数据源，编辑器读它、改完写回它；右上角可在 Editor / JSON 之间切换。
 * 素材库（图片 / 视频 / 音频）：上传、或从 `input/` 文件夹选文件，拖到镜头上即可分配。
@@ -119,7 +143,10 @@ H3MD Loop Sampler --long video--> H3MD Save Video Interp
 * `format`：`video/h264-mp4`（默认）、`video/h265-mp4`、`image/gif`、`image/webp`、`image/png-sequence`（后三种没有声音）。
 * chunk 大小按空闲显存/内存自动决定；显存不够会自动减半重试，最后退到 CPU。
 
-## 小显存
+</details>
+
+<details>
+<summary><b>小显存</b></summary>
 
 * **高清阶段**：`highres_tiling` 保持打开。它按空闲显存自动决定切几条（最多 12 条），放得下就整帧，不会白白变慢。
   爆显存时会自动多切几条重跑；切到最多还不行，就再打开前馈分块重跑一次；仍然不行才报错，并提示怎么调。
@@ -132,7 +159,10 @@ H3MD Loop Sampler --long video--> H3MD Save Video Interp
 * `unload_idle_models`（默认开）在两遍之间、每段之间卸载文本编码器 / VAE 等闲置模型；`vram_release = deep` 段间还会清理缓存。
 * 显存估算按 RTX 5090 32 GB 实测校准；你的机器第一次爆显存后会被记进 `user/h3md/tiling_calibration.json`，之后自动多切几条。
 
-## 模型清单
+</details>
+
+<details>
+<summary><b>模型清单</b></summary>
 
 示例工作流顶层有一个 `models` 数组（ComfyUI 工作流规范，<https://docs.comfy.org/specs/workflow_json>），每条有
 `name`、`url`、`directory`（必填）和 `hash` / `hash_type`（可选）。ComfyUI 前端打开工作流时，如果 `models/<directory>/`
@@ -155,11 +185,17 @@ H3MD Loop Sampler --long video--> H3MD Save Video Interp
 
 每个模型有自己的许可证，使用前请看它的模型页。`ClipProjApply` 那条只有装了 ComfyUI-ClipProj 才显示。
 
-## RIFE 模型（手动下载）
+</details>
+
+<details>
+<summary><b>RIFE 模型（手动下载）</b></summary>
 
 “缺少模型”弹窗只能下载到 `models/` 下已注册的文件夹，而且不允许 `.pkl`，所以 RIFE 的 `flownet.pkl` 不在 `models` 清单里，需要手动下载：节点包 ComfyUI-VFI（<https://github.com/GACLove/ComfyUI-VFI>）；模型 <https://huggingface.co/hzwer/RIFE/resolve/main/RIFEv4.26_0921.zip>，解压后把 `flownet.pkl` 放到 `custom_nodes/ComfyUI-VFI/rife/train_log/flownet.pkl`（相对 ComfyUI 根目录）。ComfyUI-VFI 第一次运行时通常也会自己下载。
 
-## 注意事项
+</details>
+
+<details>
+<summary><b>注意事项和已知问题</b></summary>
 
 * 走 `latent` / 外部解码出来的图片 / `audio` 这些路径处理大/长视频，**不保证**显存/内存不爆；外部一次解码整段 latent，
   接缝处也可能和 `long video` 出的片子略有不同。只有 `long video` → `H3MD Save Video Interp` 是按有限显存/内存设计的。
@@ -176,7 +212,10 @@ H3MD Loop Sampler --long video--> H3MD Save Video Interp
   `rerun_segments` 换种子重跑那一段。
 * 动作复刻的分镜总长会自动对齐到参考视频（5+17n 向上取整），导出后把超出参考视频的最后几帧剪掉。
 
-## H3MD 用到的技术和思路（给大家参考）
+</details>
+
+<details>
+<summary><b>H3MD 用到的技术和思路，以及致谢</b></summary>
 
 MiniMax H3 单次最多十几秒。要做两三分钟的长视频，难点不在“能不能接上”，而在接了十几段之后还**不跳、不漂、不爆显存、坏了能修**。下面是我们踩过的坑和解法，欢迎拿去改进。
 
@@ -248,12 +287,12 @@ H3MD 站在很多人的肩膀上。下面这些作者的代码、模型或公开
 
 谢谢大家把踩过的坑公开出来，H3MD 也会继续把我们的发现分享回社区。
 
+</details>
+
+每个节点和选项的完整说明（英文）：[docs/technical-reference.md](docs/technical-reference.md)。
 
 ## 许可证
-
 ComfyUI-H3MD 版权所有 (C) 2026 YJ，按 GNU Affero 通用公共许可证第 3 版或更新版本（SPDX `AGPL-3.0-or-later`）发布，
 附加一条：分发或作为在线服务提供时，必须保留明显的署名“基于 H3MD 导演台 / H3MD Director（ComfyUI-H3MD-Director），作者 YJ”。允许商用；修改后通过网络
 提供给别人用，必须公开修改版源码。全文见 [LICENSE](LICENSE)，说明见 [NOTICE.md](NOTICE.md)；`h3md_luna/` 里自带的
 Luna-H3-Sampler 代码是 GPL-3.0（[LICENSES/](LICENSES/)）。
-
-每个节点和选项的详细行为见英文版的 [Technical reference](README.md#technical-reference-english)。
