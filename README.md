@@ -12,6 +12,8 @@ generate them segment by segment, keep every finished segment on disk, and repai
 | 2K, one segment (2560×1408, 15 s) | 1080p long take (1920×1088, 2 min 29 s, excerpt) |
 |:---:|:---:|
 | <img src="docs/media/coast_2k_one_segment.gif" width="420"> | <img src="docs/media/coast_1080p_long.gif" width="420"> |
+| **Multi-shot story** (1080p, 2 min 19 s, excerpt) | |
+| <img src="docs/media/palace_1080p_story.gif" width="420"> | |
 
 ## Highlights
 - **Long video in one run**: 2–3 minutes at 1088×1920, split automatically into seamlessly continued segments.
