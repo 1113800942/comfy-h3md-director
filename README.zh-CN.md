@@ -7,6 +7,12 @@
 
 > H3MD **不包含**任何 MiniMax H3 权重；模型有它自己的许可证（见 [NOTICE.md](NOTICE.md)）。
 
+## 样片
+
+| 2K 单段直出（2560×1408，15 秒） | 1080p 长视频（1920×1088，2 分 29 秒，节选） |
+|:---:|:---:|
+| <img src="docs/media/coast_2k_one_segment.gif" width="420"> | <img src="docs/media/coast_1080p_long.gif" width="420"> |
+
 ## 亮点
 - **一次生成长视频**：2–3 分钟、1088×1920，自动拆成无缝续接的段。
 - **坏了只修那几段**：`rerun_segments` 只重跑有问题的段，两头锁住前后段。

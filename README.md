@@ -7,6 +7,12 @@ generate them segment by segment, keep every finished segment on disk, and repai
 
 > H3MD does **not** include any MiniMax H3 weights; the model has its own license (see [NOTICE.md](NOTICE.md)).
 
+## Samples
+
+| 2K, one segment (2560×1408, 15 s) | 1080p long take (1920×1088, 2 min 29 s, excerpt) |
+|:---:|:---:|
+| <img src="docs/media/coast_2k_one_segment.gif" width="420"> | <img src="docs/media/coast_1080p_long.gif" width="420"> |
+
 ## Highlights
 - **Long video in one run**: 2–3 minutes at 1088×1920, split automatically into seamlessly continued segments.
 - **Repair instead of re-render**: `rerun_segments` re-renders only the bad segments, locked to their neighbours at both ends.
