@@ -15,11 +15,16 @@ generate them segment by segment, keep every finished segment on disk, and repai
 - **Fits your GPU**: automatic splitting by VRAM, high-res strip tiling, disk cache and resume; the 4B + ClipProj encoder saves 10+ GB.
 
 ## Install
-```
-cd ComfyUI/custom_nodes
-git clone https://github.com/1113800942/comfy-h3md-director ComfyUI-H3MD-Director
-```
-1. Restart ComfyUI. No `pip install` is needed.
+
+> [!IMPORTANT]
+> **Install — run these two commands in a terminal, then restart ComfyUI:**
+>
+> ```bash
+> cd ComfyUI/custom_nodes
+> git clone https://github.com/1113800942/comfy-h3md-director ComfyUI-H3MD-Director
+> ```
+
+1. No `pip install` is needed.
 2. You need a ComfyUI version with MiniMax H3 support (0.43 or newer recommended).
 3. Open the example workflow: ComfyUI **Templates** → `ComfyUI-H3MD-Director` → **H3MD Director**, or drag
    [`example_workflows/H3MD Director.json`](example_workflows/H3MD%20Director.json) into ComfyUI.

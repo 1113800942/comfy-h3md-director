@@ -15,11 +15,16 @@
 - **按你的显卡来**：按显存自动拆段、高清条带分块、硬盘缓存和断点续跑；4B + ClipProj 编码器能省十几 GB。
 
 ## 安装
-```
-cd ComfyUI/custom_nodes
-git clone https://github.com/1113800942/comfy-h3md-director ComfyUI-H3MD-Director
-```
-1. 重启 ComfyUI，不需要 `pip install`。
+
+> [!IMPORTANT]
+> **安装：在终端里运行下面两行命令，然后重启 ComfyUI：**
+>
+> ```bash
+> cd ComfyUI/custom_nodes
+> git clone https://github.com/1113800942/comfy-h3md-director ComfyUI-H3MD-Director
+> ```
+
+1. 不需要 `pip install`。
 2. ComfyUI 需要支持 MiniMax H3 的版本（建议 0.43 或更新）。
 3. 打开示例工作流：ComfyUI **模板 / Templates** → `ComfyUI-H3MD-Director` → **H3MD Director**，或者把
    [`example_workflows/H3MD Director.json`](example_workflows/H3MD%20Director.json) 拖进 ComfyUI。
