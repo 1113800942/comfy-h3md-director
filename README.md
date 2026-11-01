@@ -14,6 +14,8 @@ generate them segment by segment, keep every finished segment on disk, and repai
 | <img src="docs/media/coast_2k_one_segment.gif" width="420"> | <img src="docs/media/coast_1080p_long.gif" width="420"> |
 | **Multi-shot story** (1080p, 2 min 19 s, excerpt) | **Motion copy**: depth map → result (1088×1920, 2 min 13 s, excerpt) |
 | <img src="docs/media/palace_1080p_story.gif" width="420"> | <img src="docs/media/motion_copy_depth_vs_result.gif" width="420"> |
+| **Music video**: lip-synced to a locked song (1920×1088, 2 min 40 s, excerpt) | **Music video**: empty aerial shot, the song keeps playing (excerpt) |
+| <img src="docs/media/mv_1080p_singing.gif" width="420"> | <img src="docs/media/mv_1080p_everest.gif" width="420"> |
 
 ## Highlights
 - **Long video in one run**: 2–3 minutes at 1088×1920, split automatically into seamlessly continued segments.
