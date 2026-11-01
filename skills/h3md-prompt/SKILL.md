@@ -188,6 +188,30 @@ non_diegetic_music:
   change; after a hard cut the new shot's first segment becomes the reference.
 - 1080p medium shots are sharp enough straight out; face refine is usually not needed except for small, distant faces.
 
+## 10b. Singing, framing and camera (measured on a 160 s music video)
+- **Sing only in medium and close shots.** In a wide shot the face is too small to show lips, so H3 inserts a
+  front close-up of her singing by itself: a hard cut, or a translucent double exposure (a big face floating over the
+  scene). "One continuous shot, no cuts" does not stop it. In wide shots write `She does not sing in this shot; her
+  lips stay softly closed`, and let the song play as a voice-over.
+- **Face size decides sharpness.** At 1920×1088 a knees-up shot gives a face of about 110 px (soft, blotchy skin; face
+  refine cannot rescue it). Waist-up or closer, or a portrait 1088×1920 frame, gives 200+ px and a clear face. Where a
+  face would be small, show her from behind, in profile far away, or in details (hair, hands, gown).
+- **The face close-up photo only in medium and close shots.** Attached to a wide shot, the model may copy the photo as
+  a shot of its own (its framing and its background).
+- **Timed lyrics need one segment per shot.** Write `At 00:07.3 she sings: <d>[English] ...</d>` in the shot's own
+  time and keep each singing shot ≤ about 500 frames (one segment), or split it into shots with their own prompts;
+  autosplit would replay the timings from 0 in every part.
+- **Lock the camera when a large foreground ground is in view.** A moving camera over a big meadow makes the grass
+  ripple like waves. Write `The camera is locked off on a tripod and does not move at all; the ground stays perfectly
+  still and only she, her gown and her hair move.` Keep camera moves for sky, clouds and distant shots.
+- **No "slowly" words for motion.** slowly / very slowly / unhurried / slow waves turn into slow motion. Write `at a
+  natural, relaxed pace in real time` and add `All motion plays at natural real-time speed, not slow motion.`
+  Calm comes from the music and the framing.
+- **Reference images must match the output orientation.** A landscape location picture in a portrait video comes back
+  as a letterboxed strip with dark bars. Make a portrait version (extend sky above and clouds below) for portrait runs.
+- **Stock-watermark ghosts.** Large snowfields sometimes show a faint yellow, blocky "watermark" patch; it depends on
+  the seed: re-render that segment with a new seed.
+
 ## 11. Before running
 - Run only segment 1 first (Loop `stop_after = 1`); when happy set it back to 0 - segment 1 comes from the cache.
 - Bad segments don't need a full rerun: `rerun_segments` = `8-10, 13-14` (counted from 1). Their heads continue the
@@ -216,3 +240,5 @@ End with one line: number of shots, total generated frames, total new content le
 - [ ] Simple set: no mirrors, wooden floors, tiles, stripes; one solid floor; "background never turns black or grey".
 - [ ] Every shot has composition, positions, location and light, action, camera and sound; dialogue and lyrics in
       `<d>` in their own language; unknown lyrics → she does not sing.
+- [ ] Singing only in medium / close shots; wide shots say she does not sing; face photo only in medium / close shots.
+- [ ] Locked camera where a large ground is in view; no "slowly" words; reference images match the output orientation.

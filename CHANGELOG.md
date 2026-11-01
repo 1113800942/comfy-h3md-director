@@ -3,6 +3,7 @@
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
 ## [Unreleased]
+* Prompt skill: section 10b, singing / framing / camera rules measured on the "Above the Clouds" music video; README music-video samples. 提示词 skill 加 10b（唱歌、景别、机位实测规则）；README 加 MV 样片。
 * `skills/h3md-prompt/`: H3MD prompt skill (English SKILL.md + Chinese copy), linked from the README install steps.
   H3MD 提示词 skill（英文 + 中文），README 安装步骤里加了说明。
 
