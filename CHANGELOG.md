@@ -3,6 +3,15 @@
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
 ## [Unreleased]
+* `example_workflows/H3MD Director (lite).json`: the same H3MD features with the fewest dependencies (ComfyUI + H3MD +
+  ComfyUI-KJNodes); LoRAs on core `LoraLoaderModelOnly`, no face refine / RIFE / extra refine step.
+  精简版示例工作流：H3MD 功能不变，只依赖 ComfyUI + H3MD + ComfyUI-KJNodes；LoRA 改用自带加载器，不含修脸、补帧、多一步精修。
+* `tools/drift_report.py`: measures a long video segment by segment (brightness, contrast, saturation, sharpness, colour
+  shift vs segment 1) and writes a table + chart; runs on ComfyUI's Python (PyAV + numpy). 逐段劣化测量脚本：对任意视频
+  输出亮度、对比度、饱和度、锐度、色差（都和第 1 段比）的表和图。
+* README: dependency table (required / recommended / optional, what each pack does, what happens without it) and a
+  measured "Hardware and render time" section (RTX 5090: time per segment, peak RAM, disk cache, model sizes), both
+  folded. README 加依赖表（必需 / 推荐 / 可选、各自用途、不装会怎样）和实测的"硬件要求和用时"（都折叠）。
 * `example_workflows/H3MD hard cut example.json`: minimal 2-shot hard-cut workflow (shot 2 starts fresh from the last frame of shot 1, no latent continuation); steps in the Note node. 硬切示例工作流（2 个分镜，第 2 镜用第 1 镜最后一帧重新生成，不续接 latent），步骤写在 Note 节点里。
 * Prompt skill: section 10b, singing / framing / camera rules measured on the "Above the Clouds" music video; README music-video samples. 提示词 skill 加 10b（唱歌、景别、机位实测规则）；README 加 MV 样片。
 * `skills/h3md-prompt/`: H3MD prompt skill (English SKILL.md + Chinese copy), linked from the README install steps.

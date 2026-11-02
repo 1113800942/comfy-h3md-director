@@ -39,8 +39,10 @@ generate them segment by segment, keep every finished segment on disk, and repai
 
 1. No `pip install` is needed.
 2. You need a ComfyUI version with MiniMax H3 support (0.43 or newer recommended).
-3. Open the example workflow: ComfyUI **Templates** → `ComfyUI-H3MD-Director` → **H3MD Director**, or drag
-   [`example_workflows/H3MD Director.json`](example_workflows/H3MD%20Director.json) into ComfyUI.
+3. Open an example workflow: ComfyUI **Templates** → `ComfyUI-H3MD-Director`, or drag one from
+   [`example_workflows/`](example_workflows) into ComfyUI. New here? Start with **H3MD Director (lite)**: it needs only
+   ComfyUI-KJNodes besides H3MD. **H3MD Director** is the full setup (face refine, 48 fps interpolation and more).
+   Hardware, render times and the dependency table: see **More** below.
 4. Missing node packs: ComfyUI-Manager → **Install Missing Custom Nodes**. Missing models: follow the
    **Model links** note inside the workflow (every file with its download link and folder).
 5. **Prompts: write them with the [H3MD prompt skill](skills/h3md-prompt/SKILL.md).** Each shot is a full official H3
@@ -95,19 +97,58 @@ H3MD Director --plan--> H3MD Loop Sampler (+ H3MD Loop Options) --long video--> 
 
 1. Put the folder at `custom_nodes/ComfyUI-H3MD-Director`
    (`git clone https://github.com/1113800942/comfy-h3md-director custom_nodes/ComfyUI-H3MD-Director`, or copy it).
-2. Install the node packs below, then restart ComfyUI.
+2. Install the node packs you need (table below), then restart ComfyUI.
 3. No extra `pip install`: H3MD only uses torch, numpy, PyAV, Pillow and einops, which ship with ComfyUI.
 4. Recommended: a learned latent upscaler in `models/latent_upscale_models/`, e.g.
    `minimax_h3_latent_upscaler_3d_fp16.safetensors` or a fine-tune such as
    `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors`. Without one, set `upscaler_model = none` (nearest, softer).
 
-Dependencies:
-* **ComfyUI** with the core MiniMax H3 nodes (`comfy_extras.nodes_minimax_h3`), 0.43 or newer recommended.
-* **selflift-Avatar is no longer needed**: the two-pass engine is bundled (`h3md_luna/`).
-* **ComfyUI-ClipProj** (<https://github.com/nicolab28/ComfyUI-ClipProj>) — clip projection model used by the example.
-* **ComfyUI-VFI** (<https://github.com/GACLove/ComfyUI-VFI>) — only for RIFE interpolation in `H3MD Save Video Interp`.
-* The example workflow also uses ComfyUI-KJNodes, rgthree-comfy, MiniMax H3 Audio T8, CRT-Nodes and
-  ComfyUI-YCNodes-MiniMax-H3; ComfyUI lists any missing pack when the workflow opens.
+**Two example workflows**
+* `H3MD Director (lite).json` — the fewest dependencies: ComfyUI + H3MD + ComfyUI-KJNodes (+ ComfyUI-ClipProj for the
+  small 4B text encoder). Everything H3MD does is there: Director, long-video continuation, `lowres_anchor`, tiling,
+  disk cache, `rerun_segments`, locked-audio lip sync, motion copy.
+* `H3MD Director.json` — the full setup used for the samples; adds face refine, RIFE interpolation to 48 fps, one extra
+  refine step and a few convenience nodes.
+
+| Node pack | What it does in the workflows | Needed? | Without it |
+|---|---|---|---|
+| ComfyUI 0.43+ (core MiniMax H3 nodes) | models, sampler, VAE | **required** | — |
+| H3MD Director (this pack) | Director, Loop Sampler, Save Video Interp, depth / SAM3 motion copy | **required** | — |
+| [ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) | SageAttention and chunked feed-forward patches (less VRAM) | recommended (lite + full) | runs, but needs more VRAM; the SageAttention patch also needs the SageAttention package, otherwise bypass that node |
+| [ComfyUI-ClipProj](https://github.com/nicolab28/ComfyUI-ClipProj) | 4B text encoder projection, saves 10+ GB VRAM | only with the 4B encoder | use the 32B encoder |
+| [ComfyUI-VFI](https://github.com/GACLove/ComfyUI-VFI) | RIFE interpolation in `H3MD Save Video Interp` | full only, optional | keep `interpolate` off: 24 fps output |
+| TE-Speed-VOSR2 / TE-Speed-SeedVR2 | face refine in `H3MD Save Video Interp` | full only, optional | keep `face_refine` off (default) |
+| [ComfyUI-YCNodes-MiniMax-H3](https://github.com/yichengup/ComfyUI-YCNodes-MiniMax-H3) | `H3SigmaRefiner`: one extra refine step | full only, optional | plain `BasicScheduler` |
+| [rgthree-comfy](https://github.com/rgthree/rgthree-comfy) | Power Lora Loader (many LoRAs in one node) | full only, optional | chain the core `LoraLoaderModelOnly` (lite does this) |
+| ComfyUI-Dehypnotic, Crystools, Easy-Use, LayerStyle, CRT-Nodes | aspect-ratio picker, switch, number, VRAM purge, timer | full only, optional | not needed to render |
+
+H3MD looks up the face-refine and RIFE packs only when you turn those features on, so the save node works without them.
+ComfyUI lists any missing pack when a workflow opens (ComfyUI-Manager → **Install Missing Custom Nodes**).
+
+</details>
+
+<details>
+<summary><b>Hardware and render time (measured)</b></summary>
+
+Measured on one machine: **RTX 5090 32 GB**, Ryzen 9 9950X3D, **64 GB RAM**, ComfyUI 0.43, PyTorch 2.13 + CUDA 13.0;
+hybrid b25-49 int8 model, 32B int8 text encoder, 4-step turbo LoRAs, two-pass sampling (6 low-res + 3 high-res steps).
+
+| Resolution | One ~15 s segment | 2 min 40 s video | High-res strips | Peak system RAM | Disk cache (whole video) |
+|---|---|---|---|---|---|
+| 704×1280 | about 4 min | 47 min (12 segments) | 1–2 | about 54 GB | about 22 GB |
+| 1088×1920 / 1920×1088 | about 8–12 min | about 1.5–2 h (11 segments) | 2–3 | about 35 GB | about 70 GB |
+
+* The first segment of a run takes about a minute longer (model loading).
+* Model files: base model 19.5 GB; 32B text encoder 25.3 GB (or 4B encoder 5.3 GB + ClipProj 0.5 GB); video VAE
+  4.9 GB; audio VAE 0.6 GB; each turbo LoRA 0.3–1.8 GB. Plan for about 55 GB of models plus the cache.
+* **4B encoder + ClipProj vs 32B** (704×1280, same seed): same picture quality and the same speed (203 s vs 199 s per
+  segment); it only saves VRAM (10+ GB) and follows detailed prompts a little less closely.
+* The cache is about 3 GB per 243 frames at 1088×1920 (fp16); delete it after saving (`delete_cache_after_save`).
+* **Only tested on an RTX 5090.** Smaller cards should start with the 4B encoder + ClipProj, 704×1280, segments of about
+  10 s and few, small reference pictures (see **Low VRAM**). The tiling estimate learns your card after its first
+  out-of-memory retry.
+* Please post your GPU, resolution and time per segment in
+  [Discussions](https://github.com/1113800942/comfy-h3md-director/discussions); we will add them to this table.
 
 </details>
 
@@ -143,6 +184,38 @@ own result) as a slow shift of the 24 latent channels' mean and spread.
   reference).
 * Also: give every segment the reference photos; avoid over-saturated / over-sharp reference photos; avoid lighting
   adjectives (glowing, radiant ...) in prompts; restart very long pieces from the reference photos at natural cuts.
+
+
+**Measured: a 3-minute single take** ([video](https://youtu.be/ewb1Ui5OIfs)). 3:07, locked-off camera, no cuts: 14
+segments chained through the 39-frame latent overlap, 704×1280, `lowres_anchor = 1`. Every segment is compared with
+the first one using [`tools/drift_report.py`](tools/drift_report.py) (run it on your own videos):
+
+| Segment | Time | Brightness % | Contrast % | Saturation % | Sharpness % | Colour shift |
+|---:|---|---:|---:|---:|---:|---:|
+| 1 | 0.0–12.2 s | +0.0 | +0.0 | +0.0 | +0.0 | 0.00 |
+| 2 | 12.2–25.7 s | -0.1 | +0.6 | -1.2 | -1.9 | 0.24 |
+| 3 | 25.7–39.2 s | +0.3 | +0.5 | +0.1 | -5.3 | 0.31 |
+| 4 | 39.2–52.6 s | +0.5 | +1.0 | +0.7 | -7.8 | 0.29 |
+| 5 | 52.6–66.1 s | +0.2 | +0.5 | +3.7 | -9.6 | 0.31 |
+| 6 | 66.1–79.5 s | +0.3 | +0.9 | +3.7 | -9.3 | 0.35 |
+| 7 | 79.5–93.0 s | +0.4 | +0.5 | +4.6 | -12.9 | 0.45 |
+| 8 | 93.0–106.5 s | +0.0 | -0.0 | +5.6 | -12.5 | 0.49 |
+| 9 | 106.5–119.9 s | +0.2 | -0.2 | +6.4 | -13.3 | 0.58 |
+| 10 | 119.9–133.4 s | +0.0 | -0.6 | +7.4 | -13.5 | 0.72 |
+| 11 | 133.4–146.8 s | -0.0 | -0.3 | +7.4 | -12.9 | 0.69 |
+| 12 | 146.8–160.3 s | +0.7 | -0.4 | +6.4 | -14.9 | 0.63 |
+| 13 | 160.3–173.8 s | +0.1 | -0.5 | +7.7 | -14.9 | 0.74 |
+| 14 | 173.8–187.2 s | +0.4 | -0.6 | +8.5 | -12.3 | 0.69 |
+
+<img src="docs/media/drift_3min_single_take.png" width="640">
+
+* Brightness and contrast stay within 1 %; the colour shift stays under 1 (not visible).
+* Saturation creeps up about 8.5 % and levels off after about 2 minutes. For comparison, the same kind of chain
+  **without** `lowres_anchor` went from 0.34 to 0.48 saturation (about +40 %).
+* Sharpness drops 10–15 %: the picture gets slightly **softer**, not over-sharpened or older. Segment 1 is the
+  instrumental intro with little motion, so it is the sharpest reference.
+* **It is not zero drift.** But over 3 minutes the face, the scene and the light stay the same. Test your own setup
+  with the script.
 
 </details>
 

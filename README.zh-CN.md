@@ -39,8 +39,10 @@
 
 1. 不需要 `pip install`。
 2. ComfyUI 需要支持 MiniMax H3 的版本（建议 0.43 或更新）。
-3. 打开示例工作流：ComfyUI **模板 / Templates** → `ComfyUI-H3MD-Director` → **H3MD Director**，或者把
-   [`example_workflows/H3MD Director.json`](example_workflows/H3MD%20Director.json) 拖进 ComfyUI。
+3. 打开示例工作流：ComfyUI **模板 / Templates** → `ComfyUI-H3MD-Director`，或者把
+   [`example_workflows/`](example_workflows) 里的文件拖进 ComfyUI。第一次用建议先开 **H3MD Director (lite)**（精简版）：
+   除了 H3MD 只需要 ComfyUI-KJNodes。**H3MD Director** 是完整版（修脸、48 fps 补帧等）。
+   硬件要求、用时和依赖表：见下面 **更多内容**。
 4. 缺节点包：ComfyUI-Manager → **Install Missing Custom Nodes**。缺模型：看工作流里的 **模型下载** note，每个文件都有下载链接和存放文件夹。
 5. **提示词：请用 [H3MD 提示词 skill](skills/h3md-prompt/SKILL.zh-CN.md) 来写。** 每个镜头都是一份完整的官方 H3 提示词，
    再加上 H3MD 的规则（5+17n 长度、重叠、自动拆段、标签编号、动作复刻）。在 Claude Code、Codex、Cursor 等能读
@@ -86,18 +88,55 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
 
 1. 把整个文件夹放到 `custom_nodes/ComfyUI-H3MD-Director`
    （`git clone https://github.com/1113800942/comfy-h3md-director custom_nodes/ComfyUI-H3MD-Director`，或直接复制）。
-2. 安装依赖的节点包（见下），然后重启 ComfyUI。
+2. 按下表安装需要的节点包，然后重启 ComfyUI。
 3. 不需要额外 `pip install`：H3MD 只用到 ComfyUI 自带的 torch、numpy、PyAV、Pillow、einops。
 4. 下载学习型潜空间放大器（推荐）放到 `models/latent_upscale_models/`：`minimax_h3_latent_upscaler_3d_fp16.safetensors`
    或它的微调版（如 `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors`）。不放也能跑（`upscaler_model = none`，最近邻放大，效果差一些）。
 
-依赖：
-* **ComfyUI 本体**，需要带核心 MiniMax H3 节点（`comfy_extras.nodes_minimax_h3`），建议 0.43 或更新。
-* **不再需要 selflift-Avatar**：两段式采样引擎已经自带（`h3md_luna/`）。
-* **ComfyUI-ClipProj**（<https://github.com/nicolab28/ComfyUI-ClipProj>）——示例工作流里 clip projection 模型要用。
-* **ComfyUI-VFI**（<https://github.com/GACLove/ComfyUI-VFI>）——只有 `H3MD Save Video Interp` 打开 `interpolate` 时才需要。
-* 示例工作流另外还用到：ComfyUI-KJNodes、rgthree-comfy、MiniMax H3 Audio T8、CRT-Nodes、ComfyUI-YCNodes-MiniMax-H3。
-  缺哪个，ComfyUI 打开工作流时会提示。
+**两个示例工作流**
+* `H3MD Director (lite).json`（精简版）——依赖最少：ComfyUI + H3MD + ComfyUI-KJNodes（用 4B 小编码器时再加
+  ComfyUI-ClipProj）。H3MD 的功能全都有：导演台、长视频续接、`lowres_anchor`、高清分块、硬盘缓存、`rerun_segments`、
+  锁定音频对口型、动作复刻。
+* `H3MD Director.json`（完整版）——样片用的完整设置，多了修脸、RIFE 补帧到 48 fps、多 1 步精修和几个方便的小工具。
+
+| 节点包 | 在工作流里做什么 | 要不要装 | 不装会怎样 |
+|---|---|---|---|
+| ComfyUI 0.43+（自带 MiniMax H3 节点） | 模型、采样器、VAE | **必需** | — |
+| H3MD Director（本包） | 导演台、循环采样、保存、深度 / SAM3 动作复刻 | **必需** | — |
+| [ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) | SageAttention 和 FeedForward 分块补丁（省显存） | 推荐（精简版和完整版都用） | 能跑，但显存占用更高；SageAttention 补丁还需要装 SageAttention 包，没装就把那个节点绕过 |
+| [ComfyUI-ClipProj](https://github.com/nicolab28/ComfyUI-ClipProj) | 4B 文本编码器投影，省 10 GB 以上显存 | 只有用 4B 编码器时需要 | 改用 32B 编码器 |
+| [ComfyUI-VFI](https://github.com/GACLove/ComfyUI-VFI) | `H3MD Save Video Interp` 里的 RIFE 补帧 | 仅完整版，可选 | `interpolate` 保持关，输出 24 fps |
+| TE-Speed-VOSR2 / TE-Speed-SeedVR2 | `H3MD Save Video Interp` 里的修脸 | 仅完整版，可选 | `face_refine` 保持关（默认就是关） |
+| [ComfyUI-YCNodes-MiniMax-H3](https://github.com/yichengup/ComfyUI-YCNodes-MiniMax-H3) | `H3SigmaRefiner`：多 1 步精修 | 仅完整版，可选 | 用普通 `BasicScheduler` |
+| [rgthree-comfy](https://github.com/rgthree/rgthree-comfy) | Power Lora Loader（一个节点挂多个 LoRA） | 仅完整版，可选 | 用自带的 `LoraLoaderModelOnly` 串起来（精简版就是这样） |
+| ComfyUI-Dehypnotic、Crystools、Easy-Use、LayerStyle、CRT-Nodes | 比例选择、开关、数值、清显存、计时 | 仅完整版，可选 | 出片用不到 |
+
+修脸和补帧的节点包只有在打开这两个功能时才会用到，没装也不影响保存节点。
+缺哪个节点包，ComfyUI 打开工作流时会列出来（ComfyUI-Manager → **Install Missing Custom Nodes**）。
+
+</details>
+
+<details>
+<summary><b>硬件要求和用时（实测）</b></summary>
+
+测试机只有一台：**RTX 5090 32 GB**、Ryzen 9 9950X3D、**64 GB 内存**、ComfyUI 0.43、PyTorch 2.13 + CUDA 13.0；
+hybrid b25-49 int8 底模、32B int8 文本编码器、4 步加速 LoRA、两段式采样（低清 6 步 + 高清 3 步）。
+
+| 分辨率 | 每段约 15 秒 | 2 分 40 秒整片 | 高清分块 | 内存峰值 | 硬盘缓存（整片） |
+|---|---|---|---|---|---|
+| 704×1280 | 约 4 分钟 | 47 分钟（12 段） | 1–2 条 | 约 54 GB | 约 22 GB |
+| 1088×1920 / 1920×1088 | 约 8–12 分钟 | 约 1.5–2 小时（11 段） | 2–3 条 | 约 35 GB | 约 70 GB |
+
+* 每次开跑的第 1 段会多 1 分钟左右（加载模型）。
+* 模型文件：底模 19.5 GB；32B 编码器 25.3 GB（或 4B 编码器 5.3 GB + ClipProj 0.5 GB）；视频 VAE 4.9 GB；
+  音频 VAE 0.6 GB；加速 LoRA 每个 0.3–1.8 GB。模型大约 55 GB，另外留出缓存空间。
+* **4B 编码器 + ClipProj 对比 32B**（704×1280，同一个种子）：画质一样，速度也一样（每段 203 秒对 199 秒）；
+  只是省显存（10 GB 以上），对很细的提示词稍微没那么听话。
+* 1088×1920 下每 243 帧缓存约 3 GB（fp16）；出片后可以用 `delete_cache_after_save` 删掉。
+* **只在 RTX 5090 上测过。** 显卡小的话，先用 4B 编码器 + ClipProj、704×1280、每段 10 秒左右、参考图少而小
+  （见 **小显存**）。分块估算在第一次爆显存重试后会记住你的显卡。
+* 欢迎在 [Discussions](https://github.com/1113800942/comfy-h3md-director/discussions) 里报你的显卡、分辨率和每段用时，
+  我们会补进这张表。
 
 </details>
 
@@ -125,6 +164,36 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
   场景本该变色的叙事视频不要开（硬切后会以新镜头的第一段为准）。
 * 其他建议：每段都放参考照片锚定身份和颜色；参考照片不要太浓太锐；提示词少写打光形容词（glowing、radiant 等）；
   特别长的片子在自然切点用参考照片重新起。
+
+
+**实测：3 分钟一镜到底**（[视频](https://youtu.be/ewb1Ui5OIfs)）。3 分 07 秒，机位固定，不剪辑：14 段通过 39 帧
+latent 重叠接续，704×1280，`lowres_anchor = 1`。每段都和第 1 段比，用的是 [`tools/drift_report.py`](tools/drift_report.py)
+（你也可以拿它测自己的视频）：
+
+| Segment | Time | Brightness % | Contrast % | Saturation % | Sharpness % | Colour shift |
+|---:|---|---:|---:|---:|---:|---:|
+| 1 | 0.0–12.2 s | +0.0 | +0.0 | +0.0 | +0.0 | 0.00 |
+| 2 | 12.2–25.7 s | -0.1 | +0.6 | -1.2 | -1.9 | 0.24 |
+| 3 | 25.7–39.2 s | +0.3 | +0.5 | +0.1 | -5.3 | 0.31 |
+| 4 | 39.2–52.6 s | +0.5 | +1.0 | +0.7 | -7.8 | 0.29 |
+| 5 | 52.6–66.1 s | +0.2 | +0.5 | +3.7 | -9.6 | 0.31 |
+| 6 | 66.1–79.5 s | +0.3 | +0.9 | +3.7 | -9.3 | 0.35 |
+| 7 | 79.5–93.0 s | +0.4 | +0.5 | +4.6 | -12.9 | 0.45 |
+| 8 | 93.0–106.5 s | +0.0 | -0.0 | +5.6 | -12.5 | 0.49 |
+| 9 | 106.5–119.9 s | +0.2 | -0.2 | +6.4 | -13.3 | 0.58 |
+| 10 | 119.9–133.4 s | +0.0 | -0.6 | +7.4 | -13.5 | 0.72 |
+| 11 | 133.4–146.8 s | -0.0 | -0.3 | +7.4 | -12.9 | 0.69 |
+| 12 | 146.8–160.3 s | +0.7 | -0.4 | +6.4 | -14.9 | 0.63 |
+| 13 | 160.3–173.8 s | +0.1 | -0.5 | +7.7 | -14.9 | 0.74 |
+| 14 | 173.8–187.2 s | +0.4 | -0.6 | +8.5 | -12.3 | 0.69 |
+
+<img src="docs/media/drift_3min_single_take.png" width="640">
+
+* 亮度、对比度的变化都在 1% 以内；颜色偏移小于 1（肉眼看不出）。
+* 饱和度慢慢上升约 8.5%，大约 2 分钟后基本不再涨。作为对照，同样的链式接续**不开** `lowres_anchor` 时，饱和度从
+  0.34 涨到 0.48（约 +40%）。
+* 锐度下降 10–15%：画面略微**变柔**，不是变锐、变老。第 1 段是纯音乐前奏、动作少，所以它本来就最锐。
+* **不可能做到完全不劣化**，但 3 分钟里人脸、场景、光线都保持一致。想确认的话，用这个脚本测你自己的设置。
 
 </details>
 
