@@ -212,6 +212,29 @@ non_diegetic_music:
 - **Stock-watermark ghosts.** Large snowfields sometimes show a faint yellow, blocky "watermark" patch; it depends on
   the seed: re-render that segment with a new seed.
 
+## 10c. Instrumental parts, "no X" wording, reference images (measured on a 3-minute single take)
+- **Intro, interlude and outro get their own segment, and that prompt never mentions singing.** A line like "she does
+  not sing from 0 to 12.7 s" inside a singing segment does not hold: the model sees "a singer + music" and moves her
+  lips with the music. As separate segments the 12 s intro and 14 s outro kept the mouth closed the whole time.
+  Write the instrumental segment like this:
+  - `<Audio 1> is an instrumental passage of the song's music, with no singing voice; <Subject 1> only listens to it and does not sing.`
+  - summary `... listening silently to <Audio 1> ...`; retention `it is instrumental here, so her lips stay closed.`
+  - non_diegetic_music: the instruments, `no singing voice`; overall_soundscape without her voice.
+  - give her something concrete to do: a closed-mouth smile, slow breathing, closing and opening her eyes, looking far away.
+- **A few instrumental seconds before the first sung line** (inside a singing segment): add `From 00:00.0 to
+  00:02.1 <Audio 1> is purely instrumental, with no singing voice at all, so she is only listening ...`, together with
+  the split above.
+- **"no X" does nothing.** H3 is CFG-distilled: negative prompts have no effect, and `no shine, no oil, no gloss` in
+  the positive prompt changes nothing either. Say what you want: `She wears no makeup: her face looks bare and
+  natural, like in a candid documentary photograph, with visible pores ...`
+- **Do not retouch the reference photo locally** (de-shine, local colour fixes). A retouched photo carried a yellow
+  edge and an orange background patch into the whole video; the original photo did not. Re-generate the photo instead.
+- **Yellow patches / colour casts: check the reference image first, then the seed.**
+- **Seeds: fix the seed only for A/B tests (change one thing); use a random seed for real runs.**
+- **Skin shine comes mostly from the reference photo and the model, not the prompt.** Write the light as soft, fixed
+  and diffuse: `Soft, diffused afternoon light through a thin high haze falls evenly on her, with gentle, low contrast;
+  the light stays exactly the same from start to end`.
+
 ## 11. Before running
 - Run only segment 1 first (Loop `stop_after = 1`); when happy set it back to 0 - segment 1 comes from the cache.
 - Bad segments don't need a full rerun: `rerun_segments` = `8-10, 13-14` (counted from 1). Their heads continue the
@@ -225,6 +248,30 @@ One block per shot, in order:
 2. Below it, the complete prompt ready to paste (full-reference or base format).
 
 End with one line: number of shots, total generated frames, total new content length.
+
+## 12b. Importable plan file (H3MD v0.2.0+)
+After the prompts, also give the whole plan as ONE JSON code block that the user saves as `<name>.json` and opens with
+**Import plan…** in the Director (no copy-paste per shot). Format (`docs/plan_format.md` in the repo):
+
+```json
+{
+  "version": 1, "fps": 24, "width": 704, "height": 1280, "globalPrompt": "",
+  "media": {"images": [{"id": "eve", "file": "eve.png"}], "videos": [],
+            "audios": [{"id": "song", "file": "song.mp3"}]},
+  "segments": [
+    {"length": 294, "overlapIn": 0, "images": ["eve"],
+     "audios": [{"id": "song", "mode": "locked", "offset": 0.0}], "prompt": "Duration: 12.25 s (294 frames).\n\nsubject_definitions: ..."},
+    {"length": 362, "overlapIn": 39, "images": ["eve"],
+     "audios": [{"id": "song", "mode": "locked", "offset": 10.625}], "prompt": "Duration: 15.08 s (362 frames).\n\n..."}
+  ]
+}
+```
+- `file` = the file name the user has (or will upload) in ComfyUI's `input/` folder; `id` = a short name used by the shots.
+- `length` 5+17n; `overlapIn` 0 for the first shot and hard cuts, 39 to continue.
+- Locked song: `offset` = previous offset + (previous length − this overlapIn) / 24.
+- `prompt` = the complete prompt text of that shot (newlines as `\n`), exactly what would be pasted.
+- Valid JSON only (double quotes, no comments, no trailing commas). The Director lists any problem it finds
+  (lengths, overlaps, tags without media, missing files) instead of fixing it.
 
 ## 13. Self-check before output
 - [ ] It really is an H3MD task (otherwise use `h3-prompt-writing`).
@@ -242,3 +289,6 @@ End with one line: number of shots, total generated frames, total new content le
       `<d>` in their own language; unknown lyrics → she does not sing.
 - [ ] Singing only in medium / close shots; wide shots say she does not sing; face photo only in medium / close shots.
 - [ ] Locked camera where a large ground is in view; no "slowly" words; reference images match the output orientation.
+- [ ] Intro / interlude / outro are their own segments with no singing in the prompt; no "no X" wording; the reference
+      photo is the original (no local retouching).
+- [ ] When the user wants to import: one valid plan JSON block whose lengths, overlaps, offsets and prompts match the shots above.

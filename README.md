@@ -153,6 +153,27 @@ hybrid b25-49 int8 model, 32B int8 text encoder, 4-step turbo LoRAs, two-pass sa
 </details>
 
 <details>
+<summary><b>Save and share a plan (Export plan / Import plan…)</b></summary>
+
+The row above the Director's plan header (shown even on an empty Director):
+* **Export plan + media** — one plain `.zip` with the plan, the whole workflow (every node setting: LoRAs and
+  strengths, seed, Loop Options, Save settings), a readable settings list, a first-frame thumbnail of the newest
+  finished video, and the pictures and songs. For yourself: re-open a recipe that worked, swap the photo, change a
+  length, run again. Reference videos over 200 MB are added only with "incl. big ref video" ticked.
+* **Export plan (no media)** — the same without pictures and songs, to share a recipe without anyone's photos or music.
+* **Import plan…** — a `.zip` from above, or a plan `.json` written by an agent with the
+  [H3MD prompt skill](skills/h3md-prompt/SKILL.md) (section 12b). Media go to `input/H3MD_plans/<name>/` (never
+  overwritten). **Plan only** replaces this Director's plan; **Plan + all settings** opens the saved workflow in a new
+  tab through ComfyUI's normal loader, so missing node packs show red and missing models open the usual download
+  dialog. Problems (lengths that are not 5 + 17n, wrong overlaps, `<Picture N>` tags with no picture, missing files)
+  are listed, never fixed silently.
+
+Never inside: finished videos, caches, model weights, RefMod files (they are listed in `manifest.json`).
+Format: [docs/plan_format.md](docs/plan_format.md).
+
+</details>
+
+<details>
 <summary><b>Re-render only the bad segments (rerun_segments)</b></summary>
 
 When a few segments of a finished video are bad (jumps, glitches), do not re-render the whole video:
@@ -177,11 +198,18 @@ The log lists every segment as "cache" or "RERUN (head/tail)" first; a missing c
 This is common to every chained H3 continuation; it can be held down, not removed. Measured over 16 segments:
 saturation 0.32 -> 0.46 and rising sharpness. The colour drift is born in the **low-res pass** (the model continuing its
 own result) as a slow shift of the 24 latent channels' mean and spread.
-* One continuous scene (motion copy, a long take): set `lowres_anchor` (last widget of `H3MD Loop Options`) to 1. After
+* One continuous scene (motion copy, a long take): set `lowres_anchor` (near the end of `H3MD Loop Options`) to 1. After
   each continued segment's low-res pass, before the upscale, the new frames' channel statistics are pulled back to the
   shot's first segment, and the low-res carry is corrected too, so the error does not reach the next segment. Needs
   `continue_lowres_prefix = native_lowres_carry`. Not for a story whose colours should change (a hard cut starts a new
   reference).
+* v0.2.0: `hires_anchor` (now the last widget of `H3MD Loop Options`) does the same on the high-res result, which the
+  next segment also continues from. Small gain on its own (5 segments, same seed: colour shift 0.29 -> 0.13, sharpness
+  −10.6 % -> −7.6 %, saturation unchanged), so it is off by default.
+* v0.2.0: [`tools/drift_correct.py`](tools/drift_correct.py) fixes what is left after the run, in pixel space: every
+  segment's saturation and sharpness are pulled back to segment 1 (easing in over 2 s after each seam, tint and
+  brightness untouched, audio copied). On the 3-minute take below: saturation +8.4 % -> −0.2 %, sharpness −18.0 % ->
+  +1.3 %. `python tools/drift_correct.py video.mp4 --segments 294,362,362 --overlap 39`
 * Also: give every segment the reference photos; avoid over-saturated / over-sharp reference photos; avoid lighting
   adjectives (glowing, radiant ...) in prompts; restart very long pieces from the reference photos at natural cuts.
 

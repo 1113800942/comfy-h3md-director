@@ -82,6 +82,12 @@ try:  # Phase 2 editor helpers (read-only GET routes); never blocks node loading
 except Exception as _exc:
     logging.warning("[H3MD] editor routes not loaded: %s", _exc)
 
+try:  # v0.2.0 plan export / import routes; never blocks node loading
+    from . import h3md_plan_io as _plan_io
+    _plan_io.register()
+except Exception as _exc:
+    logging.warning("[H3MD] plan export/import routes not loaded: %s", _exc)
+
 # Frontend: H3MD Director plan editor (web/js). plan_json stays the serialized widget.
 WEB_DIRECTORY = "./web/js"
 

@@ -120,6 +120,19 @@ non_diegetic_music:
 - **参考图的横竖要和成片一致。** 横的场景图放进竖屏，会变成一条带黑边的横条。竖屏要另做一张竖版（上面补天空、下面补云海）。
 - **图库水印的"鬼影"。** 大片雪坡上偶尔会出现淡黄色、带方块纹理的水印斑，和 seed 有关：换 seed 重跑那一段。
 
+## 10c. 纯音乐段、"不要什么"、参考图（3 分钟一镜到底实测）
+- **前奏、间奏、尾奏单独成一段，这一段的提示词里完全不提唱歌。** 只在唱歌段里写"0–12.7 秒不唱、嘴闭着"压不住：模型看到"她是歌手 + 有音乐"就会跟着音乐动嘴。拆成单独一段后，前奏 12 秒、尾奏 14 秒嘴全程闭着。纯音乐段这样写：
+  - `<Audio 1> is an instrumental passage of the song's music, with no singing voice; <Subject 1> only listens to it and does not sing.`
+  - summary：`... listening silently to <Audio 1> ...`；retention：`it is instrumental here, so her lips stay closed.`
+  - non_diegetic_music 写乐器和 `no singing voice`；overall_soundscape 不写她的歌声。
+  - 动作给一个具体的事：闭嘴微笑、慢慢呼吸、闭眼再睁开、看远处。
+- **唱歌段第一句前还有几秒纯音乐**：写 `From 00:00.0 to 00:02.1 <Audio 1> is purely instrumental, with no singing voice at all, so she is only listening ...`，配合上面的拆段用。
+- **"不要什么"不起作用。** H3 是去掉 CFG 蒸馏过的，负面提示词无效；正面提示词里写 `no shine, no oil, no gloss` 也一样。要什么就正面写：`She wears no makeup: her face looks bare and natural, like in a candid documentary photograph, with visible pores ...`
+- **参考图不要做局部修图**（去油、局部调色）。修过的图把黄边和背景橙色偏色带进了整条视频，原图没有。参考图有问题就重新出图。
+- **画面出现黄斑 / 偏色：先查参考图，再怀疑种子。**
+- **种子：对比测试才固定种子（只改一个变量），正式出片用随机种子。**
+- **油光主要来自参考图和模型本身，不是提示词。** 光线写成柔和、固定的散射光：`Soft, diffused afternoon light through a thin high haze falls evenly on her, with gentle, low contrast; the light stays exactly the same from start to end`。
+
 ## 11. 跑之前的工作习惯
 - 先只跑第 1 段（Loop 的 `stop_after = 1`），满意后改回 0，第 1 段从缓存取。
 - 某几段坏了不用整片重跑：`rerun_segments` 填 `8-10, 13-14`（从 1 数），开头接上一段、结尾锁到下一段旧开头，其余从缓存取（`resume_from_cache` 要开）。
@@ -129,6 +142,28 @@ non_diegetic_music:
 1. 块上方一行标注（**不粘进提示词框**）：`Shot N — 长度 f / 秒 s · overlapIn X（新内容 Y s）· 硬切/续接 · 素材与标签对应：<Picture 1>=… · 锁定音频 offset …`
 2. 下面是可直接粘贴的完整提示词（六段式或 base 格式）。
 最后给一行合计：shot 数、生成总帧数、成片新内容总时长。
+
+## 12b. 可导入的计划文件（H3MD v0.2.0 起）
+提示词之后，再把整个计划写成**一个** JSON 代码块，用户存成 `<名字>.json`，在导演台点 **Import plan…** 一键导入，不用一段段复制粘贴。格式见仓库 `docs/plan_format.md`：
+
+```json
+{
+  "version": 1, "fps": 24, "width": 704, "height": 1280, "globalPrompt": "",
+  "media": {"images": [{"id": "eve", "file": "eve.png"}], "videos": [],
+            "audios": [{"id": "song", "file": "song.mp3"}]},
+  "segments": [
+    {"length": 294, "overlapIn": 0, "images": ["eve"],
+     "audios": [{"id": "song", "mode": "locked", "offset": 0.0}], "prompt": "Duration: 12.25 s (294 frames).\n\nsubject_definitions: ..."},
+    {"length": 362, "overlapIn": 39, "images": ["eve"],
+     "audios": [{"id": "song", "mode": "locked", "offset": 10.625}], "prompt": "Duration: 15.08 s (362 frames).\n\n..."}
+  ]
+}
+```
+- `file` 是用户在 ComfyUI `input/` 文件夹里（或将要上传）的文件名；`id` 是分镜里用的短名字。
+- `length` 是 5+17n；`overlapIn` 第一段和硬切写 0，续接写 39。
+- 锁定的歌：`offset` = 上一段 offset +（上一段长度 − 本段 overlapIn）/ 24。
+- `prompt` 是这一段完整的提示词（换行写成 `\n`），和要粘贴的内容一字不差。
+- 必须是合法 JSON（双引号、不加注释、末尾不留逗号）。导演台发现问题（长度、重叠、标签没有对应素材、缺文件）会逐条列出来，不会替你改。
 
 ## 13. 输出前自查
 - [ ] 确实是 H3MD 任务（不是就改用 `h3-prompt-writing`）。
@@ -143,3 +178,5 @@ non_diegetic_music:
 - [ ] 每个镜头都写了构图、人物位置、环境光线、动作、运镜和声音；对白歌词在 `<d>` 里，保留原语言；不知道歌词就写不唱。
 - [ ] 只在中景、近景唱歌；远景写明不唱；脸部特写照片只给中景和近景。
 - [ ] 近处有大片地面时机位固定；没有 slowly 类词；参考图横竖和成片一致。
+- [ ] 前奏 / 间奏 / 尾奏是单独的段，提示词里没有任何"唱"的意思；没有"no X"这类负面写法；参考图是原图，没有做过局部修图。
+- [ ] 用户要导入时：给了一个合法的计划 JSON，长度、重叠、offset 和提示词与上面各段一致。

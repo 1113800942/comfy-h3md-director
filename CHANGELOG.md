@@ -2,6 +2,45 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.2.0] — 2026-11-02 (in testing)
+### Save and share a plan / 保存和分享计划
+* Director: a new row above the plan header — **Import plan…** (left), **Export plan + media** / **Export plan (no media)**
+  (right); shown on an empty Director too (exports greyed: "Nothing to export yet").
+  导演台计划栏上方新增一行：左边 Import plan…，右边两个导出按钮；空白导演台也显示（导出变灰）。
+* Export: one plain `.zip` — `manifest.json` (size, shots, seconds, seed, media list, models the active loaders name),
+  `plan.json`, `workflow.json` (all node settings), `settings.json` (readable), `thumbnail.jpg` (first frame of the
+  newest finished video), and with media: pictures, songs (reference videos over 200 MB only when ticked). Never:
+  finished videos, caches, models, RefMods. 导出普通 zip：清单、计划、整张工作流、可读参数、缩略图，带素材时加照片和歌；
+  不放成片、缓存、模型、RefMod。
+* Import: `.zip` or a bare plan `.json` (e.g. written by an agent with the prompt skill). Media to
+  `input/H3MD_plans/<name>/` (never overwritten), paths rewritten. **Plan only** / **Plan + all settings** (opens the
+  saved workflow through ComfyUI's own loader: missing nodes red, missing models → download dialog). Problems are listed,
+  not fixed silently. Zip members outside `media/` + the fixed files are ignored (no `..` paths).
+  导入 zip 或智能体写的计划 json；素材放 input/H3MD_plans/<名字>/；两种导入方式；问题逐条列出不自动改；只解规定的文件。
+* `docs/plan_format.md`; prompt skill section 12b (write an importable plan `.json`) and 10c (instrumental segments,
+  "no X" does nothing, don't retouch reference photos, fixed seeds only for A/B).
+  新增格式说明；提示词 skill 加 12b（输出可导入的计划 json）和 10c（3 分钟一镜到底的经验）。
+
+### Long-video quality / 长视频画质
+* `hires_anchor` (last widget of H3MD Loop Options, default 0 = off): one continuous scene only, with `lowres_anchor`.
+  The high-res result of each segment pins the next segment's high-res start, so it can drift too; after each
+  continued segment the NEW high-res latent steps (not the kept overlap, not a rerun tail lock) get their 24 channels'
+  mean / spread pulled back to the shot's first segment, before decode and before the next segment continues.
+  Measured (same seed as the 3-minute take, segments 1–5): channel statistics locked exactly; colour shift 0.29 -> 0.13,
+  sharpness −10.6 % -> −7.6 %, saturation unchanged (+3.7 % -> +3.6 %) — a small gain, so it stays off by default.
+  高清锚定（Loop Options 最后一个，默认关）：续接段新生成的高清 latent 在解码前拉回本镜头第一段。实测前 5 段：
+  色差 0.29 → 0.13，锐度 −10.6% → −7.6%，饱和度不变；效果小，默认关。
+* `tools/drift_correct.py`: after the run, pulls every segment of a finished long take back to segment 1 —
+  saturation (colour gain around each pixel's brightness and the segment's own colour cast, so the tint does not move)
+  and sharpness (light unsharp mask on brightness, capped), solved per segment from `drift_report`'s measures, easing in
+  over 2 s after each seam; original audio copied. Measured on the 3-minute take: saturation +8.4 % -> −0.2 %,
+  sharpness −18.0 % -> +1.3 %, brightness / contrast unchanged, colour shift ≤ 0.6. One continuous scene only.
+  成片后校正脚本：按段把饱和度和锐度拉回第 1 段，接缝后 2 秒渐变，保留原音轨。3 分钟长镜头实测：饱和度 +8.4% → −0.2%，
+  锐度 −18.0% → +1.3%。只用于单一场景。
+* Why both: the latent statistics were already locked (low-res and high-res) and the picture still got +3.6 %
+  saturation over 5 segments, so the rest of the drift is not a per-channel shift; it is fixed in pixel space.
+  为什么两个都做：低清、高清 latent 的通道统计都已锁住，画面饱和度仍涨 3.6%，剩下的漂移不是通道整体偏移，只能在像素层面校正。
+
 ## [0.1.2] — 2026-11-02
 No node code changes: docs, examples and tools since 0.1.1. / 节点代码没有改动：0.1.1 之后补充的文档、示例和工具。
 

@@ -436,6 +436,15 @@ function injectStyles() {
   document.head.append(h("style", { id: "h3md-editor-css" }, css + PERF_CSS));
 }
 
+function mb(b) { b = Number(b || 0); return b >= 1024 ** 3 ? `${(b / 1024 ** 3).toFixed(1)} GB` : b >= 1024 ** 2 ? `${(b / 1024 ** 2).toFixed(1)} MB` : `${Math.max(1, Math.round(b / 1024))} KB`; }
+function injectPlanIOStyles() {
+  if (document.getElementById("h3md-planio-css")) return;
+  document.head.append(h("style", { id: "h3md-planio-css" },
+    ".h3md-planio{display:flex;gap:6px;align-items:center;flex-wrap:nowrap;white-space:nowrap;overflow:hidden;margin-bottom:4px;padding-bottom:4px;border-bottom:1px solid rgba(150,178,215,.18)}" +
+    ".h3md-planio .sp{flex:1}.h3md-planio button:disabled{opacity:.45;cursor:not-allowed}.h3md-planio-msg{overflow:hidden;text-overflow:ellipsis;min-width:0}" +
+    ".h3md-importdlg .ln{white-space:normal}.h3md-importdlg button:disabled{opacity:.45;cursor:not-allowed}"));
+}
+
 // ------------------------------------------------------------------ editor
 class DirectorEditor {
   constructor(node) {
@@ -657,12 +666,14 @@ class DirectorEditor {
     const scroll = this.root.scrollTop;
     const active = document.activeElement && this.root.contains(document.activeElement) ? document.activeElement.dataset.key : null;
     this.root.replaceChildren();
-    this.root.append(this.renderToolbar());
+    this.root.append(this.renderPlanIO(), this.renderToolbar());
+    if (this.importDlg) this.root.append(this.renderImportDlg());
     if (!this.plan) {
       // broken or empty plan_json: a read-only error line + New plan (no raw JSON editor)
       this.root.append(h("div", { class: "h3md-sec" },
         h("div", { "data-plan-error": this.parseError ? "1" : "0" }, this.parseError ? h("span", { class: "h3md-bad" }, `plan_json is invalid: ${String(this.parseError).replace(/^plan_json is not valid JSON\s*/, "").replace(/^\((.*)\)$/, "$1")}`) : "plan_json is empty."),
-        h("div", { class: "h3md-row" }, h("button", { onclick: () => { this.plan = M.newPlan(); this.commit(); } }, "New plan 新建计划"))));
+        h("div", { class: "h3md-row" }, h("button", { onclick: () => { this.plan = M.newPlan(); this.commit(); } }, "New plan 新建计划"),
+          h("span", { class: "h3md-small" }, "or click Import plan… to start from a saved plan 或者点 Import plan… 从保存的计划开始"))));
       return;
     }
     this.val = this.validation();
@@ -690,6 +701,150 @@ class DirectorEditor {
       h("span", { class: "h3md-small", "data-refmod-fps": "1", style: { whiteSpace: "pre" }, title: "H3 uses 24 fps (fixed, not editable)" }, "refmod reference fps  24"),
       this.plan ? h("span", { class: "h3md-small", "data-as-budget": "1" }) : null,
       h("span", { class: "sp" }));
+  }
+
+  // ---------------------------------------------------------------- v0.2.0 plan export / import (row above the plan header)
+  renderPlanIO() {
+    injectPlanIOStyles();
+    const can = !!(this.plan && (this.plan.segments || []).length);
+    const tip = can ? "" : "Nothing to export yet";
+    const st = this.planIO || (this.planIO = { busy: false, msg: "", size: null, big: [], withBig: false });
+    const file = h("input", { type: "file", accept: ".zip,.json,application/zip,application/json", style: { display: "none" },
+      onchange: (e) => { const f = e.target.files && e.target.files[0]; e.target.value = ""; if (f) this.importPlanFile(f); } });
+    const bigBox = st.big.length ? h("label", { class: "h3md-small", title: st.big.map((b) => `${b.file} · ${mb(b.bytes)}`).join("\n") },
+      h("input", { type: "checkbox", checked: st.withBig, onchange: (e) => { st.withBig = e.target.checked; this.refreshExportSize(); } }),
+      ` incl. big ref video${st.big.length > 1 ? "s" : ""}`) : null;
+    if (can && st.size === null && !st.sizing) this.refreshExportSize();
+    return h("div", { class: "h3md-planio", "data-planio": "1" },
+      file,
+      h("button", { disabled: st.busy, title: "Open a saved H3MD plan (.zip) or a plan .json written by an agent with the H3MD prompt skill",
+        onclick: () => file.click() }, "Import plan…"),
+      h("span", { class: "h3md-small h3md-planio-msg", "data-planio-msg": "1" }, st.msg || ""),
+      h("span", { class: "sp" }),
+      can && st.size !== null ? h("span", { class: "h3md-small", title: "pictures + songs" + (st.withBig ? " + big reference videos" : "") }, `media ${mb(st.size)}`) : null,
+      bigBox,
+      h("button", { disabled: !can || st.busy, title: tip || "Plan, all node settings and the pictures / songs it uses, in one .zip (for yourself)",
+        onclick: () => this.exportPlan(true) }, "Export plan + media"),
+      h("button", { disabled: !can || st.busy, title: tip || "Plan and all node settings, no pictures / songs (to share)",
+        onclick: () => this.exportPlan(false) }, "Export plan (no media)"));
+  }
+  setPlanIOMsg(msg, bad = false) {
+    const st = this.planIO || (this.planIO = { busy: false, msg: "", size: null, big: [], withBig: false });
+    st.msg = msg;
+    const el = this.root.querySelector("[data-planio-msg]");
+    if (el) { el.textContent = msg; el.classList.toggle("h3md-bad", !!bad); }
+  }
+  async refreshExportSize() {
+    const st = this.planIO;
+    if (!this.plan || !st) return;
+    st.sizing = true;
+    try {
+      const r = await api.fetchApi("/h3md/plan/export_size", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan_json: M.serializePlan(this.plan), include_big_videos: st.withBig }) });
+      const j = await r.json();
+      if (r.ok) { st.size = j.media_bytes || 0; st.big = j.big_videos || []; }
+    } catch { /* route missing (old backend): leave the size empty */ }
+    st.sizing = false;
+    const row = this.root.querySelector("[data-planio]");
+    if (row) row.replaceWith(this.renderPlanIO());
+  }
+  savePrefixes() {
+    // filename prefixes of every save node (also inside subgraphs) -> the backend picks the newest finished video for the thumbnail
+    const out = new Set();
+    const walk = (graph, depth) => {
+      for (const n of (graph && (graph._nodes || graph.nodes)) || []) {
+        for (const w of n.widgets || []) if (/^(filename_?)?prefix$/i.test(String(w.name || "")) && typeof w.value === "string" && w.value) out.add(w.value);
+        if (n.subgraph && depth < 4) walk(n.subgraph, depth + 1);
+      }
+    };
+    try { walk(app.graph, 0); } catch { /* ignore */ }
+    return [...out];
+  }
+  async exportPlan(withMedia) {
+    const st = this.planIO;
+    if (!this.plan || st.busy) return;
+    st.busy = true; this.setPlanIOMsg("exporting…");
+    try {
+      const wf = (await app.graphToPrompt()).workflow;
+      const wfName = String(app.extensionManager?.workflow?.activeWorkflow?.filename || app.extensionManager?.workflow?.activeWorkflow?.path || "H3MD plan")
+        .split("/").pop().replace(/\.json$/i, "");
+      const r = await api.fetchApi("/h3md/plan/export", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan_json: M.serializePlan(this.plan), workflow: wf, with_media: withMedia,
+          include_big_videos: !!st.withBig, name: wfName, prefixes: this.savePrefixes() }) });
+      if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || `HTTP ${r.status}`); }
+      const blob = await r.blob();
+      const cd = r.headers.get("Content-Disposition") || "";
+      const m = /filename\*=UTF-8''([^;]+)/.exec(cd);
+      const name = m ? decodeURIComponent(m[1]) : `${wfName}.zip`;
+      const a = h("a", { href: URL.createObjectURL(blob), download: name });
+      document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+      this.setPlanIOMsg(`saved ${name} · ${mb(blob.size)}`);
+    } catch (e) {
+      this.setPlanIOMsg(`export failed: ${e.message || e}`, true);
+    } finally {
+      st.busy = false;
+    }
+  }
+  async importPlanFile(f) {
+    const st = this.planIO;
+    st.busy = true; this.setPlanIOMsg(`reading ${f.name}…`);
+    try {
+      const fd = new FormData();
+      fd.append("file", f, f.name);
+      const r = await api.fetchApi("/h3md/plan/import", { method: "POST", body: fd });
+      const j = await r.json();
+      if (!r.ok || !j.ok) throw new Error(j.error || `HTTP ${r.status}`);
+      this.importDlg = j;
+      this.setPlanIOMsg("");
+    } catch (e) {
+      this.setPlanIOMsg(`import failed: ${e.message || e}`, true);
+    } finally {
+      st.busy = false;
+      this.render();
+    }
+  }
+  renderImportDlg() {
+    const j = this.importDlg, man = j.manifest || {};
+    let plan = null;
+    try { plan = JSON.parse(j.plan_json); } catch { /* shown as a problem below */ }
+    const lay = plan ? M.layout(M.ensureShape(JSON.parse(j.plan_json))) : [];
+    const frames = lay.length ? lay[lay.length - 1].endFrame : 0;
+    const close = () => { this.importDlg = null; this.render(); };
+    const usePlan = () => {
+      this.plan = RM.ensure(M.ensureShape(JSON.parse(j.plan_json)));
+      this.importDlg = null;
+      this.commit();
+      this.probeAll();
+      this.setPlanIOMsg(`imported plan '${j.name}'`);
+    };
+    const useAll = async () => {
+      const wf = JSON.parse(JSON.stringify(j.workflow));
+      const nodes = [...(wf.nodes || []), ...((wf.definitions && wf.definitions.subgraphs) || []).flatMap((s) => s.nodes || [])];
+      for (const n of nodes) if (String(n.type || "").startsWith("H3MDDirector") && Array.isArray(n.widgets_values)) n.widgets_values[0] = j.plan_json;
+      this.importDlg = null;
+      this.render();
+      // ComfyUI's own load: missing node packs show red, missing models open the usual download dialog
+      await app.loadGraphData(wf, true, true, `${j.name}.json`);
+    };
+    const probs = j.problems || [];
+    return h("div", { class: "h3md-pop h3md-importdlg", "data-import-dlg": "1", style: { top: "34px", left: "6px", right: "6px", maxHeight: "420px" } },
+      h("div", { class: "h3md-row one" }, h("b", {}, "Import H3MD plan"), h("span", { style: { flex: 1 } }), h("button", { onclick: close }, "✕")),
+      h("div", { class: "h3md-row", style: { alignItems: "flex-start", gap: "10px" } },
+        j.thumbnail ? h("img", { src: j.thumbnail, style: { maxWidth: "140px", maxHeight: "160px", borderRadius: "4px" } }) : null,
+        h("div", { class: "h3md-small", style: { lineHeight: "1.5" } },
+          h("div", {}, h("b", {}, j.name), j.kind === "json" ? " · plan .json" : ` · H3MD ${man.h3md_version || "?"}`),
+          h("div", {}, `${lay.length} shot(s) · ${fmtF(frames)}${plan && plan.width ? ` · ${plan.width}×${plan.height}` : ""}${man.seed != null ? ` · seed ${man.seed}` : ""}`),
+          j.folder ? h("div", {}, `media → input/${j.folder}/`) : h("div", {}, man.with_media === false ? "no media in this plan: upload your own pictures / songs" : ""),
+          man.models && man.models.length ? h("div", { title: man.models.map((m) => m.name).join("\n") }, `${man.models.length} model file(s) named in the workflow`) : null)),
+      probs.length ? h("div", { class: "hd h3md-bad" }, `${probs.length} problem(s) – nothing was changed, fix them after importing`) : h("div", { class: "h3md-ok h3md-small" }, "✓ no problems found"),
+      probs.map((p) => h("div", { class: "ln h3md-bad" }, "✗ " + p)),
+      h("div", { class: "h3md-row", style: { marginTop: "6px" } },
+        h("button", { disabled: !plan, title: "Replace this Director's plan; keep this workflow's other settings", onclick: usePlan }, "Plan only"),
+        h("button", { disabled: !plan || !j.workflow, title: j.workflow ? "Open the saved workflow (all node settings) with this plan in a new tab" : "this file has no workflow (plan .json)",
+          onclick: useAll }, "Plan + all settings"),
+        h("span", { style: { flex: 1 } }),
+        h("button", { onclick: close }, "Cancel")));
   }
 
   // plan check messages: the full report is the Director's plan_info output; the editor only shows a small

@@ -274,6 +274,40 @@ def low_res_prefix(vae, prev: dict, overlap: int, target_latent: dict, lowres_sc
     return z.to(device="cpu", dtype=v_target.dtype)
 
 
+def hires_anchor_step(final: dict, ref, continued: bool, overlap: int, strength: float, where: str = "",
+                      tail_frames: int = 0):
+    """H3MD hi-res anchor (v0.2.0).  A shot's first segment sets the reference (per-channel mean / std of its final
+    high-res video latent); every continued segment's NEW latent steps (not the kept overlap prefix) are pulled toward
+    it with LA.transform / LA.apply - the same correction lowres_anchor makes on the low-res result.  Because the
+    corrected final is what the next segment continues from, the error cannot pile up.  -> (final, ref, report|None)"""
+    try:
+        v, a = D._streams(final, "final latent")
+    except ValueError as exc:
+        LOG.warning("%s %s: hires_anchor skipped (%s)", _TAG, where, exc)
+        return final, ref, None
+    if not continued or ref is None:
+        if continued:
+            LOG.warning("%s %s: hires_anchor has no reference (the shot's first segment was not seen); not applied",
+                        _TAG, where)
+            return final, ref, None
+        return final, LA.stats(v), None
+    T = int(v.shape[2])
+    held = torch.zeros(T, dtype=torch.bool)
+    held[:min(T, D.video_tokens(int(overlap)))] = True
+    if tail_frames:  # H3MD rerun tail lock: the kept tail must stay exactly the next segment's head
+        held[max(0, T - D.video_tokens(int(tail_frames))):] = True
+    xf = LA.transform(v, held, ref, strength)
+    if xf is None:
+        return final, ref, None
+    v2 = LA.apply(v, xf)
+    LOG.info("%s %s: hi-res anchor: %d new latent steps pulled to the shot's first segment (strength %.2f, channel "
+             "mean shift %.3f std, spread ratio %.2f-%.2f)", _TAG, where, xf["report"]["new_steps"],
+             xf["report"]["strength"], xf["report"]["mean_shift"], *xf["report"]["std_ratio"])
+    out = dict(final)
+    out["samples"] = D._nested((v2, a))
+    return out, ref, xf["report"]
+
+
 def native_carry_prefix(prev_lowres, overlap: int, target_latent: dict, lowres_scale: float, where: str = ""):
     """Beta: overlap prefix for the low-res stage = tail of the previous segment's own low-res endpoint.
 
@@ -489,6 +523,16 @@ class H3MDLoopSampler:
             "should change.\n只用于单一场景的长视频（动作复刻、长镜头）：每个续接段低清跑完、放大前，把新画面 24 个通道"
             "的均值和幅度拉回本镜头第一段，低清接续数据也一起校正，颜色不会一段段越漂越深。0 = 关，1 = 全量。需要 "
             "continue_lowres_prefix = native_lowres_carry。场景本该变色的叙事视频不要开。"})
+        # H3MD high-res anchor (v0.2.0), appended LAST; 0 = off (old keys)
+        opt["hires_anchor"] = ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05, "tooltip":
+            "ONE continuous scene only, together with lowres_anchor. The high-res result of each segment pins the next "
+            "segment's high-res start, so a small colour / detail shift there also piles up (measured on a 3-minute take: "
+            "saturation +8 %, sharpness -15 % with lowres_anchor alone). After each continued segment, the new high-res "
+            "latent frames (not the kept overlap) get their 24 channels' mean and spread pulled back to the first segment "
+            "of the shot, before decode and before the next segment continues from it. 0 = off, 1 = full.\n"
+            "只用于单一场景的长视频，和 lowres_anchor 一起用：每个续接段的高清结果会钉住下一段的高清开头，细小的颜色、"
+            "清晰度变化也会一段段累积（3 分钟长镜头实测：只开 lowres_anchor 时饱和度 +8%、锐度 -15%）。开了以后，每个续接段"
+            "新生成的高清 latent（不含重叠部分）在解码前、下一段接续前，把 24 个通道的均值和幅度拉回本镜头第一段。0 = 关，1 = 全量。"})
         # hidden 'prompt' (no widget / no slot): only to warn when 'images' (now a placeholder) is used downstream
         return {"required": req, "optional": opt, "hidden": {"unique_id": "UNIQUE_ID", "prompt": "PROMPT"}}
 
@@ -537,6 +581,7 @@ class H3MDLoopSampler:
         self._vram_release = str(sampler_kwargs.pop("vram_release", "deep") or "deep")      # H3MD memguard (not in keys)
         guard = str(sampler_kwargs.pop("slow_step_guard", "stop") or "stop")                 # H3MD memguard (not in keys)
         self._anchor = max(0.0, min(1.0, float(sampler_kwargs.pop("lowres_anchor", 0.0) or 0.0)))  # H3MD low-res anchor
+        self._hires_anchor = max(0.0, min(1.0, float(sampler_kwargs.pop("hires_anchor", 0.0) or 0.0)))  # H3MD hi-res anchor
         for gone in ("drift_handoff_match", "drift_seam_anchor", "drift_detail"):  # removed 2026-10-30 (ineffective)
             if sampler_kwargs.pop(gone, None):
                 LOG.warning("%s '%s' was removed (it did not stop the drift): use lowres_anchor", _TAG, gone)
@@ -562,6 +607,8 @@ class H3MDLoopSampler:
                     "engine": S.ENGINE}
         if self._anchor > 0:  # H3MD low-res anchor: continued-segment key only (0 = old keys unchanged)
             settings["continue"] = list(settings["continue"]) + [{"lowres_anchor": self._anchor}]
+        if self._hires_anchor > 0:  # H3MD hi-res anchor: continued-segment key only (0 = old keys unchanged)
+            settings["continue"] = list(settings["continue"]) + [{"hires_anchor": self._hires_anchor}]
         if self._ctx_clips:  # H3MD-Exp seam_decode_context: continued-segment key only (0 = old keys unchanged)
             settings["continue"] = list(settings["continue"]) + [{"seam_decode_context": self._ctx_clips}]
         if SEAM.cache_settings(self._post) is not None:  # H3MD seam/refwindow hook
@@ -630,6 +677,8 @@ class H3MDLoopSampler:
         rerun = sorted(set(rerun or []))
         anchor_strength = float(getattr(self, "_anchor", 0.0) or 0.0) if beta else 0.0  # H3MD low-res anchor
         anchor_ref = None   # per-channel stats of the current shot's first segment (low-res result)
+        hires_strength = float(getattr(self, "_hires_anchor", 0.0) or 0.0)  # H3MD hi-res anchor
+        hires_ref = None    # per-channel stats of the current shot's first segment (high-res final latent)
         tail_from = {}
         archive = None
         if rerun:  # H3MD rerun (2026-10-30): check the cache before anything is rendered
@@ -702,6 +751,8 @@ class H3MDLoopSampler:
                 prev_low = cache.load_lowres(k) if beta else None
                 if anchor_strength > 0 and not (seg["overlapIn"] > 0 and step > 0):  # H3MD low-res anchor: shot start
                     anchor_ref = LA.stats(prev_low) if isinstance(prev_low, torch.Tensor) else None
+                if hires_strength > 0 and not (seg["overlapIn"] > 0 and step > 0):  # H3MD hi-res anchor: shot start
+                    hires_ref = LA.stats(D._streams(final, "cached latent")[0])
                 if self._seam.active:  # H3MD seam hook
                     self._seam.remember(cache.frames(k))
                 LOG.info("%s %s: resumed from cache (%d frames)%s", _TAG, where, man["frames"],
@@ -812,6 +863,11 @@ class H3MDLoopSampler:
                 del low_model, dctl
             out = res["result"][0] if isinstance(res, dict) else res[0]
             final = _to_cpu(out)  # only 'samples' ever leaves the sampler; this is the handoff
+            if hires_strength > 0:  # H3MD hi-res anchor (v0.2.0)
+                final, hires_ref, hinfo = hires_anchor_step(final, hires_ref, continued, overlap, hires_strength, where,
+                                                          tail_ov if tail_lat is not None else 0)
+            else:
+                hinfo = None
             finals.append(final)
             ctx_prevs.append(prev if (continued and ctx_clips > 0) else None)  # H3MD-Exp
             trims.append(overlap if continued else 0)
@@ -820,6 +876,8 @@ class H3MDLoopSampler:
                            "overlapIn": overlap, "trim": trims[-1], "seed": seg_seed, "tiling": tiling})
             if getattr(sampler_node, "last_anchor", None) is not None:  # H3MD low-res anchor
                 report[-1]["lowres_anchor"] = sampler_node.last_anchor
+            if hinfo is not None:  # H3MD hi-res anchor
+                report[-1]["hires_anchor"] = hinfo
             if rerun and k in rerun:  # H3MD rerun
                 report[-1]["rerun"] = True
                 if tail_lat is not None:

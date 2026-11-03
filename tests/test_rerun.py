@@ -314,6 +314,25 @@ class LoopRerunTests(unittest.TestCase):
         self.assertEqual(len(FakeSampler.calls), 2)
         self.assertTrue(all(c["anchor"] is None for c in FakeSampler.calls))
 
+    def test_hires_anchor_option(self):  # v0.2.0
+        plan = make_plan(3)
+        self.run_loop(plan)
+        lat0 = self.latent(0)[0]
+        FakeSampler.calls = []
+        _, out = self.run_loop(plan, drift={"hires_anchor": 1.0})
+        self.assertEqual(len(FakeSampler.calls), 2)              # segment 1 from the cache (reference); 2-3 re-render
+        self.assertIn("hires_anchor", out[4])
+        tt = D.video_tokens(OV)
+        v1, v2 = self.latent(1)[0], self.latent(2)[0]
+        self.assertTrue(torch.equal(v1[:, :, :tt], lat0[:, :, -tt:]))   # kept overlap = corrected previous tail
+        self.assertTrue(torch.equal(v2[:, :, :tt], v1[:, :, -tt:]))
+        ref = torch.tensor(LA.stats(lat0)["mean"])
+        got = v1[:, :, tt:].float().mean(dim=(0, 2, 3, 4))
+        self.assertLess(float((got - ref).abs().max()), 1e-3)
+        FakeSampler.calls = []                                   # off again: old keys -> the old cache is reused
+        self.run_loop(plan)
+        self.assertEqual(len(FakeSampler.calls), 2)
+
     def test_options_removed(self):
         for gone in ("drift_handoff_match", "drift_seam_anchor", "drift_detail"):
             self.assertNotIn(gone, LS.option_defaults())

@@ -141,6 +141,25 @@ hybrid b25-49 int8 底模、32B int8 文本编码器、4 步加速 LoRA、两段
 </details>
 
 <details>
+<summary><b>保存和分享计划（Export plan / Import plan…）</b></summary>
+
+导演台计划栏上方单独一行（空白导演台也显示）：
+* **Export plan + media**：一个普通 `.zip`，里面有计划、整张工作流（所有节点设置：LoRA 和权重、种子、Loop Options、
+  保存设置）、一份可读的参数清单、最新成片的第 1 帧缩略图，以及照片和歌。自己用：跑出满意效果后存下来，下次打开换张照片、
+  改改时长再跑。超过 200 MB 的参考视频要勾选 "incl. big ref video" 才放进去。
+* **Export plan (no media)**：同样的内容，不带照片和歌，用来分享配方，不外传别人的照片和音乐。
+* **Import plan…**：打开上面导出的 `.zip`，或者智能体按 [H3MD 提示词 skill](skills/h3md-prompt/SKILL.zh-CN.md)
+  （12b 节）写出来的计划 `.json`。素材放进 `input/H3MD_plans/<名字>/`（不会覆盖已有文件）。**Plan only** 只替换当前
+  导演台的计划；**Plan + all settings** 用 ComfyUI 正常的加载流程在新标签页打开保存的工作流，缺的节点照常显示红色，
+  缺的模型照常弹下载窗口。发现的问题（长度不是 5 + 17n、重叠不对、`<Picture N>` 没有对应图片、缺文件）逐条列出，
+  不会悄悄替你改。
+
+包里不放：成片视频、缓存、模型、RefMod 文件（在 `manifest.json` 里列出）。格式说明：
+[docs/plan_format.md](docs/plan_format.md)。
+
+</details>
+
+<details>
 <summary><b>只重跑有问题的段（rerun_segments）</b></summary>
 
 片子跑完后如果某几段有问题（跳变、穿帮），不用整片重做：
@@ -159,9 +178,14 @@ hybrid b25-49 int8 底模、32B int8 文本编码器、4 步加速 LoRA、两段
 
 这是 H3 一段接一段续写的共性问题（各家续写节点都有），只能压住、不能根除。实测 16 段：饱和度 0.32→0.46，锐度明显上升。
 颜色漂移在**低清阶段**就产生了（模型续写自己的结果），表现为 24 个 latent 通道的均值和幅度慢慢偏移。
-* 单一场景的长视频（动作复刻、长镜头）：`H3MD Loop Options` 最后一项 `lowres_anchor` 设 1。每个续接段低清跑完、放大前，
+* 单一场景的长视频（动作复刻、长镜头）：`H3MD Loop Options` 末尾的 `lowres_anchor` 设 1。每个续接段低清跑完、放大前，
   新画面的通道统计拉回本镜头第一段，低清接续数据也一起校正，偏差不会传到下一段。需要 `continue_lowres_prefix = native_lowres_carry`。
   场景本该变色的叙事视频不要开（硬切后会以新镜头的第一段为准）。
+* v0.2.0：`hires_anchor`（现在是 `H3MD Loop Options` 最后一项）对高清结果做同样的校正（下一段也从高清结果接续）。单独效果小
+  （同一种子前 5 段：色差 0.29 → 0.13，锐度 −10.6% → −7.6%，饱和度不变），所以默认关。
+* v0.2.0：[`tools/drift_correct.py`](tools/drift_correct.py) 在跑完之后、在像素层面把剩下的漂移拉回来：每段的饱和度和锐度
+  校正到第 1 段（接缝后 2 秒渐变，色调和亮度不动，音轨原样复制）。下面这条 3 分钟长镜头：饱和度 +8.4% → −0.2%，
+  锐度 −18.0% → +1.3%。用法：`python tools/drift_correct.py video.mp4 --segments 294,362,362 --overlap 39`
 * 其他建议：每段都放参考照片锚定身份和颜色；参考照片不要太浓太锐；提示词少写打光形容词（glowing、radiant 等）；
   特别长的片子在自然切点用参考照片重新起。
 
