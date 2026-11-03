@@ -2,6 +2,13 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.3.2] — 2026-11-03
+* Removed `H3MD hard cut example.json`: with the Eve music video every example's shots are hard cuts already; for a
+  short test type `1-2` in the Control Panel's "which segments" box. Examples now: `H3MD Director simple.json`
+  (start here) and `H3MD Director.json` (full, flat). 删掉硬切示例：现在只留清爽版和完整版。
+* Eve demo plan pack: exported from 0.3.1 with "which segments" = `1` (first segment only; Clear = whole video) and a
+  thumbnail. 演示包默认只跑第一段，带缩略图。
+
 ## [0.3.1] — 2026-11-03
 * Control Panel: removed the size drop-down (it only filled in width / height, which are typed directly; the size
   reference note on the canvas stays). 总控台去掉"宽高快选"下拉，宽高直接填，画布上的尺寸参考表保留。
