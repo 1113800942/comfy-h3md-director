@@ -123,6 +123,16 @@ def _vosr2_class():
     return cls
 
 
+def _vosr2_original():
+    """v0.3: the original ComfyUI-VOSR2 (github.com/ylchen333/ComfyUI-VOSR2) 'VOSR 2.0 Upscale' node, or None."""
+    return _registry().get("VOSR2Upscale")
+
+
+def is_original_vosr2(model) -> bool:
+    """A model from the original 'VOSR 2.0 Model Loader' (VOSR2_MODEL), not the TE-Speed one."""
+    return type(model).__name__ == "VOSR2Model" or hasattr(model, "denoise_one_step")
+
+
 def _seedvr2_class():
     cls = _registry().get("TESpeedSeedVR2Integrated")
     if cls is None:
@@ -893,6 +903,13 @@ class FaceRefiner:
             self.sv_kw = _seedvr2_defaults(sv_cls)
             self.sv_kw["attention_backend"] = "comfy_auto"  # TE-Speed sage path asserts on fp32 with no fallback
             self.vosr2 = None
+        elif is_original_vosr2(vosr2_model):   # v0.3: original ComfyUI-VOSR2 node (no TE-Speed build needed)
+            orig = _vosr2_original()
+            if orig is None:
+                raise RuntimeError(f"{_TAG} the VOSR2 model comes from ComfyUI-VOSR2, but its 'VOSR 2.0 Upscale' node "
+                                   "is not loaded")
+            self.vosr2 = None
+            self.orig = orig
         else:
             self.vosr2 = _vosr2_class()()
         self.stitch = _stitch_class()()
@@ -909,7 +926,12 @@ class FaceRefiner:
             S.check_interrupt()
             part = crops[k:k + size]
             try:
-                if self.vosr2 is None:
+                if getattr(self, "orig", None) is not None:
+                    # original node: scale 1 (the crop size), its own tiling only when a crop is above the 512 px it
+                    # was trained at; wavelet colour alignment as the TE-Speed default
+                    tile = 512 if max(self.cw, self.ch) > 512 else 0
+                    r = _unwrap_image(self.orig.execute(self.model, part, 1, self.seed, "wavelet", tile, 32, 0, 32))
+                elif self.vosr2 is None:
                     r = _unwrap_image(self.sv_fn(model=self.model, vae=self.seedvr2_vae, images=part,
                                                  max_long_edge=max(self.cw, self.ch), seed=self.seed, **self.sv_kw))
                 else:
@@ -1231,8 +1253,9 @@ class H3MDSaveVideoFaceRefineInterp:
         req["vosr2_seed"] = ("INT", {"default": 42, "min": 0, "max": 0xFFFFFFFFFFFFFFFF, "tooltip":
                              "VOSR2 / SeedVR2 seed, the same for every chunk (scale is fixed at 1)."})
         opt = {
-            "vosr2_model": ("TE_SPEED_VOSR2_MODEL", {"lazy": True, "tooltip": "TE-Speed VOSR2 model (its model "
-                                                                "loader), used when refine_model = VOSR2."}),
+            "vosr2_model": ("TE_SPEED_VOSR2_MODEL,VOSR2_MODEL", {"lazy": True, "tooltip": "VOSR2 model, used when "
+                            "refine_model = VOSR2: 'VOSR 2.0 Model Loader' of the original ComfyUI-VOSR2 (recommended) "
+                            "or the TE-Speed VOSR2 loader."}),
             "vosr2_settings": ("TE_SPEED_VOSR2_SETTINGS", {"lazy": True, "tooltip": "Optional TE-Speed VOSR2 settings."}),
             "seedvr2_model": ("MODEL", {"lazy": True, "tooltip": "TE-Speed SeedVR2 Loader 'model', used when "
                                         "refine_model = SeedVR2. Its other parameters run at that node's own defaults."}),
@@ -1329,13 +1352,13 @@ class H3MDSaveVideoFaceRefineInterp:
             vosr2_model = vosr2_settings = None
         else:
             if vosr2_model is None:
-                raise ValueError(f"{_TAG} refine_model=VOSR2 needs vosr2_model (TE-Speed VOSR2 model loader)")
+                raise ValueError(f"{_TAG} refine_model=VOSR2 needs vosr2_model ('VOSR 2.0 Model Loader' of ComfyUI-VOSR2)")
             seedvr2_model = seedvr2_vae = None
         fr = _fr_module()
         _stitch_class()
         if seedvr2_model is not None:
             _seedvr2_class()
-        else:
+        elif not is_original_vosr2(vosr2_model):
             _vosr2_class()
         info = segments
         cache_dir = os.path.abspath(info["cache_dir"])
