@@ -2,7 +2,15 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
-## [0.2.0] — 2026-11-02 (in testing)
+## [0.2.0] — 2026-11-02
+### Example workflows / 示例工作流
+* Full, lite and hard-cut examples: LoRA mix set to the one measured against oily skin — FL2V turbo 4-step **v1.2** 768p
+  (was v1.3, matching the README model table); low-res: turbo 0.5, Motion Repair 0.75, speed slider 3, cinematic 0.5,
+  VBVR 1, Enhancer 0.55; high-res: turbo 0.7, realism-people 0.6, Motion Repair 0.25, cinematic 0.2, lms 0.2, VBVR 0.5
+  (lite: Enhancer 0.55, realism-people 0.6). High-res LoRA note: regular row now "lms-0.2, realism people-0.6".
+  示例工作流换成今天实测去油光的 LoRA 组合（FL2V turbo 改回 v1.2 768p，Enhancer 0.55，realism-people 0.6，电影感两边都开），
+  高清 LoRA 注释 regular 一行同步修改。
+
 ### Save and share a plan / 保存和分享计划
 * Director: a new row above the plan header — **Import plan…** (left), **Export plan + media** / **Export plan (no media)**
   (right); shown on an empty Director too (exports greyed: "Nothing to export yet").

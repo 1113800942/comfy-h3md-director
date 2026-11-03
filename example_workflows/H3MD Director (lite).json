@@ -1503,7 +1503,7 @@
     "Node name for S&R": "H3MDLowVRAMLoraLoader"
    },
    "widgets_values": [
-    "minimax_h3_fl2v_turbo_4step_v1.3_768p_comfyui_bf16.safetensors",
+    "minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors",
     1,
     "replace_like_comfy",
     8192
@@ -2600,7 +2600,7 @@
    "outputs": [],
    "properties": {},
    "widgets_values": [
-    "high res Lora 推荐\n\nregular: turbo-0.7, motion repair-0.25, cinematic-0.2, VBVR-0.5, realism people-0.7 reduce oil skin. \nhigh motion: turbo-0.7, realism people-0.7 reduce oil skin, motion repair-0.25, cinematic-0.2, VBVR-0.5, fightflow-0.25 or weapon_combat-0.6, lms-0.2.    \ncopycat: turbo-0.7, realism people-0.5 reduce oil skin, lms-0.2. \n无审核那点事自己琢磨"
+    "high res Lora 推荐\n\nregular: turbo-0.7, motion repair-0.25, cinematic-0.2, VBVR-0.5, lms-0.2, realism people-0.6 reduce oil skin. \nhigh motion: turbo-0.7, realism people-0.7 reduce oil skin, motion repair-0.25, cinematic-0.2, VBVR-0.5, fightflow-0.25 or weapon_combat-0.6, lms-0.2.    \ncopycat: turbo-0.7, realism people-0.5 reduce oil skin, lms-0.2. \n无审核那点事自己琢磨"
    ],
    "widgets_values_named": {
     "text": "high res Lora 推荐\n\nregular: turbo-0.7, motion repair-0.25, cinematic-0.2, VBVR-0.5, realism people-0.7 reduce oil skin. \nhigh motion: turbo-0.7, realism people-0.7 reduce oil skin, motion repair-0.25, cinematic-0.2, VBVR-0.5, fightflow-0.25 or weapon_combat-0.6, lms-0.2.    \ncopycat: turbo-0.7, realism people-0.5 reduce oil skin, lms-0.2. \n无审核那点事自己琢磨"
@@ -3678,7 +3678,7 @@
    },
    "widgets_values": [
     "MiniMaxH3_Enhancer_0.5-1.0_3432130_epoch_10.safetensors",
-    0.5
+    0.55
    ],
    "widgets_values_named": {
     "lora_name": "MiniMaxH3_Enhancer_0.5-1.0_3432130_epoch_10.safetensors",
@@ -3806,7 +3806,7 @@
    },
    "widgets_values": [
     "h3-realism-people-r34l1sm-1.0 strong 0.6-0.8 light.safetensors",
-    0.5
+    0.6
    ],
    "widgets_values_named": {
     "lora_name": "h3-realism-people-r34l1sm-1.0 strong 0.6-0.8 light.safetensors",
