@@ -15,8 +15,8 @@ layout thumbnail, measured like tools/drift_report.py on a 360 px wide copy):
      (3-minute take: +0.65 % saturation per segment, residual < 1 %).  Moving content (a dancer, someone walking in)
      makes the values jump around instead.  A metric is corrected only when its trend is clear (>= 2 % by the end of
      the group) and the segments follow it (residual <= max(1.5 %, 35 % of the trend)); otherwise it is left alone.
-  3. CORRECTION.  Only the fitted trend is removed - never the segment-to-segment variation - so content changes
-     are not "fixed".  Colour: one gain per segment (scaled around each pixel's own brightness and the segment's
+  3. CORRECTION.  Only the drift is removed: the measured values smoothed over neighbouring segments (so a one-segment
+     jump from the content is not "fixed", and drift that levels off is not over-corrected).  Colour: one gain per segment (scaled around each pixel's own brightness and the segment's
      average colour cast, so tint and brightness stay).  Sharpness: a light unsharp mask on brightness only (capped).
      Both are solved on a few sample frames.  Across a continued seam the change eases over 2 s (raised cosine); a hard
      cut keeps its cut.
@@ -44,7 +44,7 @@ GAIN_RANGE = (0.8, 1.2)
 THUMB = (16, 9)          # layout thumbnail (w, h) - transposed for portrait
 # scene-change thresholds (relative to the group's reference): lighting changes, not content
 LIMITS = {"brightness": 0.05, "contrast": 0.10, "colour": 2.5}
-TREND_MIN = 0.02          # a trend smaller than 2 % by the end of the group is not worth correcting
+TREND_MIN = 0.03          # a trend smaller than 3 % by the end of the group is not worth correcting
 TREND_FIT = (0.015, 0.35)  # residual allowed: max(1.5 %, 35 % of the trend)
 MAX_CORR = {"saturation": 0.15, "sharpness": 0.35}   # never remove more than this
 _LUMA = torch.tensor([0.299, 0.587, 0.114])
@@ -138,6 +138,18 @@ def fit_trend(values):
     return b, resid, end, ok
 
 
+def smooth(ys):
+    """3-point moving average (2 points at the ends): keeps the shape of the drift, drops one-segment jumps."""
+    y = np.asarray(ys, np.float64)
+    if len(y) < 3:
+        return y
+    out = np.empty_like(y)
+    out[0] = (y[0] + y[1]) / 2
+    out[-1] = (y[-2] + y[-1]) / 2
+    out[1:-1] = (y[:-2] + y[1:-1] + y[2:]) / 3
+    return out
+
+
 def decide(fps: list, cut: list, min_shot: int = 3, limits=LIMITS) -> list:
     """fps: fingerprint per segment; cut[i] True = segment i starts a new shot (first segment / hard cut).
     -> per segment {"role": ref|scene|drift|steady|short, "ref", "shot", "diff", "trend": {metric: {...}},
@@ -182,8 +194,12 @@ def decide(fps: list, cut: list, min_shot: int = 3, limits=LIMITS) -> list:
             trends[m] = {"per_segment_pct": round(b * 100, 2), "residual_pct": round(resid * 100, 2),
                          "end_pct": round(end * 100, 1), "corrected": bool(ok)}
             if ok:
-                for k, i in enumerate(members, 1):
-                    targets[i][m] = float(np.clip(b * k, -MAX_CORR[m], MAX_CORR[m]))
+                # follow the measured drift, smoothed over neighbours (drift can level off; a straight line would
+                # over-correct the last segments), never past the fitted line's sign
+                sm = smooth(ys)
+                for k, i in enumerate(members):
+                    v = sm[k] if sm[k] * b > 0 else 0.0
+                    targets[i][m] = float(np.clip(v, -MAX_CORR[m], MAX_CORR[m]))
         for i in members:
             out[i]["trend"] = trends
             out[i]["target"] = targets[i]
@@ -256,7 +272,13 @@ def solve(samples: list, target: dict, strength: float = 1.0, sharpen: bool = Tr
     s0, k0 = meas(1.0, 0.0)
     g, a = 1.0, 0.0
     if "saturation" in target:
-        g = _bisect(lambda x: meas(x, 0.0)[0], s0 * math.exp(-target["saturation"] * strength), *GAIN_RANGE)
+        want = s0 * math.exp(-target["saturation"] * strength)
+        g = _bisect(lambda x: meas(x, 0.0)[0], want, *GAIN_RANGE)
+        if abs(g - 1) > 2.5 * abs(target["saturation"] * strength) + 0.02:
+            # a strongly tinted picture (most of its saturation is the overall tint): keeping the tint would need a
+            # big gain on the remaining colours - scale around brightness only instead (a gentle, even change)
+            cast = torch.zeros(3)
+            g = _bisect(lambda x: meas(x, 0.0)[0], want, *GAIN_RANGE)
     if sharpen and target.get("sharpness", 0.0) < 0:
         k1 = meas(g, 0.0)[1]
         a = _bisect(lambda x: meas(g, x)[1], k1 * math.exp(-target["sharpness"] * strength), 0.0, MAX_AMOUNT, n=10)
