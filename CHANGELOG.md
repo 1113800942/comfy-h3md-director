@@ -5,6 +5,8 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
 ## [0.3.1] — 2026-11-03
 * Control Panel: removed the size drop-down (it only filled in width / height, which are typed directly; the size
   reference note on the canvas stays). 总控台去掉"宽高快选"下拉，宽高直接填，画布上的尺寸参考表保留。
+* Removed `H3MD Director lite.json`: the simple workflow (`H3MD Director simple.json`) replaces it. Examples now:
+  simple, full, alpha, hard cut. 删掉精简版示例，由清爽版代替。
 
 ## [0.3.0] — 2026-11-03 (清爽版)
 ### H3MD Control Panel + simple workflow / 总控台 + 清爽版工作流

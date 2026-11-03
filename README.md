@@ -44,7 +44,7 @@ generate them segment by segment, keep every finished segment on disk, and repai
    only three things on the canvas – the **H3MD Control Panel** (size, fps / interpolation, face refine, seed, which
    segments to run, style buttons Balanced / High motion / Motion copy, low-res and high-res LoRA lists), the
    **Director** (media, shots, prompts) and the video preview. Models, sampler and save settings sit in subgraphs
-   (click to open). `H3MD Director lite` and `H3MD Director` are the older flat layouts.
+   (click to open). `H3MD Director` is the older flat full layout.
    Hardware: 40 / 50-series GPU with **16 GB VRAM minimum, 24 GB+ recommended** (measured on an RTX 5090; reports from
    16 / 24 GB cards welcome). On RunningHub and other platforms where subgraphs are awkward, unpack them first
    (right-click the subgraph node → Unpack). See **More** below for render times and the dependency table.
@@ -121,9 +121,6 @@ H3MD Director --plan--> H3MD Loop Sampler (+ H3MD Loop Options) --long video--> 
 * `H3MD Director simple.json` — **start here** (v0.3): Control Panel + Director + preview; models / sampler / save in
   subgraphs; no rgthree, Crystools, easy-use, LayerStyle or TE-Speed nodes. Low VRAM: the 4B text encoder + ClipProj
   are inside the models subgraph (bypassed), with a note on how to switch.
-* `H3MD Director lite.json` — the fewest dependencies: ComfyUI + H3MD + ComfyUI-KJNodes (+ ComfyUI-ClipProj for the
-  small 4B text encoder). Everything H3MD does is there: Director, long-video continuation, `lowres_anchor`, tiling,
-  disk cache, `rerun_segments`, locked-audio lip sync, motion copy.
 * `H3MD Director.json` — the full setup used for the samples; adds face refine, RIFE interpolation to 48 fps, one extra
   refine step and a few convenience nodes.
 
@@ -131,12 +128,12 @@ H3MD Director --plan--> H3MD Loop Sampler (+ H3MD Loop Options) --long video--> 
 |---|---|---|---|
 | ComfyUI 0.43+ (core MiniMax H3 nodes) | models, sampler, VAE | **required** | — |
 | H3MD Director (this pack) | Director, Loop Sampler, Save Video Interp, depth / SAM3 motion copy | **required** | — |
-| [ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) | SageAttention and chunked feed-forward patches (less VRAM) | recommended (lite + full) | runs, but needs more VRAM; the SageAttention patch also needs the SageAttention package, otherwise bypass that node |
+| [ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) | SageAttention and chunked feed-forward patches (less VRAM) | recommended (simple + full) | runs, but needs more VRAM; the SageAttention patch also needs the SageAttention package, otherwise bypass that node |
 | [ComfyUI-ClipProj](https://github.com/nicolab28/ComfyUI-ClipProj) | 4B text encoder projection, saves 10+ GB VRAM | only with the 4B encoder | use the 32B encoder |
-| [ComfyUI-VFI](https://github.com/GACLove/ComfyUI-VFI) | RIFE interpolation in `H3MD Save Video Interp` | full only, optional | keep `interpolate` off: 24 fps output |
-| TE-Speed-VOSR2 / TE-Speed-SeedVR2 | face refine in `H3MD Save Video Interp` | full only, optional | keep `face_refine` off (default) |
-| [ComfyUI-YCNodes-MiniMax-H3](https://github.com/yichengup/ComfyUI-YCNodes-MiniMax-H3) | `H3SigmaRefiner`: one extra refine step | full only, optional | plain `BasicScheduler` |
-| [rgthree-comfy](https://github.com/rgthree/rgthree-comfy) | Power Lora Loader (many LoRAs in one node) | full only, optional | chain the core `LoraLoaderModelOnly` (lite does this) |
+| [ComfyUI-VFI](https://github.com/GACLove/ComfyUI-VFI) | RIFE interpolation in `H3MD Save Video Interp` | optional | keep `interpolate` off: 24 fps output |
+| [ComfyUI-VOSR2](https://github.com/ylchen333/ComfyUI-VOSR2) (simple) / TE-Speed-VOSR2 (full) | face refine in `H3MD Save Video Interp` | optional | keep `face_refine` off (default) |
+| [ComfyUI-YCNodes-MiniMax-H3](https://github.com/yichengup/ComfyUI-YCNodes-MiniMax-H3) | `H3SigmaRefiner`: one extra refine step | optional | plain `BasicScheduler` |
+| [rgthree-comfy](https://github.com/rgthree/rgthree-comfy) | Power Lora Loader (many LoRAs in one node) | full only, optional | the simple workflow's Control Panel loads LoRAs itself |
 | ComfyUI-Dehypnotic, Crystools, Easy-Use, LayerStyle, CRT-Nodes | aspect-ratio picker, switch, number, VRAM purge, timer | full only, optional | not needed to render |
 
 H3MD looks up the face-refine and RIFE packs only when you turn those features on, so the save node works without them.

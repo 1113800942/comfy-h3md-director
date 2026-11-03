@@ -43,7 +43,7 @@
    [`example_workflows/`](example_workflows) 里的文件拖进 ComfyUI。**第一次用请先开 `H3MD Director simple`（v0.3 清爽版）**：
    画布上只有三样——**总控台**（尺寸、帧数 / 插帧、修脸、种子、跑哪几段、风格按钮 均衡 / 高动态 / 动作复刻、低清和高清两张
    LoRA 表）、**导演台**（素材、分镜、提示词）和成片预览。模型、采样、保存的设置都收在子图里（点开就能改）。
-   `H3MD Director lite` 和 `H3MD Director` 是以前的平铺版。
+   `H3MD Director` 是以前的完整平铺版。
    硬件：40 / 50 系显卡，**显存最低 16 GB，推荐 24 GB 以上**（在 RTX 5090 上实测；16 / 24 GB 的实测反馈欢迎告诉我们）。
    在 RunningHub 等进出子图不方便的平台上，先把子图释放（右键子图节点 → 解包 / Unpack）再改。用时和依赖表见下面 **更多内容**。
 4. 缺节点包：ComfyUI-Manager → **Install Missing Custom Nodes**。缺模型：看工作流里的 **模型下载** note，每个文件都有下载链接和存放文件夹。
@@ -106,21 +106,18 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
 **示例工作流**
 * `H3MD Director simple.json`（清爽版，**推荐从这里开始**）：总控台 + 导演台 + 预览，模型 / 采样 / 保存收在子图里；不用
   rgthree、Crystools、easy-use、LayerStyle、TE-Speed 这些节点。小显存：模型子图里有 4B 编码器 + ClipProj（默认旁路），旁边写了切换方法。
-* `H3MD Director lite.json`（精简版）——依赖最少：ComfyUI + H3MD + ComfyUI-KJNodes（用 4B 小编码器时再加
-  ComfyUI-ClipProj）。H3MD 的功能全都有：导演台、长视频续接、`lowres_anchor`、高清分块、硬盘缓存、`rerun_segments`、
-  锁定音频对口型、动作复刻。
 * `H3MD Director.json`（完整版）——样片用的完整设置，多了修脸、RIFE 补帧到 48 fps、多 1 步精修和几个方便的小工具。
 
 | 节点包 | 在工作流里做什么 | 要不要装 | 不装会怎样 |
 |---|---|---|---|
 | ComfyUI 0.43+（自带 MiniMax H3 节点） | 模型、采样器、VAE | **必需** | — |
 | H3MD Director（本包） | 导演台、循环采样、保存、深度 / SAM3 动作复刻 | **必需** | — |
-| [ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) | SageAttention 和 FeedForward 分块补丁（省显存） | 推荐（精简版和完整版都用） | 能跑，但显存占用更高；SageAttention 补丁还需要装 SageAttention 包，没装就把那个节点绕过 |
+| [ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) | SageAttention 和 FeedForward 分块补丁（省显存） | 推荐（清爽版和完整版都用） | 能跑，但显存占用更高；SageAttention 补丁还需要装 SageAttention 包，没装就把那个节点绕过 |
 | [ComfyUI-ClipProj](https://github.com/nicolab28/ComfyUI-ClipProj) | 4B 文本编码器投影，省 10 GB 以上显存 | 只有用 4B 编码器时需要 | 改用 32B 编码器 |
-| [ComfyUI-VFI](https://github.com/GACLove/ComfyUI-VFI) | `H3MD Save Video Interp` 里的 RIFE 补帧 | 仅完整版，可选 | `interpolate` 保持关，输出 24 fps |
-| TE-Speed-VOSR2 / TE-Speed-SeedVR2 | `H3MD Save Video Interp` 里的修脸 | 仅完整版，可选 | `face_refine` 保持关（默认就是关） |
-| [ComfyUI-YCNodes-MiniMax-H3](https://github.com/yichengup/ComfyUI-YCNodes-MiniMax-H3) | `H3SigmaRefiner`：多 1 步精修 | 仅完整版，可选 | 用普通 `BasicScheduler` |
-| [rgthree-comfy](https://github.com/rgthree/rgthree-comfy) | Power Lora Loader（一个节点挂多个 LoRA） | 仅完整版，可选 | 用自带的 `LoraLoaderModelOnly` 串起来（精简版就是这样） |
+| [ComfyUI-VFI](https://github.com/GACLove/ComfyUI-VFI) | `H3MD Save Video Interp` 里的 RIFE 补帧 | 可选 | `interpolate` 保持关，输出 24 fps |
+| [ComfyUI-VOSR2](https://github.com/ylchen333/ComfyUI-VOSR2)（清爽版）/ TE-Speed-VOSR2（完整版） | `H3MD Save Video Interp` 里的修脸 | 可选 | `face_refine` 保持关（默认就是关） |
+| [ComfyUI-YCNodes-MiniMax-H3](https://github.com/yichengup/ComfyUI-YCNodes-MiniMax-H3) | `H3SigmaRefiner`：多 1 步精修 | 可选 | 用普通 `BasicScheduler` |
+| [rgthree-comfy](https://github.com/rgthree/rgthree-comfy) | Power Lora Loader（一个节点挂多个 LoRA） | 仅完整版，可选 | 清爽版的总控台自己加载 LoRA |
 | ComfyUI-Dehypnotic、Crystools、Easy-Use、LayerStyle、CRT-Nodes | 比例选择、开关、数值、清显存、计时 | 仅完整版，可选 | 出片用不到 |
 
 修脸和补帧的节点包只有在打开这两个功能时才会用到，没装也不影响保存节点。
