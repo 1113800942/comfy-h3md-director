@@ -412,8 +412,8 @@ def _to_cpu(latent: dict) -> dict:
     s = latent["samples"]
     try:
         s = s.to("cpu")
-    except Exception:
-        pass
+    except Exception as exc:                                       # keep going on the device, but say so
+        LOG.warning("H3MD could not move a latent to CPU (%s); keeping it on %s", exc, getattr(s, "device", "?"))
     return {"samples": s}
 
 

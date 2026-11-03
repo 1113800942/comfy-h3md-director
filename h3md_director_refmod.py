@@ -75,7 +75,8 @@ REFMOD_RE = re.compile(r"<\s*RefMod\s*(\d+)\s*>|(?<![A-Za-z0-9_])RefMod\s*(\d+)(
 # ----------------------------------------------------------------------------
 
 def plugin_nodes():
-    """The plugin's nodes module (has H3RefMod, _find_mod_path, _list_mod_names), or None."""
+    """The plugin's nodes module (has H3RefMod, _find_mod_path), or None. _list_mod_names / _find_mod_path are
+    private helpers of that plugin: every use falls back to our own scan of models/refmods if they are missing or fail."""
     try:
         import nodes as comfy_nodes
         cls = comfy_nodes.NODE_CLASS_MAPPINGS.get("MiniMaxH3RefModsLoader")
@@ -120,9 +121,13 @@ def resolve_refmod_file(file: str) -> str:
         return D.resolve_media_path(f)[: -len(".safetensors")]   # relative: ComfyUI input folder
     name = f.replace("\\", "/")
     pn = plugin_nodes()
-    if pn is not None:
-        return pn._find_mod_path(name)
-    for root in _refmod_roots():                                   # plugin missing: same lookup, first root wins
+    find = getattr(pn, "_find_mod_path", None) if pn is not None else None
+    if callable(find):
+        try:
+            return find(name)
+        except Exception as exc:                                   # plugin renamed / changed its private helper
+            LOG.warning("%s RefMod plugin lookup failed for '%s' (%s); scanning models/refmods instead", _TAG, name, exc)
+    for root in _refmod_roots():                                   # own lookup, first root wins
         p = os.path.join(root, *name.split("/"))
         if os.path.isfile(p + ".safetensors"):
             return os.path.abspath(p)
@@ -174,12 +179,13 @@ def list_refmods() -> list:
     out, seen = [], set()
     pn = plugin_nodes()
     names = []
-    if pn is not None:
+    lister = getattr(pn, "_list_mod_names", None) if pn is not None else None
+    if callable(lister):
         try:
-            names = list(pn._list_mod_names())
-        except Exception as exc:
-            LOG.warning("%s listing RefMods failed: %s", _TAG, exc)
-    else:
+            names = list(lister())
+        except Exception as exc:                                   # plugin renamed / changed its private helper
+            LOG.warning("%s plugin RefMod list failed (%s); scanning models/refmods instead", _TAG, exc)
+    if not names:                                                  # no plugin helper, or it gave nothing: own scan
         for root in _refmod_roots():
             for dp, dn, fn in os.walk(root):
                 dn[:] = [d for d in dn if d not in ("graph_presets", ".git", "__pycache__")]
