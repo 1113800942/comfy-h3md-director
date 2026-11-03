@@ -2,7 +2,9 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
-## [Unreleased]
+## [0.1.2] — 2026-11-02
+No node code changes: docs, examples and tools since 0.1.1. / 节点代码没有改动：0.1.1 之后补充的文档、示例和工具。
+
 * `example_workflows/H3MD Director (lite).json`: the same H3MD features with the fewest dependencies (ComfyUI + H3MD +
   ComfyUI-KJNodes); LoRAs on core `LoraLoaderModelOnly`, no face refine / RIFE / extra refine step.
   精简版示例工作流：H3MD 功能不变，只依赖 ComfyUI + H3MD + ComfyUI-KJNodes；LoRA 改用自带加载器，不含修脸、补帧、多一步精修。
