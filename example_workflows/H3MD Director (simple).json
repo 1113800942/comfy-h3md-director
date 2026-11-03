@@ -9,7 +9,7 @@
    "type": "H3MDDirectorRefMod",
    "pos": [
     -770,
-    780
+    560
    ],
    "size": [
     1250,
@@ -132,12 +132,12 @@
    "id": 271,
    "type": "H3MDVideoPreview",
    "pos": [
-    490,
-    780
+    450,
+    1220
    ],
    "size": [
-    420,
-    760
+    923.8101194841042,
+    575
    ],
    "flags": {},
    "order": 6,
@@ -161,8 +161,8 @@
    "id": 304,
    "type": "489eeb82-04ff-4c9c-9555-4ee9fc216a2e",
    "pos": [
-    0,
-    290
+    450,
+    980
    ],
    "size": [
     320,
@@ -249,8 +249,8 @@
    "id": 333,
    "type": "MarkdownNote",
    "pos": [
-    -2320,
-    1110
+    -1240,
+    1560
    ],
    "size": [
     400,
@@ -276,8 +276,8 @@
    "id": 337,
    "type": "H3MDControlPanel",
    "pos": [
-    -1220,
-    780
+    -1240,
+    560
    ],
    "size": [
     420,
@@ -506,8 +506,8 @@
    "id": 338,
    "type": "6630206f-e7c9-49d1-824c-ee74264548d4",
    "pos": [
-    -550,
-    300
+    450,
+    560
    ],
    "size": [
     250,
@@ -573,8 +573,8 @@
    "id": 339,
    "type": "9e2db2ef-33af-4484-9b02-ce2742ada61b",
    "pos": [
-    -250,
-    290
+    450,
+    720
    ],
    "size": [
     230.51860146586858,
@@ -4239,10 +4239,10 @@
   "h3md": "H3MD alpha example (template)",
   "h3md_layout": "H3MDLoopSampler2 + H3MDLoopOptions (generated from H3MD_loop_AB_alpha.json)",
   "ds": {
-   "scale": 0.6493386574074081,
+   "scale": 0.6586079545454545,
    "offset": [
-    1502.3707880079307,
-    -475.61589032838384
+    1484.266057024544,
+    -535
    ]
   },
   "frontendVersion": "1.57.6",
