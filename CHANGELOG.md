@@ -14,9 +14,9 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   a repair inside a finished video keeps the whole video). The value stays after the run (orange banner + Clear);
   the hint shows the total segment count; a wrong or out-of-range value blocks the queue. Old workflows: unchanged.
   "跑哪几段"一个框代替 rerun_segments + stop_after；跑完保留（橙色提示 + 清空按钮）；写错拦住运行。
-* `example_workflows/H3MD_Director_simple.json`: Control Panel + Director + preview, models / sampler / save in
+* `example_workflows/H3MD Director simple.json`: Control Panel + Director + preview, models / sampler / save in
   subgraphs, 4B encoder + ClipProj note inside. Examples now use our own Eve music video "Above the Clouds".
-  Example files renamed without spaces or brackets (`H3MD_Director.json`, `H3MD_Director_lite.json`, ...).
+  Example files without brackets (`H3MD Director simple.json` instead of `H3MD Director (simple).json`).
 * Simple Director: media rows show only ＋ (or drop files), reference video height is auto, "+ Shot" hidden; all
   kept in code – Settings → H3MD → "Show advanced Director buttons" brings them back.
   导演台简化：只隐藏，设置里可恢复。

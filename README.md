@@ -40,11 +40,11 @@ generate them segment by segment, keep every finished segment on disk, and repai
 1. No `pip install` is needed.
 2. You need a ComfyUI version with MiniMax H3 support (0.43 or newer recommended).
 3. Open an example workflow: ComfyUI **Templates** → `ComfyUI-H3MD-Director`, or drag one from
-   [`example_workflows/`](example_workflows) into ComfyUI. **New here? Start with `H3MD_Director_simple`** (v0.3):
+   [`example_workflows/`](example_workflows) into ComfyUI. **New here? Start with `H3MD Director simple`** (v0.3):
    only three things on the canvas – the **H3MD Control Panel** (size, fps / interpolation, face refine, seed, which
    segments to run, style buttons Balanced / High motion / Motion copy, low-res and high-res LoRA lists), the
    **Director** (media, shots, prompts) and the video preview. Models, sampler and save settings sit in subgraphs
-   (click to open). `H3MD_Director_lite` and `H3MD_Director` are the older flat layouts.
+   (click to open). `H3MD Director lite` and `H3MD Director` are the older flat layouts.
    Hardware: 40 / 50-series GPU with **16 GB VRAM minimum, 24 GB+ recommended** (measured on an RTX 5090; reports from
    16 / 24 GB cards welcome). On RunningHub and other platforms where subgraphs are awkward, unpack them first
    (right-click the subgraph node → Unpack). See **More** below for render times and the dependency table.
@@ -118,13 +118,13 @@ H3MD Director --plan--> H3MD Loop Sampler (+ H3MD Loop Options) --long video--> 
    `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors`. Without one, set `upscaler_model = none` (nearest, softer).
 
 **Example workflows**
-* `H3MD_Director_simple.json` — **start here** (v0.3): Control Panel + Director + preview; models / sampler / save in
+* `H3MD Director simple.json` — **start here** (v0.3): Control Panel + Director + preview; models / sampler / save in
   subgraphs; no rgthree, Crystools, easy-use, LayerStyle or TE-Speed nodes. Low VRAM: the 4B text encoder + ClipProj
   are inside the models subgraph (bypassed), with a note on how to switch.
-* `H3MD_Director_lite.json` — the fewest dependencies: ComfyUI + H3MD + ComfyUI-KJNodes (+ ComfyUI-ClipProj for the
+* `H3MD Director lite.json` — the fewest dependencies: ComfyUI + H3MD + ComfyUI-KJNodes (+ ComfyUI-ClipProj for the
   small 4B text encoder). Everything H3MD does is there: Director, long-video continuation, `lowres_anchor`, tiling,
   disk cache, `rerun_segments`, locked-audio lip sync, motion copy.
-* `H3MD_Director.json` — the full setup used for the samples; adds face refine, RIFE interpolation to 48 fps, one extra
+* `H3MD Director.json` — the full setup used for the samples; adds face refine, RIFE interpolation to 48 fps, one extra
   refine step and a few convenience nodes.
 
 | Node pack | What it does in the workflows | Needed? | Without it |
