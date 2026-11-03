@@ -40,7 +40,7 @@ generate them segment by segment, keep every finished segment on disk, and repai
 1. No `pip install` is needed.
 2. You need a ComfyUI version with MiniMax H3 support (0.43 or newer recommended).
 3. Open an example workflow: ComfyUI **Templates** → `ComfyUI-H3MD-Director`, or drag one from
-   [`example_workflows/`](example_workflows) into ComfyUI. New here? Start with **H3MD Director (lite)**: it needs only
+   [`example_workflows/`](example_workflows) into ComfyUI. New here? Start with **H3MD Director lite**: it needs only
    ComfyUI-KJNodes besides H3MD. **H3MD Director** is the full setup (face refine, 48 fps interpolation and more).
    Hardware, render times and the dependency table: see **More** below.
 4. Missing node packs: ComfyUI-Manager → **Install Missing Custom Nodes**. Missing models: follow the
@@ -113,7 +113,7 @@ H3MD Director --plan--> H3MD Loop Sampler (+ H3MD Loop Options) --long video--> 
    `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors`. Without one, set `upscaler_model = none` (nearest, softer).
 
 **Two example workflows**
-* `H3MD Director (lite).json` — the fewest dependencies: ComfyUI + H3MD + ComfyUI-KJNodes (+ ComfyUI-ClipProj for the
+* `H3MD Director lite.json` — the fewest dependencies: ComfyUI + H3MD + ComfyUI-KJNodes (+ ComfyUI-ClipProj for the
   small 4B text encoder). Everything H3MD does is there: Director, long-video continuation, `lowres_anchor`, tiling,
   disk cache, `rerun_segments`, locked-audio lip sync, motion copy.
 * `H3MD Director.json` — the full setup used for the samples; adds face refine, RIFE interpolation to 48 fps, one extra

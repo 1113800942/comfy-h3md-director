@@ -40,7 +40,7 @@
 1. 不需要 `pip install`。
 2. ComfyUI 需要支持 MiniMax H3 的版本（建议 0.43 或更新）。
 3. 打开示例工作流：ComfyUI **模板 / Templates** → `ComfyUI-H3MD-Director`，或者把
-   [`example_workflows/`](example_workflows) 里的文件拖进 ComfyUI。第一次用建议先开 **H3MD Director (lite)**（精简版）：
+   [`example_workflows/`](example_workflows) 里的文件拖进 ComfyUI。第一次用建议先开 **H3MD Director lite**（精简版）：
    除了 H3MD 只需要 ComfyUI-KJNodes。**H3MD Director** 是完整版（修脸、48 fps 补帧等）。
    硬件要求、用时和依赖表：见下面 **更多内容**。
 4. 缺节点包：ComfyUI-Manager → **Install Missing Custom Nodes**。缺模型：看工作流里的 **模型下载** note，每个文件都有下载链接和存放文件夹。
@@ -101,7 +101,7 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
    或它的微调版（如 `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors`）。不放也能跑（`upscaler_model = none`，最近邻放大，效果差一些）。
 
 **两个示例工作流**
-* `H3MD Director (lite).json`（精简版）——依赖最少：ComfyUI + H3MD + ComfyUI-KJNodes（用 4B 小编码器时再加
+* `H3MD Director lite.json`（精简版）——依赖最少：ComfyUI + H3MD + ComfyUI-KJNodes（用 4B 小编码器时再加
   ComfyUI-ClipProj）。H3MD 的功能全都有：导演台、长视频续接、`lowres_anchor`、高清分块、硬盘缓存、`rerun_segments`、
   锁定音频对口型、动作复刻。
 * `H3MD Director.json`（完整版）——样片用的完整设置，多了修脸、RIFE 补帧到 48 fps、多 1 步精修和几个方便的小工具。
