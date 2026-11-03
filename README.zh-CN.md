@@ -40,9 +40,12 @@
 1. 不需要 `pip install`。
 2. ComfyUI 需要支持 MiniMax H3 的版本（建议 0.43 或更新）。
 3. 打开示例工作流：ComfyUI **模板 / Templates** → `ComfyUI-H3MD-Director`，或者把
-   [`example_workflows/`](example_workflows) 里的文件拖进 ComfyUI。第一次用建议先开 **H3MD Director lite**（精简版）：
-   除了 H3MD 只需要 ComfyUI-KJNodes。**H3MD Director** 是完整版（修脸、48 fps 补帧等）。
-   硬件要求、用时和依赖表：见下面 **更多内容**。
+   [`example_workflows/`](example_workflows) 里的文件拖进 ComfyUI。**第一次用请先开 `H3MD_Director_simple`（v0.3 清爽版）**：
+   画布上只有三样——**总控台**（尺寸、帧数 / 插帧、修脸、种子、跑哪几段、风格按钮 均衡 / 高动态 / 动作复刻、低清和高清两张
+   LoRA 表）、**导演台**（素材、分镜、提示词）和成片预览。模型、采样、保存的设置都收在子图里（点开就能改）。
+   `H3MD_Director_lite` 和 `H3MD_Director` 是以前的平铺版。
+   硬件：40 / 50 系显卡，**显存最低 16 GB，推荐 24 GB 以上**（在 RTX 5090 上实测；16 / 24 GB 的实测反馈欢迎告诉我们）。
+   在 RunningHub 等进出子图不方便的平台上，先把子图释放（右键子图节点 → 解包 / Unpack）再改。用时和依赖表见下面 **更多内容**。
 4. 缺节点包：ComfyUI-Manager → **Install Missing Custom Nodes**。缺模型：看工作流里的 **模型下载** note，每个文件都有下载链接和存放文件夹。
 5. **提示词：请用 [H3MD 提示词 skill](skills/h3md-prompt/SKILL.zh-CN.md) 来写。** 每个镜头都是一份完整的官方 H3 提示词，
    再加上 H3MD 的规则（5+17n 长度、重叠、自动拆段、标签编号、动作复刻）。在 Claude Code、Codex、Cursor 等能读
@@ -100,11 +103,13 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
 4. 下载学习型潜空间放大器（推荐）放到 `models/latent_upscale_models/`：`minimax_h3_latent_upscaler_3d_fp16.safetensors`
    或它的微调版（如 `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors`）。不放也能跑（`upscaler_model = none`，最近邻放大，效果差一些）。
 
-**两个示例工作流**
-* `H3MD Director lite.json`（精简版）——依赖最少：ComfyUI + H3MD + ComfyUI-KJNodes（用 4B 小编码器时再加
+**示例工作流**
+* `H3MD_Director_simple.json`（清爽版，**推荐从这里开始**）：总控台 + 导演台 + 预览，模型 / 采样 / 保存收在子图里；不用
+  rgthree、Crystools、easy-use、LayerStyle、TE-Speed 这些节点。小显存：模型子图里有 4B 编码器 + ClipProj（默认旁路），旁边写了切换方法。
+* `H3MD_Director_lite.json`（精简版）——依赖最少：ComfyUI + H3MD + ComfyUI-KJNodes（用 4B 小编码器时再加
   ComfyUI-ClipProj）。H3MD 的功能全都有：导演台、长视频续接、`lowres_anchor`、高清分块、硬盘缓存、`rerun_segments`、
   锁定音频对口型、动作复刻。
-* `H3MD Director.json`（完整版）——样片用的完整设置，多了修脸、RIFE 补帧到 48 fps、多 1 步精修和几个方便的小工具。
+* `H3MD_Director.json`（完整版）——样片用的完整设置，多了修脸、RIFE 补帧到 48 fps、多 1 步精修和几个方便的小工具。
 
 | 节点包 | 在工作流里做什么 | 要不要装 | 不装会怎样 |
 |---|---|---|---|

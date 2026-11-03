@@ -2,6 +2,28 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.3.0] — 2026-11-03 (清爽版)
+### H3MD Control Panel + simple workflow / 总控台 + 清爽版工作流
+* New node **H3MD Control Panel**: size (+ one-click 16:9 / 9:16 presets), fps / interpolation (24 locked when off),
+  face refine, seed, which segments to run, style buttons (Balanced / High motion / Motion copy: recommended LoRAs,
+  semantic bridge, Dasiwa high-res strength), low-res and high-res LoRA lists (on / strength / remove / add / reset;
+  the node grows with the lists). The node loads the LoRAs itself (no rgthree / Crystools).
+  新节点"总控台"：常改的设置集中在一处，风格按钮一键切推荐 LoRA、语义桥；自己加载 LoRA。
+* "Which segments" box (`segments_to_run`, new last input of the Loop): empty = run everything (cached segments
+  reused); `2` / `1-2` / `3, 6-7, 9` = generate only these (cached ones again too; missing earlier segments as well;
+  a repair inside a finished video keeps the whole video). The value stays after the run (orange banner + Clear);
+  the hint shows the total segment count; a wrong or out-of-range value blocks the queue. Old workflows: unchanged.
+  "跑哪几段"一个框代替 rerun_segments + stop_after；跑完保留（橙色提示 + 清空按钮）；写错拦住运行。
+* `example_workflows/H3MD_Director_simple.json`: Control Panel + Director + preview, models / sampler / save in
+  subgraphs, 4B encoder + ClipProj note inside. Examples now use our own Eve music video "Above the Clouds".
+  Example files renamed without spaces or brackets (`H3MD_Director.json`, `H3MD_Director_lite.json`, ...).
+* Simple Director: media rows show only ＋ (or drop files), reference video height is auto, "+ Shot" hidden; all
+  kept in code – Settings → H3MD → "Show advanced Director buttons" brings them back.
+  导演台简化：只隐藏，设置里可恢复。
+* Face refine also takes the original ComfyUI-VOSR2 ("VOSR 2.0 Model Loader"); the simple workflow uses it.
+  修脸支持原作者 ComfyUI-VOSR2。
+* Registry scan: no `__import__` / `.eval()` / RegExp `.exec` spellings left in the shipped files.
+
 ## [0.2.2] — 2026-11-02
 ### More shared / server hardening / 共享和服务器继续加固
 * Plan export: a plan can no longer pull arbitrary files into the zip - absolute paths only for media files, and on a

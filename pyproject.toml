@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-h3md-director"
 description = "H3MD Director: long multi-shot MiniMax H3 video - visual Director, segment-by-segment low-res/high-res generation with disk cache, streamed save with optional RIFE interpolation."
-version = "0.2.2"
+version = "0.3.0"
 license = { text = "AGPL-3.0-or-later" }
 authors = [{ name = "YJ" }]
 requires-python = ">=3.10"

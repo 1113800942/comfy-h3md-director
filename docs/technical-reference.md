@@ -145,7 +145,7 @@ rewrite `plan_json`; the text only changes when you edit something.
 * **Legacy**: class id `H3MDLoopSampler`, labelled "H3MD Loop Sampler (legacy)". Since 2026-10-30 (start_index /
   end_index / previous_latent removed, rerun inputs added at the top) workflows saved before that date must be
   re-created or migrated (`widgets_values` are positional).
-  Example: `example_workflows/H3MD alpha example.json`.
+  Example: `example_workflows/H3MD_alpha_example.json`.
 
 ### H3MD Loop Sampler (`h3md_loop.py`)
 Runs every segment of the plan (or segments 1..`stop_after`; `rerun_segments` re-renders only the listed ones with a
@@ -184,7 +184,7 @@ the resume folder (`run.json`) is reused. Interrupt is checked between segments 
 * Only **`long video` -> H3MD Save Video Interp** is designed to stay within bounded VRAM/RAM (streamed chunk by
   chunk from the disk cache).
 * The same text is in the Loop nodes' DESCRIPTION and output tooltips (`OUTPUT_TOOLTIPS`, hover an output dot), and
-  as a Note node in `example_workflows/H3MD alpha example.json`.
+  as a Note node in `example_workflows/H3MD_alpha_example.json`.
 
 **RIFE 模型（手动下载） / RIFE model (manual download)**
 * 中文：ComfyUI 的“缺少模型”下载弹窗只能下载到 `models/` 下已注册的文件夹，而且不允许 `.pkl` 文件，所以 RIFE 的
