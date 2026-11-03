@@ -11,11 +11,6 @@ const STYLE_TIP = {
   motion_copy: "dance / motion transfer from a reference video · 动作复刻",
 };
 let presetCache = null;
-// common sizes (16:9, multiple of 32); portrait = swapped
-const SIZES = [[0.2, 608, 352], [0.3, 736, 416], [0.4, 864, 480], [0.5, 960, 544], [0.6, 1056, 608], [0.7, 1152, 640],
-  [0.8, 1216, 672], [0.9, 1280, 736], [0.98, 1344, 768], [1.0, 1376, 768], [1.2, 1504, 832], [1.5, 1664, 928],
-  [1.8, 1824, 1024], [2.0, 1920, 1088]];
-
 async function presets() {
   if (presetCache) return presetCache;
   try { presetCache = await (await api.fetchApi("/h3md/control_panel/presets")).json(); }
@@ -202,37 +197,12 @@ class Panel {
     if (old.firstChild?.textContent !== "↑ " + h.t) old.replaceWith(this.hintEl(h));
   }
 
-  // one click instead of typing: sets width / height
-  sizePicker() {
-    const w = W(this.node, "width"), hh = W(this.node, "height");
-    const cur = `${w?.value}x${hh?.value}`;
-    const sel = el("select", { title: "common sizes (multiple of 32) – sets width and height above · 常用尺寸，点选即填入宽高",
-      style: { flex: 1, background: "#1e1e1e", color: "#ddd", border: "1px solid #444", borderRadius: "3px", fontSize: "11px" },
-      onchange: (e) => {
-        const [a, b] = e.target.value.split("x").map(Number);
-        if (a && b && w && hh) { w.value = a; hh.value = b; w.callback?.(a); hh.callback?.(b); this.node.setDirtyCanvas?.(true, true); }
-        this.render();
-      } });
-    sel.append(el("option", { value: "" }, "宽高快选（16:9 / 9:16）· Size presets for width × height …"));
-    for (const [orient, label] of [["l", "横屏 16:9"], ["p", "竖屏 9:16"]]) {
-      const grp = el("optgroup", { label });
-      for (const [mp, a, b] of SIZES) {
-        const v = orient === "l" ? `${a}x${b}` : `${b}x${a}`;
-        grp.append(el("option", { value: v }, `${v.replace("x", " × ")}  (${mp} MP)`));
-      }
-      sel.append(grp);
-    }
-    sel.value = [...sel.querySelectorAll("option")].some((o) => o.value === cur) ? cur : "";
-    return el("div", { class: "row" }, sel);
-  }
-
   render() {
     injectCss();
     const h = hintText(W(this.node, "segments_to_run")?.value);
     const style = W(this.node, "style")?.value || "balanced";
     this.root.replaceChildren(
       this.hintEl(h),
-      this.sizePicker(),
       el("div", { class: "styles" }, ...["balanced", "high_motion", "motion_copy"].map((s) =>
         el("button", { class: s === style ? "on" : "", title: STYLE_TIP[s], onclick: () => this.setStyle(s) }, STYLE_LABEL[s]))),
       this.table("low"), this.table("high"));

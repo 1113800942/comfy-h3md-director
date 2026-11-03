@@ -2,9 +2,13 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.3.1] — 2026-11-03
+* Control Panel: removed the size drop-down (it only filled in width / height, which are typed directly; the size
+  reference note on the canvas stays). 总控台去掉"宽高快选"下拉，宽高直接填，画布上的尺寸参考表保留。
+
 ## [0.3.0] — 2026-11-03 (清爽版)
 ### H3MD Control Panel + simple workflow / 总控台 + 清爽版工作流
-* New node **H3MD Control Panel**: size (+ one-click 16:9 / 9:16 presets), fps / interpolation (24 locked when off),
+* New node **H3MD Control Panel**: size, fps / interpolation (24 locked when off),
   face refine, seed, which segments to run, style buttons (Balanced / High motion / Motion copy: recommended LoRAs,
   semantic bridge, Dasiwa high-res strength), low-res and high-res LoRA lists (on / strength / remove / add / reset;
   the node grows with the lists). The node loads the LoRAs itself (no rgthree / Crystools).
