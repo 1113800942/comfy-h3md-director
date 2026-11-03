@@ -53,6 +53,15 @@ generate them segment by segment, keep every finished segment on disk, and repai
    npx skills add https://github.com/MiniMax-AI/MiniMax-H3 --skill h3-prompt-writing
    ```
    No agent? Paste the SKILL.md into any chat AI and ask it to write your shots.
+6. **Fastest first run: the demo pack.** Download
+   [`H3MD_demo_bluedress_seg1.zip`](https://github.com/1113800942/comfy-h3md-director/releases/download/0.2.0/H3MD_demo_bluedress_seg1.zip)
+   (one 12 s shot: picture, music and all settings). On the H3MD Director click **Import plan…** → pick the zip →
+   **Plan + all settings** → Run. Only the two-stage sampling (low-res + latent upscale) runs inside the Loop node;
+   there is nothing else to set.
+7. **Shared or server ComfyUI** (started with `--listen`, a LAN address or a cloud platform): H3MD then only reads
+   media inside ComfyUI's input / output / temp folders, only saves videos inside the output folder and keeps its
+   cache in ComfyUI's temp folder. Local use (the default `127.0.0.1`) is unchanged. Override with
+   `H3MD_PATHS=local` / `H3MD_PATHS=shared`; allow extra media folders with `H3MD_MEDIA_DIRS`.
 
 ## Quick start
 1. Put your photos, reference video and music into the Director, write the prompt per shot (use the

@@ -124,7 +124,12 @@ def default_root() -> str:
     """Root used when cache_dir is empty (no hard-coded drive, works for any user):
     1. sticky: an existing <base>/H3MD_cache that holds resume_* runs (newest one wins), so resume survives restarts;
     2. otherwise <base>/H3MD_cache on the local fixed drive / mount with the most free space (created on demand);
-    3. nothing writable: the old temp location, with a warning."""
+    3. nothing writable: the old temp location, with a warning.
+    Shared ComfyUI (--listen, h3md_paths.shared): always ComfyUI's temp folder - no scanning of other drives."""
+    if D.PATHS.shared():
+        root = temp_root()
+        LOG.info("%s shared ComfyUI: cache root %s (ComfyUI temp folder)", _TAG, root)
+        return root
     bases = _candidates()
     sticky = []
     for b in bases:
@@ -226,6 +231,9 @@ def segment_key(settings_hash: str, plan: dict, k: int, seed: int, continued: bo
 
 class SegmentCache:
     def __init__(self, root: str | None, settings_hash: str, resume: bool, dtype: str = "fp16"):
+        if root and D.PATHS.shared() and not D.PATHS.inside(root, D.PATHS.read_roots()):
+            LOG.warning("%s cache_dir '%s' is outside ComfyUI's folders on a shared ComfyUI; using the default", _TAG, root)
+            root = None
         root = os.path.abspath(root or default_root())
         if resume:
             name = "resume_" + settings_hash[:16]

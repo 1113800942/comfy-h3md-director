@@ -52,6 +52,13 @@
    npx skills add https://github.com/MiniMax-AI/MiniMax-H3 --skill h3-prompt-writing
    ```
    没有这类工具：把 SKILL 文件内容贴给任意聊天 AI，让它照着写分镜。
+6. **最快跑通：示例包。** 下载
+   [`H3MD_demo_bluedress_seg1.zip`](https://github.com/1113800942/comfy-h3md-director/releases/download/0.2.0/H3MD_demo_bluedress_seg1.zip)
+   （1 个 12 秒镜头，图、音乐、全部设置都在里面）。在 H3MD 导演台点 **Import plan…** → 选这个 zip →
+   **Plan + all settings** → 运行。两段式采样（低清 + latent 放大）在 Loop 节点内部自动完成，其他都不用调。
+7. **共享 / 服务器上的 ComfyUI**（用 `--listen`、局域网地址或云平台启动）：H3MD 只读取 ComfyUI 的 input / output / temp
+   文件夹里的素材，视频只保存到 output 文件夹里，缓存放在 ComfyUI 的 temp 文件夹。本机使用（默认 `127.0.0.1`）不变。
+   可以用环境变量 `H3MD_PATHS=local` / `H3MD_PATHS=shared` 强制指定；`H3MD_MEDIA_DIRS` 可以额外允许素材文件夹。
 
 ## 快速开始
 1. 在导演台里放好照片、参考视频和音乐，每个镜头写好提示词（用 [H3MD 提示词 skill](skills/h3md-prompt/SKILL.zh-CN.md)）。

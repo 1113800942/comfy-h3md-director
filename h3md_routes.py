@@ -51,6 +51,14 @@ def _resolve(file: str, base: str) -> str | None:
     if not file:
         return None
     if os.path.isabs(file):
+        if not file.lower().endswith(EXTS["image"] + EXTS["video"] + EXTS["audio"]):
+            return None                          # v0.2.1: probe media files only
+        try:
+            from . import h3md_paths as PATHS
+        except ImportError:
+            import h3md_paths as PATHS
+        if not PATHS.may_read(file):             # shared ComfyUI: nothing outside input/output/temp
+            return None
         return file if os.path.isfile(file) else None
     cand = os.path.abspath(os.path.join(base, file))
     if os.path.commonpath((base, cand)) != base:

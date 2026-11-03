@@ -834,7 +834,7 @@ def save_path(filename_prefix, output_folder, width, height, ext="mp4", temp=Fal
     import folder_paths
     base = temp_directory() if temp else output_directory()
     custom = "" if temp else (output_folder or "").strip().strip('"')
-    root = os.path.abspath(custom) if custom else base
+    root = D.PATHS.output_root(custom, base)   # v0.2.1: shared ComfyUI -> always inside the output folder
     os.makedirs(root, exist_ok=True)
     full, name, counter, subfolder, _ = folder_paths.get_save_image_path(filename_prefix, root, width, height)
     file = f"{name}_{counter:05}_.{ext}" if ext else f"{name}_{counter:05}_"   # '' = a folder (png sequence)
@@ -1108,7 +1108,7 @@ class H3MDSaveVideoInterp:
                 "filename_prefix": ("STRING", {"default": "video/H3MD", "tooltip":
                                     "Like SaveVideo: <prefix>_00001_.mp4 (subfolders allowed, %date% vars)."}),
                 "output_folder": ("STRING", {"default": "", "tooltip":
-                                  "Empty = ComfyUI's output folder. Otherwise an absolute folder."}),
+                                  "Empty = ComfyUI's output folder. Otherwise an absolute folder (on a shared ComfyUI started with --listen: only a subfolder of the output folder)."}),
                 "interpolate": ("BOOLEAN", {"default": False, "tooltip":
                                 "On: RIFE frame interpolation (ComfyUI-VFI's model) 24 fps -> target_fps. Off: the "
                                 "H3MD frames are written unchanged (the RIFE options below are greyed out)."}),

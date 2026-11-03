@@ -61,9 +61,11 @@ import torch
 try:
     from . import h3md_vram
     from . import h3md_autosplit as AS   # H3MD autosplit (2026-10-27)
+    from . import h3md_paths as PATHS    # v0.2.1: shared-ComfyUI path limits
 except ImportError:  # flat import (tests)
     import h3md_vram
     import h3md_autosplit as AS
+    import h3md_paths as PATHS
 
 LOG = logging.getLogger("H3MD")
 
@@ -718,7 +720,7 @@ def _input_dir() -> str:
 
 def resolve_media_path(file: str) -> str:
     if os.path.isabs(file) and os.path.isfile(file):
-        return file
+        return PATHS.check_read(file)   # shared ComfyUI: only inside input/output/temp (h3md_paths)
     base = os.path.abspath(_input_dir())
     candidate = os.path.abspath(os.path.join(base, file))
     if os.path.isfile(candidate):

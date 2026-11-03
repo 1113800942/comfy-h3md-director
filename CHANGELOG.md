@@ -2,6 +2,22 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.2.1] — 2026-11-02
+### Safer on shared / server ComfyUI / 共享和服务器上更安全
+* New `h3md_paths.py`. When ComfyUI listens beyond localhost (`--listen`, LAN, cloud platform) H3MD only reads media
+  inside ComfyUI's input / output / temp folders (`/h3md/probe` and the Director), only saves videos inside the output
+  folder (`output_folder` outside it falls back to the output folder, a relative one becomes a subfolder) and keeps the
+  automatic cache in ComfyUI's temp folder (no scan of other drives; an explicit `cache_dir` outside ComfyUI's folders
+  is ignored). Local use (default `127.0.0.1`) is unchanged. Overrides: `H3MD_PATHS=local|shared`, `H3MD_MEDIA_DIRS`.
+  `/h3md/probe` answers for media files only, in every mode.
+  ComfyUI 对外开放（--listen、局域网、云平台）时：只读 input/output/temp 里的素材，视频只存 output 里，缓存放 ComfyUI temp；
+  本机使用不变。probe 只回答媒体文件。
+* RefMod: the list and the lookup no longer depend on the RefMod plugin's private helpers (`_list_mod_names`,
+  `_find_mod_path`): if they are renamed or fail, H3MD scans `models/refmods` itself.
+  RefMod 列表和查找不再依赖另一个插件的私有函数，拿不到时自己扫描目录。
+* A latent that cannot be moved to the CPU is now logged instead of silently kept on the GPU.
+* README: demo pack (import and run) and the shared-ComfyUI rules. Tests: `test_paths.py`, `test_refmod_fallback.py`.
+
 ## [0.2.0] — 2026-11-02
 ### Example workflows / 示例工作流
 * Full, lite and hard-cut examples: LoRA mix set to the one measured against oily skin — FL2V turbo 4-step **v1.2** 768p
