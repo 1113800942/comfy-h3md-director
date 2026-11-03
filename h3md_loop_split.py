@@ -31,7 +31,8 @@ MAIN_INPUTS = ("rerun_segments", "stop_after", "rerun_new_seed",   # H3MD rerun 
                "seed_mode", "decode_output",
                "high_res_model", "highres_tiling",
                "cache_mode", "delete_cache", "resume_from_cache", "semantic_bridge",
-               "depth_control")   # H3MD depth (2026-10-26): link input, moved after `options` below
+               "depth_control",   # H3MD depth (2026-10-26): link input, moved after `options` below
+               "segments_to_run")   # v0.3 Control Panel link input, moved to the very end below
 _WIDGET_TYPES = ("INT", "FLOAT", "STRING", "BOOLEAN", "COMBO")
 
 
@@ -67,6 +68,8 @@ def split_spec(legacy: dict) -> tuple:
                                                   "Not connected = all defaults."})
     if "depth_control" in main["optional"]:  # H3MD depth: appended LAST (after options) -> old links keep their slots
         main["optional"]["depth_control"] = main["optional"].pop("depth_control")
+    if "segments_to_run" in main["optional"]:  # v0.3: appended LAST -> old links keep their slots
+        main["optional"]["segments_to_run"] = main["optional"].pop("segments_to_run")
     return main, opts
 
 

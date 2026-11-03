@@ -370,6 +370,22 @@ class LoopRerunTests(unittest.TestCase):
         self.assertEqual(first["seed"], 5)                          # rerun_new_seed off: original seed
         self.assertTrue(torch.equal(self.latent(1)[0], old1[0]))
 
+    def test_segments_to_run_box(self):
+        """v0.3 Control Panel box: '1' = test run, empty = the rest from the cache, '2' = rerun of a cached one."""
+        plan = make_plan(3)
+        self.run_loop(plan, segments_to_run="1")
+        self.assertEqual(len(FakeSampler.calls), 1)               # test run: only segment 1
+        FakeSampler.calls = []
+        self.run_loop(plan, segments_to_run="")
+        self.assertEqual(len(FakeSampler.calls), 2)               # empty box: 2 and 3, segment 1 from the cache
+        FakeSampler.calls = []
+        self.run_loop(plan, segments_to_run="2")
+        self.assertEqual(len(FakeSampler.calls), 1)               # cached segment 2 generated again, nothing else
+        self.assertIsNotNone(FakeSampler.calls[0]["suffix"])      # tail locked to the cached segment 3
+        FakeSampler.calls = []
+        self.run_loop(make_plan(3), segments_to_run="3", stop_after=0)
+        self.assertEqual(len(FakeSampler.calls), 1)
+
 
 if __name__ == "__main__":
     unittest.main()

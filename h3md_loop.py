@@ -203,6 +203,35 @@ def parse_segments(text: str, n: int) -> list:
     return sorted(out)
 
 
+def cache_usable(cache, k: int, segs: list, beta: bool) -> bool:
+    """Segment k (0-based) can be taken from the cache as it is (same check as the rerun pre-check)."""
+    man = cache.manifest(k) if cache is not None else None
+    if man is None or int(man.get("frames", -1)) != int(segs[k]["length"]):
+        return False
+    return not (beta and not man.get("lowres"))
+
+
+def plan_segments_to_run(text: str, segs: list, cache, beta: bool):
+    """v0.3 'segments_to_run' (H3MD Control Panel): one box instead of rerun_segments + stop_after.
+    Empty -> None (normal run).  '2' / '1-2' / '3, 6-7, 9' -> (stop_after, rerun list, log line):
+    run up to the highest one; the listed segments are generated again even if cached; earlier segments missing
+    from the cache are generated too (a continuation needs the segment before it)."""
+    sel = parse_segments(text, len(segs))
+    if not sel:
+        return None
+    stop = max(sel) + 1
+    forced = [k for k in sel if cache_usable(cache, k, segs, beta)]
+    missing = [k for k in range(stop) if k not in sel and not cache_usable(cache, k, segs, beta)]
+    later_cached = all(cache_usable(cache, k, segs, beta) for k in range(stop, len(segs)))
+    if forced and later_cached:
+        stop = len(segs)   # a repair inside a finished video: keep the whole video (later segments from the cache)
+    rerun = sorted(set(sel) | set(missing)) if forced else []
+    one = lambda ks: ", ".join(str(k + 1) for k in ks) or "-"   # noqa: E731
+    line = (f"segments_to_run '{text}': run up to segment {stop}; listed: {one(sel)} (cached, generated again: "
+            f"{one(forced)}); missing earlier segments generated too: {one(missing)}; the rest from the cache")
+    return stop, rerun, line
+
+
 def describe_rerun(selected: list, indices: list, segs: list, tail_from: dict) -> str:
     """One line per segment for the log: cache / rerun (head from / tail locked to)."""
     lines = []
@@ -533,6 +562,12 @@ class H3MDLoopSampler:
             "只用于单一场景的长视频，和 lowres_anchor 一起用：每个续接段的高清结果会钉住下一段的高清开头，细小的颜色、"
             "清晰度变化也会一段段累积（3 分钟长镜头实测：只开 lowres_anchor 时饱和度 +8%、锐度 -15%）。开了以后，每个续接段"
             "新生成的高清 latent（不含重叠部分）在解码前、下一段接续前，把 24 个通道的均值和幅度拉回本镜头第一段。0 = 关，1 = 全量。"})
+        # v0.3 H3MD Control Panel, appended LAST: one box for "which segments" (empty / not connected = old widgets)
+        opt["segments_to_run"] = ("STRING", {"default": "", "forceInput": True, "tooltip":
+            "From H3MD Control Panel. Empty: run everything (cached segments reused). '2' / '1-2' / '3, 6-7, 9': "
+            "generate only these this time (cached ones again too); missing earlier segments are generated as well. "
+            "Overrides rerun_segments / stop_after when not empty.\n来自总控台。空 = 全部跑完（有缓存的直接用）；"
+            "填 2 / 1-2 / 3, 6-7, 9 = 这次只生成这几段（有缓存的也重新生成），前面缺的段一起生成。"})
         # hidden 'prompt' (no widget / no slot): only to warn when 'images' (now a placeholder) is used downstream
         return {"required": req, "optional": opt, "hidden": {"unique_id": "UNIQUE_ID", "prompt": "PROMPT"}}
 
@@ -555,6 +590,10 @@ class H3MDLoopSampler:
         for gone in ("start_index", "end_index", "previous_latent"):  # removed 2026-10-30 (API-format prompts)
             if sampler_kwargs.pop(gone, None) is not None:
                 LOG.warning("%s '%s' was removed: use rerun_segments / stop_after", _TAG, gone)
+        run_text = str(sampler_kwargs.pop("segments_to_run", "") or "").strip()   # v0.3 Control Panel box
+        if run_text:
+            parse_segments(run_text, len(plan["segments"]))   # wrong writing -> error before anything runs
+            rerun_segments, stop_after = "", max(parse_segments(run_text, len(plan["segments"]))) + 1
         indices = segment_range(plan, stop_after)
         segs = plan["segments"]
         selected = parse_segments(rerun_segments, len(segs))
@@ -631,6 +670,16 @@ class H3MDLoopSampler:
             users = images_used_downstream(prompt, unique_id)
             if users:  # once per run
                 LOG.warning("%s %s (node(s) %s use 'images').", _TAG, IMAGES_PLACEHOLDER_WARNING, ", ".join(users))
+        if run_text:   # v0.3 segments_to_run: decide rerun vs. normal resume from what is really in the cache
+            planned = plan_segments_to_run(run_text, segs, cache if resume_from_cache else None,
+                                           continue_lowres_prefix == BETA)
+            _stop, selected, line = planned
+            LOG.info("%s %s", _TAG, line)
+            if _stop != len(indices):   # whole video kept (repair) or shorter test run
+                indices = list(range(_stop))
+                pbar = progress_bar(len(indices), unique_id)
+            if selected and not (decode_output and cache_mode == "disk" and resume_from_cache):
+                selected = []   # cannot re-render from the cache: plain run of segments 1..stop
         if cache is not None:  # base seed of a resumed run (the seed widget is usually randomized every queue)
             stored = cache.run_seed() if resume_from_cache else None
             if stored is not None and stored != int(seed):

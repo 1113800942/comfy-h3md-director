@@ -13,6 +13,9 @@ import { PERF_CSS, videoThumb, attachHoverPlay, installMoveWatch, watchNode, unw
 import { hideWidgets } from "./h3md_hide_widgets.js";
 
 const NODE_CLASS = "H3MDDirectorRefMod";
+// v0.3 simple Director: rarely used buttons are hidden (code kept). Settings → H3MD → "Show advanced Director buttons".
+const ADVANCED_SETTING = "H3MD.Director.AdvancedButtons";
+const advanced = () => { try { return !!app.extensionManager?.setting?.get?.(ADVANCED_SETTING); } catch { return false; } };
 const LOOP_CLASS = "H3MDLoopSamplerRefMod";
 // UI-state keys of removed features (raw plan_json view, Segment Prompt Auto Split): dropped on load so old
 // workflows that saved them still open in the normal editor
@@ -942,6 +945,10 @@ class DirectorEditor {
   // reference-video resolution row (between the media library's 图片 box and the shots); native removes the key
   renderRefVideoHeight() {
     const p = this.plan;
+    if (!advanced()) {   // v0.3: fixed auto, row not shown (auto follows the VRAM estimate)
+      if (p.refVideoHeight == null) { p.refVideoHeight = "auto"; queueMicrotask(() => this.commit()); }
+      return null;
+    }
     const raw = String(p.refVideoHeight ?? "native").trim().toLowerCase();
     const cur = REF_VIDEO_HEIGHTS.includes(raw) ? raw : "native";
     const sel = h("select", { "data-key": "ref-video-height",
@@ -982,17 +989,17 @@ class DirectorEditor {
       h("b", {}, KIND_LABEL[kind]), h("span", { class: "h3md-cnt" }, items.length),
       h("span", { class: "h3md-small", "data-pickinfo": kind }, npick > 1 ? `${npick} selected – drag or double-click to add all` : ""),
       h("span", { style: { flex: 1 } }),
-      h("button", { title: isRM ? "Upload RefMod .safetensors to ComfyUI input/refmods" : takesRM ? "Upload to ComfyUI input folder (.safetensors = RefMod, to input/refmods)" : "Upload to ComfyUI input folder", onclick: () => fileInput.click() }, "Upload…"),
-      pickInput, dl,
+      h("button", { title: isRM ? "Upload RefMod .safetensors to ComfyUI input/refmods" : takesRM ? "Upload to ComfyUI input folder (.safetensors = RefMod, to input/refmods) – or drop files here" : "Upload to ComfyUI input folder – or drop files here", onclick: () => fileInput.click() }, advanced() ? "Upload…" : "＋"),
+      ...(advanced() ? [pickInput, dl,
       h("button", { title: "Add the chosen input-folder file", onclick: addPicked }, "Add"),
       h("button", { title: "Refresh file list", onclick: () => { if (isRM) { rmListCache = null; rmInfoCache.clear(); this.rmInfos = {}; this.probeAll(); } else { delete fileListCache[kind]; if (takesRM) rmListCache = null; } pickInput.focus(); } }, "↻"),
       h("button", { class: "clr", "data-clear": kind, title: `remove ALL ${kind} from the plan (and from every shot) – files stay on disk`, disabled: items.length ? null : true,
-        onclick: () => { this.keepGlobal(() => { if (isRM) for (const it of items.slice()) RM.remove(this.plan, it.id); else M.clearMedia(this.plan, kind); }); if (this.pick.kind === kind) this.pick = { kind: null, ids: new Set(), anchor: null }; this.commit(); } }, "Clear 清空"),
+        onclick: () => { this.keepGlobal(() => { if (isRM) for (const it of items.slice()) RM.remove(this.plan, it.id); else M.clearMedia(this.plan, kind); }); if (this.pick.kind === kind) this.pick = { kind: null, ids: new Set(), anchor: null }; this.commit(); } }, "Clear 清空")] : []),
       fileInput));
     const defH = Math.round(BIN_ROWS[kind] * (TILE_H + TILE_GAP) + GRID_PAD);
     const grid = h("div", { class: "h3md-grid", "data-grid": kind, style: { height: `${this.sizeOf("bin-" + kind) || defH}px` } });
     this.trackResize(grid, "bin-" + kind);
-    if (!items.length && !rmItems.length) grid.append(h("div", { class: "h3md-empty" }, isRM ? "empty · type/pick a RefMod name and Add, Upload… a .safetensors, or drop it here" : takesRM ? "empty · Upload… or drop files here (.safetensors = RefMod)" : "empty · Upload… or drop files here"));
+    if (!items.length && !rmItems.length) grid.append(h("div", { class: "h3md-empty" }, isRM ? "empty · type/pick a RefMod name and Add, Upload… a .safetensors, or drop it here" : takesRM ? "empty · drop files here or click ＋ (.safetensors = RefMod)" : "empty · drop files here or click ＋"));
     items.forEach((item, idx) => grid.append(this.renderTile(kind, item, idx)));
     rmItems.forEach((item) => grid.append(this.renderTile("refmods", item, this.plan.media.refmods.indexOf(item))));
     // reorder: drop on the empty area after the last tile = move to the end
@@ -1518,7 +1525,7 @@ class DirectorEditor {
       h("span", { class: "h3md-small", "data-tl-total": "1" }, ""),
       h("span", { style: { flex: 1 } }),
       h("button", { title: "Manual: replace the selected shot by separate shots (each gets its own prompt/refs card)", onclick: () => { this.splitDlg = !this.splitDlg; this.render(); } }, "Split shot…"),
-      h("button", { title: "Append a hard-cut shot", onclick: () => { const at = M.addShotSeconds(p, 10, null, 0); this.selShot = at; this.commit(); } }, "+ Shot")));
+      advanced() ? h("button", { title: "Append a hard-cut shot", onclick: () => { const at = M.addShotSeconds(p, 10, null, 0); this.selShot = at; this.commit(); } }, "+ Shot") : null));
     sec.classList.add("tl");
     if (this.splitDlg) sec.append(this.renderSplitDialog());   // in normal flow: under the title bar, above the track
     this.tlBox = h("div", {});
@@ -2206,6 +2213,10 @@ function hideLoopWidgets(nodeType) {
 
 app.registerExtension({
   name: "H3MD.DirectorEditorRefMod",
+  settings: [{ id: ADVANCED_SETTING, category: ["H3MD", "Director", "Advanced buttons"],
+    name: "Show advanced Director buttons (add file by name / refresh / clear media, reference video height, + Shot)",
+    tooltip: "Off (default): simple Director – media rows show only ＋ (or drop files), reference video height is auto. Reopen the workflow after changing.",
+    type: "boolean", defaultValue: false }],
   setup() {
     try { installMoveWatch(app); } catch (e) { console.error("[H3MD] editor move watch failed", e); }
   },

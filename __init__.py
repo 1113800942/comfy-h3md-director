@@ -50,6 +50,10 @@ def _m_h3md_depth_control():
     from . import h3md_depth_control as m
     return m
 
+def _m_h3md_control_panel():
+    from . import h3md_control_panel as m
+    return m
+
 def _m_h3md_director_refmod():
     from . import h3md_director_refmod as m
     return m
@@ -67,6 +71,7 @@ for _name, _load in (
         ("h3md_face_refine_save", _m_h3md_face_refine_save),
         ("h3md_video_preview", _m_h3md_video_preview),
         ("h3md_depth_control", _m_h3md_depth_control),
+        ("h3md_control_panel", _m_h3md_control_panel),
         ("h3md_director_refmod", _m_h3md_director_refmod),
 ):
     try:
