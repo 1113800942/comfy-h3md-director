@@ -94,7 +94,8 @@ class Panel {
     this.root = el("div", { class: "h3mdcp" });
     for (const ev of ["pointerdown", "wheel"]) this.root.addEventListener(ev, (e) => e.stopPropagation(), { passive: true });
     this.widget = node.addDOMWidget("h3md_panel_ui", "h3md_panel_ui", this.root, {
-      serialize: false, hideOnZoom: false, getValue: () => undefined, setValue: () => {}, getMinHeight: () => 360,
+      serialize: false, hideOnZoom: false, getValue: () => undefined, setValue: () => {},
+      getMinHeight: () => this.minH || 360, getMaxHeight: () => this.minH || 360,
     });
     this.widget.serialize = false;
     for (const n of ["style", "lora_low", "lora_high"]) { const w = W(node, n); if (w) w.hidden = true; }
@@ -163,6 +164,21 @@ class Panel {
       el("div", { class: "styles" }, ...["balanced", "high_motion", "motion_copy"].map((s) =>
         el("button", { class: s === style ? "on" : "", title: STYLE_TIP[s], onclick: () => this.setStyle(s) }, STYLE_LABEL[s]))),
       this.table("low"), this.table("high"));
+    this.fit();
+  }
+
+  // the node grows / shrinks with the LoRA tables (+ / ✕ rows), keeping its width
+  fit() {
+    requestAnimationFrame(() => {
+      // content height (not scrollHeight: the root is stretched to the widget area, so it never shrinks)
+      const last = this.root.lastElementChild, first = this.root.firstElementChild;
+      const need = last && first ? Math.ceil(last.offsetTop + last.offsetHeight - first.offsetTop) + 14 : 360;
+      if (!need || need === this.minH) return;
+      this.minH = need;
+      const size = this.node.computeSize?.();
+      if (size && this.node.setSize) this.node.setSize([this.node.size[0], size[1]]);
+      this.node.setDirtyCanvas?.(true, true);
+    });
   }
 }
 
@@ -194,7 +210,7 @@ app.registerExtension({
     nodeType.prototype.onNodeCreated = function () {
       const r = created?.apply(this, arguments);
       this.__h3mdPanel = new Panel(this);
-      if (!this.size || this.size[0] < 360) this.setSize?.([380, Math.max(this.size?.[1] || 0, 720)]);
+      if (!this.size || this.size[0] < 360) this.setSize?.([400, this.size?.[1] || 600]);
       return r;
     };
     const configure = nodeType.prototype.onConfigure;
