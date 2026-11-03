@@ -2,6 +2,16 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.2.2] — 2026-11-02
+### More shared / server hardening / 共享和服务器继续加固
+* Plan export: a plan can no longer pull arbitrary files into the zip - absolute paths only for media files, and on a
+  shared ComfyUI only inside ComfyUI's folders. 导出计划不能再把任意文件打进 zip。
+* Plan import: on a shared ComfyUI uploads and unpacked media are capped at 1 GB (8 GB locally); unpacking counts the
+  real bytes, so a zip whose header lies (zip bomb) is stopped. 共享模式导入上限 1 GB；解压按实际字节计数，防压缩炸弹。
+* Cache: on a shared ComfyUI `resume_from_cache` no longer reuses the `resume_<settings>` folder (another person with the
+  same settings could get your segments); each run gets its own folder. `H3MD_SHARED_RESUME=1` allows it again.
+  共享模式下不再复用同设置的续跑缓存，避免拿到别人的分段。
+
 ## [0.2.1] — 2026-11-02
 ### Safer on shared / server ComfyUI / 共享和服务器上更安全
 * New `h3md_paths.py`. When ComfyUI listens beyond localhost (`--listen`, LAN, cloud platform) H3MD only reads media

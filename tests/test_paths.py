@@ -46,6 +46,8 @@ def test_local_mode_unchanged():
     assert R._resolve(os.path.join(other, "secret.txt"), inp) is None        # but only media files
     assert D.resolve_media_path(os.path.join(other, "a.png"))
     assert P.output_root(other, out) == os.path.abspath(other)
+    import h3md_plan_io as PI
+    assert PI.limits() == (PI.MAX_FILE_BYTES, PI.MAX_TOTAL_BYTES)
 
 
 def test_shared_mode_limits():
@@ -66,6 +68,13 @@ def test_shared_mode_limits():
         full, file, sub, kind = S.save_path("video/H3MD", other, 64, 64)
         assert P.inside(full, [out]), full
         assert C.default_root() == C.temp_root()
+        import h3md_plan_io as PI
+        assert PI.limits() == (PI.SHARED_MAX_BYTES, PI.SHARED_MAX_BYTES)
+        assert PI.resolve_in(inp, os.path.join(other, "a.png")) is None      # export can't pack outside files
+        assert PI.resolve_in(inp, os.path.join(inp, "secret.txt")) is None    # nor non-media
+        c = C.SegmentCache(None, "f" * 64, True)                             # resume asked, shared: fresh run
+        assert os.path.basename(c.dir).startswith("run_"), c.dir
+        assert P.inside(c.dir, [tmp])
         os.environ["H3MD_MEDIA_DIRS"] = other
         assert R._resolve(os.path.join(other, "a.png"), inp)                 # explicitly allowed extra folder
     finally:

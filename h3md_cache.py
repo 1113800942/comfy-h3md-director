@@ -235,6 +235,11 @@ class SegmentCache:
             LOG.warning("%s cache_dir '%s' is outside ComfyUI's folders on a shared ComfyUI; using the default", _TAG, root)
             root = None
         root = os.path.abspath(root or default_root())
+        if resume and D.PATHS.shared() and os.environ.get("H3MD_SHARED_RESUME", "") != "1":
+            # resume_<settings hash> is shared by every run with the same settings: on a shared ComfyUI another
+            # person's segments could be picked up. Fresh run folder instead (H3MD_SHARED_RESUME=1 to allow).
+            LOG.warning("%s shared ComfyUI: resume_from_cache off for this run (set H3MD_SHARED_RESUME=1 to allow)", _TAG)
+            resume = False
         if resume:
             name = "resume_" + settings_hash[:16]
         else:

@@ -44,6 +44,22 @@ MEDIA_EXTS = (".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff",
 MAX_FILE_BYTES = 4 * 1024 ** 3        # one member
 MAX_TOTAL_BYTES = 8 * 1024 ** 3       # whole plan, unpacked
 BIG_VIDEO_BYTES = 200 * 1024 ** 2     # reference videos above this need include_big_videos
+SHARED_MAX_BYTES = 1 * 1024 ** 3      # v0.2.1: shared / server ComfyUI (h3md_paths.shared): member and total cap
+
+
+def _paths():
+    try:
+        from . import h3md_paths as PATHS
+    except ImportError:
+        import h3md_paths as PATHS
+    return PATHS
+
+
+def limits() -> tuple:
+    """(one member, whole plan) byte limits: lower on a shared ComfyUI, where an upload must not fill the disk."""
+    if _paths().shared():
+        return SHARED_MAX_BYTES, SHARED_MAX_BYTES
+    return MAX_FILE_BYTES, MAX_TOTAL_BYTES
 KINDS = ("images", "videos", "audios")
 FPS = 24
 TOKEN_RE = re.compile(r"<(Picture|Video|Audio) (\d+)>")
@@ -98,10 +114,13 @@ def refmod_files(plan: dict):
 
 
 def resolve_in(base: str, file: str):
-    """Relative paths must stay inside base (the input folder); absolute paths are used as they are."""
+    """Relative paths must stay inside base (the input folder); absolute paths only for media files, and on a
+    shared ComfyUI only inside ComfyUI's folders (v0.2.1: an export must not pack arbitrary files)."""
     if not file:
         return None
     if os.path.isabs(file):
+        if not file.lower().endswith(MEDIA_EXTS) or not _paths().may_read(file):
+            return None
         return file if os.path.isfile(file) else None
     base = os.path.abspath(base)
     cand = os.path.abspath(os.path.join(base, file))
@@ -386,23 +405,30 @@ def import_plan(data: bytes, input_dir: str, filename: str = "") -> dict:
         os.makedirs(root, exist_ok=True)
         dest = _unique_dir(root, name)
         folder_rel = f"{PLANS_SUBDIR}/{os.path.basename(dest)}"
+        max_file, max_total = limits()
         with zipfile.ZipFile(io.BytesIO(data)) as z:
             total = 0
             for zi in z.infolist():
                 if zi.filename in info["media_members"]:
-                    if zi.file_size > MAX_FILE_BYTES:
+                    if zi.file_size > max_file:
                         raise ValueError(f"{_TAG} {zi.filename} is too large ({zi.file_size} bytes)")
                     total += zi.file_size
-            if total > MAX_TOTAL_BYTES:
+            if total > max_total:
                 raise ValueError(f"{_TAG} the plan's media are too large ({total} bytes)")
             os.makedirs(dest)
+            written = 0
             for m in info["media_members"]:
                 out = os.path.join(dest, os.path.basename(m))
+                size = 0
                 with z.open(m) as src, open(out, "wb") as dst:
                     while True:
                         chunk = src.read(1 << 20)
                         if not chunk:
                             break
+                        size += len(chunk)
+                        written += len(chunk)
+                        if size > max_file or written > max_total:   # sizes in the zip header can lie (zip bomb)
+                            raise ValueError(f"{_TAG} {m} unpacks larger than its header says; import stopped")
                         dst.write(chunk)
         # rewrite plan paths: manifest maps original file -> media/<name>; without a manifest match by base name
         by_file = {e.get("file"): e.get("zip") for e in manifest.get("media") or [] if e.get("included")}
@@ -487,7 +513,7 @@ def register() -> bool:
                 if not chunk:
                     break
                 data += chunk
-                if len(data) > MAX_TOTAL_BYTES:
+                if len(data) > limits()[1]:
                     return web.json_response({"ok": False, "error": "file too large"}, status=400)
             out = await asyncio.get_running_loop().run_in_executor(None, import_plan, bytes(data), _in(), filename)
         except Exception as exc:

@@ -60,7 +60,7 @@ generate them segment by segment, keep every finished segment on disk, and repai
    there is nothing else to set.
 7. **Shared or server ComfyUI** (started with `--listen`, a LAN address or a cloud platform): H3MD then only reads
    media inside ComfyUI's input / output / temp folders, only saves videos inside the output folder and keeps its
-   cache in ComfyUI's temp folder. Local use (the default `127.0.0.1`) is unchanged. Override with
+   cache in ComfyUI's temp folder (each run its own; plan imports capped at 1 GB). Local use (the default `127.0.0.1`) is unchanged. Override with
    `H3MD_PATHS=local` / `H3MD_PATHS=shared`; allow extra media folders with `H3MD_MEDIA_DIRS`.
 
 ## Quick start

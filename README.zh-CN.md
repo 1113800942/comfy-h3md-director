@@ -57,7 +57,7 @@
    （1 个 12 秒镜头，图、音乐、全部设置都在里面）。在 H3MD 导演台点 **Import plan…** → 选这个 zip →
    **Plan + all settings** → 运行。两段式采样（低清 + latent 放大）在 Loop 节点内部自动完成，其他都不用调。
 7. **共享 / 服务器上的 ComfyUI**（用 `--listen`、局域网地址或云平台启动）：H3MD 只读取 ComfyUI 的 input / output / temp
-   文件夹里的素材，视频只保存到 output 文件夹里，缓存放在 ComfyUI 的 temp 文件夹。本机使用（默认 `127.0.0.1`）不变。
+   文件夹里的素材，视频只保存到 output 文件夹里，缓存放在 ComfyUI 的 temp 文件夹（每次运行单独一份，计划导入上限 1 GB）。本机使用（默认 `127.0.0.1`）不变。
    可以用环境变量 `H3MD_PATHS=local` / `H3MD_PATHS=shared` 强制指定；`H3MD_MEDIA_DIRS` 可以额外允许素材文件夹。
 
 ## 快速开始
