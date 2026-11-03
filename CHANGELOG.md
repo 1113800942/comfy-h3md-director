@@ -30,13 +30,16 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   sharpness −10.6 % -> −7.6 %, saturation unchanged (+3.7 % -> +3.6 %) — a small gain, so it stays off by default.
   高清锚定（Loop Options 最后一个，默认关）：续接段新生成的高清 latent 在解码前拉回本镜头第一段。实测前 5 段：
   色差 0.29 → 0.13，锐度 −10.6% → −7.6%，饱和度不变；效果小，默认关。
-* `tools/drift_correct.py`: after the run, pulls every segment of a finished long take back to segment 1 —
-  saturation (colour gain around each pixel's brightness and the segment's own colour cast, so the tint does not move)
-  and sharpness (light unsharp mask on brightness, capped), solved per segment from `drift_report`'s measures, easing in
-  over 2 s after each seam; original audio copied. Measured on the 3-minute take: saturation +8.4 % -> −0.2 %,
-  sharpness −18.0 % -> +1.3 %, brightness / contrast unchanged, colour shift ≤ 0.6. One continuous scene only.
-  成片后校正脚本：按段把饱和度和锐度拉回第 1 段，接缝后 2 秒渐变，保留原音轨。3 分钟长镜头实测：饱和度 +8.4% → −0.2%，
-  锐度 −18.0% → +1.3%。只用于单一场景。
+* **`drift_correct` (off / auto) + `drift_strength`** on H3MD Save Video Interp and the Face Refine save node (appended
+  last, default off): while the video is written, every segment is measured (brightness, contrast, colour, layout,
+  saturation, sharpness); a hard cut starts a new reference; inside a shot only "saturation / sharpness moved, the rest
+  stayed" counts as drift and is pulled back (colour gain around each pixel's brightness and the segment's own tint, a
+  light luma-only unsharp mask, easing over 2 s); a clear brightness / colour / layout change is a scene change — not
+  corrected, new reference; shots of 1–2 segments are skipped. Decisions in `<video>_drift.json`. The cache is not
+  changed. 3-minute take: saturation +8.4 % -> −0.2 %, sharpness −18.0 % -> +1.3 %; the 11-shot hard-cut music video:
+  every shot left untouched. `h3md_drift_correct.py`; `tools/drift_correct.py` does the same on finished videos.
+  保存节点新增 drift_correct（默认关）：存盘时逐段测量；硬切换参照；同一镜头里只有饱和度、锐度变了才算漂移并拉回；
+  亮度、色调、构图明显变了算换场景，不调并换参照；1–2 段的短镜头不动；每段判断写进 _drift.json；缓存不变。
 * Why both: the latent statistics were already locked (low-res and high-res) and the picture still got +3.6 %
   saturation over 5 segments, so the rest of the drift is not a per-channel shift; it is fixed in pixel space.
   为什么两个都做：低清、高清 latent 的通道统计都已锁住，画面饱和度仍涨 3.6%，剩下的漂移不是通道整体偏移，只能在像素层面校正。

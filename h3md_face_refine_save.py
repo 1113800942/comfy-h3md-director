@@ -1000,11 +1000,12 @@ class RefinedSource:
 def refined_stream_save(info, path, refiner, interpolate=False, target_fps=S.SOURCE_FPS, scale=1.0,
                         model_name="flownet.pkl", batch_size=8, use_fp16=True, crf=19, metadata=None,
                         interpolator=None, pbar=None, chunk_frames=None, fmt="video/h264-mp4", pix_fmt="yuv420p",
-                        loop_count=0, trim_to_audio=False, src=None):
+                        loop_count=0, trim_to_audio=False, src=None, drift_correct="off", drift_strength=1.0):
     """h3md_stream_save.stream_save with RefinedSource as the frame source (same timing, writers, RIFE chunk / OOM
     ladder, atomic .part rename).  Chunk size: auto_chunk with the refine buffers added to the RAM budget."""
     t0 = time.time()
     base_src = src if src is not None else S.SegmentSource(info)
+    drift_rows = S.attach_drift(base_src, drift_correct, drift_strength)   # v0.2.0: corrected before the face refine
     src = RefinedSource(base_src, refiner)
     n = src.total
     source_fps = float(src.fps)
@@ -1119,6 +1120,8 @@ def refined_stream_save(info, path, refiner, interpolate=False, target_fps=S.SOU
               "vosr2_s": round(refiner.t_vosr2, 1), "stitch_s": round(refiner.t_stitch, 1),
               "audio_seconds": round(writer.a_done / writer.sr, 3) if writer.a is not None else None,
               "peak_chunk_mb": round(peak_chunk / 1e6, 1), "cache_dir": src.dir, "elapsed_s": round(time.time() - t0, 1)}
+    if drift_rows is not None:
+        report["drift_report"] = S.write_drift_report(path, drift_rows, drift_strength)
     LOG.info("%s saved %s", _TAG, report)
     return report
 
@@ -1245,6 +1248,7 @@ class H3MDSaveVideoFaceRefineInterp:
         opt["refine_model"] = (["VOSR2", "SeedVR2"], {"default": "VOSR2", "tooltip":
                                "Face restore path: VOSR2 uses vosr2_model (+ vosr2_settings); SeedVR2 uses "
                                "seedvr2_model + seedvr2_vae. The other inputs are ignored."})
+        opt.update(S.DRIFT_INPUTS)   # v0.2.0, appended LAST
         return {"required": req, "optional": opt,
                 "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "unique_id": "UNIQUE_ID"}}
 
@@ -1267,7 +1271,7 @@ class H3MDSaveVideoFaceRefineInterp:
     def save(self, segments=None, vosr2_model=None, face_refine=True, vosr2_seed=42, vosr2_settings=None,
              identity_reference=None, identity_clip_vision=None, face_pick=None, prompt=None, extra_pnginfo=None,
              unique_id=None, seedvr2_model=None, seedvr2_vae=None, refine_model="VOSR2", **kw):
-        save_keys = set(_save_inputs()) | set(S.REMOVED_INPUTS)
+        save_keys = set(_save_inputs()) | set(S.REMOVED_INPUTS) | set(S.DRIFT_INPUTS)
         save_kw = {k: v for k, v in kw.items() if k in save_keys}
         track, stitch = _fr_specs()
         track_kw = {k: kw.get(k, _spec_default(track[k])) for k in TRACK_REQUIRED + TRACK_OPTIONAL}
@@ -1393,7 +1397,8 @@ class H3MDSaveVideoFaceRefineInterp:
                                       g("scale", 1.0), g("model_name", "flownet.pkl"), g("batch_size", 8),
                                       g("use_fp16", True), g("crf", 19), meta, pbar=pbar, fmt=fmt,
                                       pix_fmt=g("pix_fmt", "yuv420p"), loop_count=g("loop_count", 0),
-                                      trim_to_audio=g("trim_to_audio", False))
+                                      trim_to_audio=g("trim_to_audio", False),
+                                      drift_correct=g("drift_correct", "off"), drift_strength=g("drift_strength", 1.0))
         except BaseException:
             S.notify_ui(unique_id, {"cache_dir": cache_dir, "state": "kept (save failed)"})
             raise

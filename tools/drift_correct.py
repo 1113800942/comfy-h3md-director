@@ -1,99 +1,133 @@
-"""H3MD drift correct: pull every segment of a finished long video back to segment 1 (saturation + sharpness).
+"""H3MD drift correct: pull every continued segment of a finished video back to the first segment of its shot
+(saturation + sharpness).
 
 Usage (ComfyUI's Python: PyAV, numpy, torch):
 
     python tools/drift_correct.py my_video.mp4 --segments 294,362,362,362 --overlap 39
     python tools/drift_correct.py my_video.mp4 --every 13.5 --strength 0.7 --no-sharpen
 
-For ONE continuous scene (a long take, motion copy) - a story whose look should change must not use it.
-Each segment's mean saturation and sharpness are measured exactly like tools/drift_report.py (360 px wide), then:
+Shot by shot: every hard cut (overlapIn 0) starts a new shot whose first segment is the new reference, so a film
+with several scenes can use it - each continued segment is pulled back to the first segment of ITS shot.  Shots with
+fewer than --min-shot segments (default 3) are left alone.  Inside one shot the look must stay the same: a shot whose
+light or content is meant to change (night falls, someone walks in) must not be corrected.
+
+    python tools/drift_correct.py film.mp4 --plan "my workflow.json"        (or a plan .json / exported plan .zip)
+    python tools/drift_correct.py film.mp4 --segments 294,362,362,362:0,362,362
+
+Scene changes inside a shot are recognised and left alone: a continued segment whose brightness, contrast, colour or
+layout differs clearly from its reference (day -> night, a new room, someone walks in), or whose saturation /
+sharpness change is too large to be drift, is NOT corrected and becomes the new reference (h3md_drift_correct.py).
+Every decision is written to <video>_corrected.json and printed.
+
+Each drifting segment's mean saturation and sharpness are measured exactly like tools/drift_report.py, then:
   * saturation: colour is scaled around each pixel's own brightness and the segment's average colour cast (a single
     gain per segment), so the overall tint does not move,
   * sharpness: a light unsharp mask on brightness only (sigma 1.2 px, amount capped at 0.8),
-solved per segment so the segment matches segment 1 (x strength).  The change eases in over 2 s (raised cosine) after
-each seam, so nothing jumps.  Brightness, contrast and hue are not touched.  The original audio is copied unchanged.
+solved per segment so the segment matches its shot's first segment (x strength).  The change eases in over 2 s (raised cosine) after
+each continued seam, so nothing jumps (a hard cut keeps its cut).  Brightness, contrast and hue are not touched.  The original audio is copied unchanged.
 Writes <video>_corrected.mp4 (H.264 CRF 16) and <video>_corrected.json (the gain / amount per segment).
 
 Measured on the 3-minute single take (14 segments, lowres_anchor = 1):
-saturation +8.4 % -> +0.1 %, sharpness -18.0 % -> +1.5 % (worst segment vs segment 1).
+saturation +8.4 % -> -0.2 %, sharpness -18.0 % -> +1.3 % (worst segment vs segment 1).
 """
 import argparse
 import json
-import math
 import os
 import sys
 
 import av
 import numpy as np
 import torch
-import torch.nn.functional as F
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.dirname(HERE))
 import drift_report as DR  # noqa: E402
-
-EASE_S = 2.0
-SIGMA = 1.2
-MAX_AMOUNT = 0.8
-SAMPLES = 6
+import h3md_drift_correct as DC  # noqa: E402
 
 
-def stats(rgb):
-    t = torch.from_numpy(rgb).permute(2, 0, 1)[None].float()
-    h = max(2, round(rgb.shape[0] * 360 / rgb.shape[1] / 2) * 2)
-    s = F.interpolate(t, size=(h, 360), mode="area")[0].permute(1, 2, 0).clamp(0, 255).round().byte().numpy()
-    L, _, _ = DR._lab_like(s)
-    return DR._saturation(s).mean(), DR._sharpness(L)
+def parse_segments(text, overlap):
+    """'294,362,362:0,362' -> [(294, 0), (362, 39), (362, 0), (362, 39)]  (':0' = hard cut, ':22' = other overlap)."""
+    out = []
+    for i, tok in enumerate(t.strip() for t in text.split(",") if t.strip()):
+        ln, _, ov = tok.partition(":")
+        out.append((int(ln), 0 if i == 0 else (int(ov) if ov else overlap)))
+    return out
 
 
-def _kernel():
-    r = int(math.ceil(3 * SIGMA))
-    x = torch.arange(-r, r + 1, dtype=torch.float32)
-    k = torch.exp(-x * x / (2 * SIGMA * SIGMA))
-    return k / k.sum()
+def plan_segments(path):
+    """(length, overlapIn) per segment from an H3MD plan .json, a workflow .json or an exported plan .zip."""
+    import zipfile
+    if zipfile.is_zipfile(path):
+        with zipfile.ZipFile(path) as z:
+            obj = json.loads(z.read("plan.json").decode("utf-8"))
+    else:
+        with open(path, encoding="utf-8-sig") as f:
+            obj = json.load(f)
+    if isinstance(obj, dict) and "nodes" in obj:          # a ComfyUI workflow: take the Director's plan_json
+        nodes = list(obj.get("nodes") or [])
+        for sg in (obj.get("definitions") or {}).get("subgraphs") or []:
+            nodes += sg.get("nodes") or []
+        plans = [n["widgets_values"][0] for n in nodes if str(n.get("type", "")).startswith("H3MDDirector")
+                 and isinstance(n.get("widgets_values"), list) and n["widgets_values"]]
+        if not plans:
+            raise SystemExit("no H3MD Director node in this workflow")
+        obj = json.loads(plans[0]) if isinstance(plans[0], str) else plans[0]
+    if isinstance(obj, dict) and isinstance(obj.get("plan"), (dict, str)) and "segments" not in obj:
+        obj = obj["plan"] if isinstance(obj["plan"], dict) else json.loads(obj["plan"])
+    segs = [s for s in obj.get("segments") or [] if isinstance(s, dict)]
+    return [(int(s["length"]), 0 if i == 0 else int(s.get("overlapIn") or 0)) for i, s in enumerate(segs)]
 
 
-KERNEL = _kernel()
+def layout(n, fps, segs=None, every=None):
+    """-> blocks [(start, end)] of visible frames and cut flags (True = first segment / hard cut)."""
+    if segs:
+        scale = fps / 24.0                     # H3MD renders 24 fps; an interpolated 48 fps file has 2x the frames
+        b, cut = [0], []
+        for i, (ln, ov) in enumerate(segs):
+            b.append(b[-1] + (ln if i == 0 else ln - ov))
+            cut.append(i == 0 or ov == 0)
+        b = [int(round(x * scale)) for x in b]
+        b[-1] = n if abs(b[-1] - n) <= 2 * scale + 1 else min(b[-1], n)
+        blocks = [(b[i], b[i + 1]) for i in range(len(segs)) if b[i + 1] > b[i]]
+        return blocks, cut[:len(blocks)]
+    blocks = DR.bounds(n, fps, None, 0, every)
+    return blocks, [i == 0 for i in range(len(blocks))]
 
 
-def chroma_mean(frames):
-    """Mean colour offset (RGB minus brightness) of a few frames: the cast that the gain must not change."""
-    t = torch.from_numpy(np.stack(frames)).float()
-    y = (t * torch.tensor([0.299, 0.587, 0.114])).sum(-1, keepdim=True)
-    return (t - y).mean(dim=(0, 1, 2))
+class SequentialReader:
+    """read(a, b) for increasing, contiguous ranges of a video file (decoded once, front to back)."""
 
+    def __init__(self, path):
+        self.c = av.open(path)
+        self.it = self.c.decode(video=0)
+        self.pos = 0
 
-def correct(rgb, gain, amount, cast=None):
-    t = torch.from_numpy(rgb).float()
-    y = (t * torch.tensor([0.299, 0.587, 0.114])).sum(-1, keepdim=True)
-    c = cast if cast is not None else torch.zeros(3)
-    out = y + (t - y - c) * gain + c
-    if amount > 0:
-        r = (len(KERNEL) - 1) // 2
-        yy = y.permute(2, 0, 1)[None]
-        bl = F.conv2d(F.pad(yy, (r, r, 0, 0), mode="replicate"), KERNEL.view(1, 1, 1, -1))
-        bl = F.conv2d(F.pad(bl, (0, 0, r, r), mode="replicate"), KERNEL.view(1, 1, -1, 1))
-        out = out + (yy - bl)[0].permute(1, 2, 0) * amount
-    return out.clamp(0, 255).round().byte().numpy()
+    def read(self, a, b):
+        while self.pos < a:
+            next(self.it)
+            self.pos += 1
+        out = []
+        while self.pos < b:
+            out.append(torch.from_numpy(next(self.it).to_ndarray(format="rgb24")))
+            self.pos += 1
+        return torch.stack(out).float() / 255.0
 
-
-def bisect(fn, target, lo, hi, increasing, n=12):
-    for _ in range(n):
-        mid = (lo + hi) / 2
-        if (fn(mid) > target) == increasing:
-            hi = mid
-        else:
-            lo = mid
-    return (lo + hi) / 2
+    def close(self):
+        self.c.close()
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("video")
-    ap.add_argument("--segments", help="segment lengths in frames, e.g. 294,362,362")
+    ap.add_argument("--segments", help="segment lengths in frames, e.g. 294,362,362; LEN:0 = this segment starts with a "
+                                       "hard cut (a new shot, measured against its own first segment)")
+    ap.add_argument("--plan", help="read the segments from an H3MD plan .json, a workflow .json or an exported plan .zip")
     ap.add_argument("--overlap", type=int, default=39)
-    ap.add_argument("--every", type=float, help="cut into blocks of N seconds instead")
-    ap.add_argument("--strength", type=float, default=1.0, help="0..1 (default 1 = match segment 1)")
+    ap.add_argument("--every", type=float, help="cut into blocks of N seconds instead (one shot)")
+    ap.add_argument("--strength", type=float, default=1.0, help="0..1 (default 1 = match the reference)")
     ap.add_argument("--no-sharpen", action="store_true", help="saturation only")
+    ap.add_argument("--min-shot", type=int, default=3, help="shots with fewer segments are left untouched (default 3)")
     ap.add_argument("--out", help="output file (default <video>_corrected.mp4)")
     a = ap.parse_args()
     out_path = a.out or os.path.splitext(a.video)[0] + "_corrected.mp4"
@@ -105,67 +139,18 @@ def main():
     if not n:
         with av.open(a.video) as c:
             n = sum(1 for _ in c.decode(video=0))
-    segs = [int(x) for x in a.segments.split(",")] if a.segments else None
-    blocks = DR.bounds(n, fps, segs, a.overlap, a.every)
-    seg_of = np.zeros(n, np.int32)
-    for i, (s, e) in enumerate(blocks):
-        seg_of[s:e] = i
+    segs = plan_segments(a.plan) if a.plan else (parse_segments(a.segments, a.overlap) if a.segments else None)
+    blocks, cut = layout(n, fps, segs, a.every)
 
-    raw = [[] for _ in blocks]
-    samples = [[] for _ in blocks]
-    with av.open(a.video) as c:
-        for k, fr in enumerate(c.decode(video=0)):
-            if k >= n:
-                break
-            i = seg_of[k]
-            rgb = fr.to_ndarray(format="rgb24")
-            raw[i].append(stats(rgb))
-            s, e = blocks[i]
-            if (k - s) % max(1, (e - s) // SAMPLES) == 0 and len(samples[i]) < SAMPLES:
-                samples[i].append(rgb)
-    ref = np.array(raw[0]).mean(0)
-    params = [(1.0, 0.0)]
-    casts = [chroma_mean(samples[0])]
-    rows = []
-    for i in range(1, len(blocks)):
-        m = np.array(raw[i]).mean(0)
-        smp = samples[i]
-        cast = chroma_mean(smp)
-        casts.append(cast)
-
-        def sat(g, amt=0.0):
-            return np.mean([stats(correct(f, g, amt, cast))[0] for f in smp])
-
-        def sharp(amt, g):
-            return np.mean([stats(correct(f, g, amt, cast))[1] for f in smp])
-        s0 = sat(1.0)
-        tgt = (m[0] + (ref[0] - m[0]) * a.strength) * s0 / m[0]
-        g = bisect(sat, tgt, 0.7, 1.3, True)
-        amt = 0.0
-        if not a.no_sharpen and m[1] < ref[1]:
-            k0 = sharp(0.0, g)
-            tk = (m[1] + (ref[1] - m[1]) * a.strength) * k0 / m[1]
-            amt = bisect(lambda x: sharp(x, g), tk, 0.0, MAX_AMOUNT, True, n=10)
-        params.append((g, amt))
-        rows.append({"segment": i + 1, "saturation_pct": round(100 * (m[0] / ref[0] - 1), 1),
-                     "sharpness_pct": round(100 * (m[1] / ref[1] - 1), 1), "gain": round(g, 4), "amount": round(amt, 4)})
-        print(f"segment {i + 1}: saturation {rows[-1]['saturation_pct']:+.1f} %, sharpness {rows[-1]['sharpness_pct']:+.1f} %"
-              f" -> colour gain {g:.3f}, sharpen {amt:.3f}")
-
-    ease = max(1, int(round(EASE_S * fps)))
-
-    def factor(k):
-        i = seg_of[min(k, n - 1)]
-        g, amt = params[i]
-        c = casts[i]
-        if i > 0:
-            p = k - blocks[i][0]
-            e = max(1, min(ease, (blocks[i][1] - blocks[i][0]) // 3))   # short blocks: ease over their first third
-            if p < e:
-                w = 0.5 - 0.5 * math.cos(math.pi * p / e)
-                g0, a0 = params[i - 1]
-                g, amt, c = g0 + (g - g0) * w, a0 + (amt - a0) * w, casts[i - 1] + (c - casts[i - 1]) * w
-        return g, amt, c
+    rd = SequentialReader(a.video)
+    try:
+        plan = DC.build(rd.read, blocks, cut, fps, a.strength, not a.no_sharpen, a.min_shot)
+    finally:
+        rd.close()
+    for row in plan.report():
+        extra = f" -> colour gain {row['gain']:.3f}, sharpen {row['sharpen']:.3f}" if row["role"] == "drift" else ""
+        why = f" ({row['why']})" if row.get("why") else ""
+        print(f"segment {row['segment']} (shot {row['shot']}): {row['role']}{why}{extra}")
 
     with av.open(a.video) as c, av.open(out_path, "w") as o:
         vin = c.streams.video[0]
@@ -183,17 +168,16 @@ def main():
                     o.mux(pkt)
                 continue
             for fr in pkt.decode():
-                g, amt, c = factor(k)
-                img = correct(fr.to_ndarray(format="rgb24"), g, amt, c)
-                nf = av.VideoFrame.from_ndarray(img, format="rgb24")
-                for p in vout.encode(nf):
+                t = torch.from_numpy(fr.to_ndarray(format="rgb24")).float()[None] / 255.0
+                img = (plan.correct(t, k)[0] * 255).round().clamp(0, 255).to(torch.uint8).numpy()
+                for p in vout.encode(av.VideoFrame.from_ndarray(img, format="rgb24")):
                     o.mux(p)
                 k += 1
         for p in vout.encode():
             o.mux(p)
     with open(os.path.splitext(out_path)[0] + ".json", "w", encoding="utf-8") as f:
         json.dump({"video": os.path.basename(a.video), "strength": a.strength, "sharpen": not a.no_sharpen,
-                   "segments": rows}, f, indent=1)
+                   "min_shot": a.min_shot, "shots": int(sum(cut)), "segments": plan.report()}, f, indent=1)
     print("written:", out_path)
 
 

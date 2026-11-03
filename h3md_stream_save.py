@@ -38,8 +38,10 @@ import torch
 
 try:
     from . import h3md_director as D
+    from . import h3md_drift_correct as DRIFT   # v0.2.0 drift_correct (save-time correction)
 except ImportError:  # flat import (tests)
     import h3md_director as D
+    import h3md_drift_correct as DRIFT
 
 LOG = logging.getLogger("H3MD")
 _TAG = "[H3MD StreamSave]"
@@ -126,6 +128,7 @@ class SegmentSource:
             pos += e - s
         self.total = pos
         self._mm = {}
+        self.drift = None   # v0.2.0: h3md_drift_correct.Plan applied in read() (None = frames unchanged)
 
     def _p(self, k, suffix):
         return os.path.join(self.dir, f"seg_{k:03d}{suffix}")
@@ -162,7 +165,15 @@ class SegmentSource:
             pos += part.shape[0]
             del part
         assert pos == b, (pos, b)
+        if self.drift is not None:
+            out = self.drift.correct(out, a)
         return out
+
+    def segment_blocks(self):
+        """[(start, end)] of every segment in the merged clip and cut flags (True = first segment / hard cut)."""
+        blocks = [(g0, g0 + (e - s)) for g0, (s, e) in zip(self.starts, self.spans)]
+        cut = [j == 0 or int(t) == 0 for j, t in enumerate(self.trims)]
+        return blocks, cut
 
     def audio(self):
         """Joined audio, like SegmentCache.merge (audio is small: ~0.4 MB/s stereo float32)."""
@@ -860,9 +871,55 @@ def delete_cache_dir(path):
 # core (no ComfyUI dependency except the hooks above)
 # ---------------------------------------------------------------------------
 
+DRIFT_INPUTS = {
+    "drift_correct": (DRIFT.MODES, {"default": "off", "tooltip":
+                      "v0.2.0. auto: while saving, pull slow drift (saturation creeping up, picture getting softer) "
+                      "back segment by segment. A hard cut starts a new reference; inside a shot a segment whose "
+                      "brightness, colour or layout clearly changed (night falls, a new room, someone walks in) is "
+                      "left alone and becomes the new reference. Shots of 1-2 segments are not touched. The cache is "
+                      "not changed: switch off and save again to compare. Decisions: <video>_drift.json.\n"
+                      "auto：保存时把一段段累积的漂移（饱和度变高、画面变软）拉回来。硬切换新参照；同一镜头里亮度、"
+                      "色调或构图明显变了的段（天黑、换地方、有人进来）不调，并成为新参照；1-2 段的短镜头不动。"
+                      "缓存不变：关掉再存一次就能对比。每段的判断写在 <视频>_drift.json。"}),
+    "drift_strength": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 1.0, "step": 0.05, "tooltip":
+                       "drift_correct = auto: 1 = match the reference, 0.5 = half way. 校正力度。"}),
+}
+
+
+def attach_drift(src, mode="off", strength=1.0):
+    """Measure the clip and set src.drift (save-time correction).  -> per-segment report rows or None."""
+    if mode != "auto" or float(strength) <= 0:
+        return None
+    t0 = time.time()
+    blocks, cut = src.segment_blocks()
+    src.drift = None
+    plan = DRIFT.build(src.read, blocks, cut, src.fps, float(strength), True, check=check_interrupt)
+    src.drift = plan if plan.active else None
+    rows = plan.report()
+    LOG.info("%s drift_correct auto: %d segment(s) measured in %.1fs, %d corrected, %d scene change(s)", _TAG,
+             len(blocks), time.time() - t0, sum(r["role"] == "drift" for r in rows),
+             sum(r["role"] == "scene" for r in rows))
+    return rows
+
+
+def write_drift_report(path, rows, strength):
+    if rows is None:
+        return None
+    rp = os.path.splitext(path)[0] + "_drift.json"
+    try:
+        with open(rp, "w", encoding="utf-8") as f:
+            json.dump({"video": os.path.basename(path), "strength": float(strength), "segments": rows}, f, indent=1,
+                      ensure_ascii=False)
+        return rp
+    except OSError as exc:
+        LOG.warning("%s drift report not written (%s)", _TAG, exc)
+        return None
+
+
 def stream_save(info, path, interpolate=False, target_fps=SOURCE_FPS, scale=1.0, model_name="flownet.pkl",
                 batch_size=8, use_fp16=True, crf=19, metadata=None, interpolator=None, pbar=None, chunk_frames=None,
-                fmt="video/h264-mp4", pix_fmt="yuv420p", loop_count=0, trim_to_audio=False):
+                fmt="video/h264-mp4", pix_fmt="yuv420p", loop_count=0, trim_to_audio=False, drift_correct="off",
+                drift_strength=1.0):
     """Write the merged clip of `info` to `path` (atomic: path + '.part' renamed at the end). Returns a report.
     The source is always H3MD's own frame rate (24 fps).  The file is always written at target_fps:
     interpolate on: RIFE 24 -> target_fps.  Off: the frames unchanged, played at target_fps (!= 24 plays faster /
@@ -870,6 +927,7 @@ def stream_save(info, path, interpolate=False, target_fps=SOURCE_FPS, scale=1.0,
     Chunk size is automatic (free VRAM / RAM before each chunk); chunk_frames (tests only) pins it."""
     t0 = time.time()
     src = SegmentSource(info)
+    drift_rows = attach_drift(src, drift_correct, drift_strength)   # v0.2.0 (None when off)
     n = src.total
     source_fps = float(src.fps)
     out_fps = float(target_fps)
@@ -979,6 +1037,8 @@ def stream_save(info, path, interpolate=False, target_fps=SOURCE_FPS, scale=1.0,
               "chunk_sizes": sorted(set(sizes)), "oom_events": state["events"],
               "audio_seconds": round(writer.a_done / writer.sr, 3) if writer.a is not None else None,
               "peak_chunk_mb": round(peak_chunk / 1e6, 1), "cache_dir": src.dir, "elapsed_s": round(time.time() - t0, 1)}
+    if drift_rows is not None:
+        report["drift_report"] = write_drift_report(path, drift_rows, drift_strength)
     LOG.info("%s saved %s", _TAG, report)
     return report
 
@@ -1091,6 +1151,7 @@ class H3MDSaveVideoInterp:
                                             "Off (default): keep it, e.g. to re-render single segments with "
                                             "resume_from_cache or to save again. The folder is shown below."}),
             },
+            "optional": dict(DRIFT_INPUTS),   # v0.2.0, appended LAST (old workflows load with drift_correct off)
             "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "unique_id": "UNIQUE_ID"},
         }
 
@@ -1111,7 +1172,8 @@ class H3MDSaveVideoInterp:
 
     def save(self, interpolate, target_fps, scale, model_name, batch_size, use_fp16, filename_prefix, output_folder,
              crf, delete_cache_after_save, format="video/h264-mp4", pix_fmt="yuv420p", loop_count=0,
-             save_metadata=True, trim_to_audio=False, save_output=True, segments=None, prompt=None, extra_pnginfo=None, unique_id=None, **removed):
+             save_metadata=True, trim_to_audio=False, save_output=True, segments=None, prompt=None, extra_pnginfo=None, unique_id=None,
+             drift_correct="off", drift_strength=1.0, **removed):
         fmt = format
         if removed:
             unknown = sorted(set(removed) - set(REMOVED_INPUTS))
@@ -1149,7 +1211,7 @@ class H3MDSaveVideoInterp:
         try:
             rep = stream_save(info, path, interpolate, target_fps, scale, model_name, batch_size, use_fp16, crf, meta,
                               pbar=pbar, fmt=fmt, pix_fmt=pix_fmt, loop_count=loop_count,
-                              trim_to_audio=trim_to_audio)
+                              trim_to_audio=trim_to_audio, drift_correct=drift_correct, drift_strength=drift_strength)
         except BaseException:
             notify_ui(unique_id, {"cache_dir": cache_dir, "state": "kept (save failed)"})
             raise
