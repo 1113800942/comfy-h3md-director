@@ -31,15 +31,18 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   高清锚定（Loop Options 最后一个，默认关）：续接段新生成的高清 latent 在解码前拉回本镜头第一段。实测前 5 段：
   色差 0.29 → 0.13，锐度 −10.6% → −7.6%，饱和度不变；效果小，默认关。
 * **`drift_correct` (off / auto) + `drift_strength`** on H3MD Save Video Interp and the Face Refine save node (appended
-  last, default off): while the video is written, every segment is measured (brightness, contrast, colour, layout,
-  saturation, sharpness); a hard cut starts a new reference; inside a shot only "saturation / sharpness moved, the rest
-  stayed" counts as drift and is pulled back (colour gain around each pixel's brightness and the segment's own tint, a
-  light luma-only unsharp mask, easing over 2 s); a clear brightness / colour / layout change is a scene change — not
-  corrected, new reference; shots of 1–2 segments are skipped. Decisions in `<video>_drift.json`. The cache is not
-  changed. 3-minute take: saturation +8.4 % -> −0.2 %, sharpness −18.0 % -> +1.3 %; the 11-shot hard-cut music video:
-  every shot left untouched. `h3md_drift_correct.py`; `tools/drift_correct.py` does the same on finished videos.
-  保存节点新增 drift_correct（默认关）：存盘时逐段测量；硬切换参照；同一镜头里只有饱和度、锐度变了才算漂移并拉回；
-  亮度、色调、构图明显变了算换场景，不调并换参照；1–2 段的短镜头不动；每段判断写进 _drift.json；缓存不变。
+  last, default off): while the video is written, every segment is measured (brightness, contrast, colour, saturation,
+  sharpness). A hard cut, or a clear brightness / contrast / colour change inside a shot, starts a new reference. Per
+  reference, saturation and sharpness are corrected only when they follow a clear, steady trend (fitted line through
+  the reference, trend >= 3 %, residual <= max(1.5 %, 35 % of the trend)); the measured drift, smoothed over
+  neighbouring segments, is removed (colour gain around each pixel's brightness and the segment's tint - plain
+  brightness-centred gain for strongly tinted pictures - and a light luma-only unsharp mask, easing over 2 s). Sharpness
+  is never lowered. Decisions in `<video>_drift.json`; the cache is not changed. Measured: 3-minute take saturation
+  +8.4 % -> <= +1.5 %, sharpness −18 % -> <= +3.1 %; 11-shot hard-cut music video untouched; 16-segment dance: 2–6 %
+  colour pull only; synthetic day -> night kept as a new scene. `h3md_drift_correct.py`; `tools/drift_correct.py` does
+  the same on finished videos (`--segments 294,362:0,...` or `--plan`).
+  保存节点新增 drift_correct（默认关）：硬切或镜头内亮度、对比度、色调明显变化都换新参照；同一参照下只有饱和度、锐度呈稳定
+  趋势才校正，随内容跳动的不动；锐度只补不减；每段判断写进 _drift.json；缓存不变。
 * Why both: the latent statistics were already locked (low-res and high-res) and the picture still got +3.6 %
   saturation over 5 segments, so the rest of the drift is not a per-channel shift; it is fixed in pixel space.
   为什么两个都做：低清、高清 latent 的通道统计都已锁住，画面饱和度仍涨 3.6%，剩下的漂移不是通道整体偏移，只能在像素层面校正。

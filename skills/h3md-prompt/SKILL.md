@@ -225,15 +225,22 @@ non_diegetic_music:
   00:02.1 <Audio 1> is purely instrumental, with no singing voice at all, so she is only listening ...`, together with
   the split above.
 - **"no X" does nothing.** H3 is CFG-distilled: negative prompts have no effect, and `no shine, no oil, no gloss` in
-  the positive prompt changes nothing either. Say what you want: `She wears no makeup: her face looks bare and
-  natural, like in a candid documentary photograph, with visible pores ...`
+  the positive prompt changes nothing either. Leave the thing out instead (see "When there is a reference photo" below).
 - **Do not retouch the reference photo locally** (de-shine, local colour fixes). A retouched photo carried a yellow
   edge and an orange background patch into the whole video; the original photo did not. Re-generate the photo instead.
 - **Yellow patches / colour casts: check the reference image first, then the seed.**
 - **Seeds: fix the seed only for A/B tests (change one thing); use a random seed for real runs.**
-- **Skin shine comes mostly from the reference photo and the model, not the prompt.** Write the light as soft, fixed
-  and diffuse: `Soft, diffused afternoon light through a thin high haze falls evenly on her, with gentle, low contrast;
-  the light stays exactly the same from start to end`.
+- **When there is a reference photo, do not describe the person, the light or the colours - let the picture carry
+  them.** Measured on the same reference and seed: a prompt that described her face, "no makeup ... visible pores on
+  her forehead, nose and cheeks", "true-to-life skin texture", "music-video footage" and "light falls on her face and
+  hands" gave a sweaty, glossy face and oily hands although the photo was matte; the same shot with `<Subject 1> is the
+  woman shown in <Picture 1>.`, the place as "the room shown in `<Picture 1>`" and no light / colour / style words came
+  out as matte as the photo. Write only what the picture cannot show: camera, framing, action, timing, sound. Skin and
+  texture words make the model *render* skin, and that is where the shine comes from. (A satin dress still shines:
+  that is the fabric.)
+- **Skin shine also depends on the LoRA mix.** On the same photo and seed, moving to the FL2V turbo 4-step v1.2 768p
+  LoRA, Enhancer 0.55 (low-res), realism-people 0.6 (high-res) and the cinematic LoRA on both passes removed most of the
+  shine; the bare prompt above removed the rest. Test the LoRA mix on segment 1 before a long run.
 
 ## 11. Before running
 - Run only segment 1 first (Loop `stop_after = 1`); when happy set it back to 0 - segment 1 comes from the cache.
@@ -289,6 +296,8 @@ After the prompts, also give the whole plan as ONE JSON code block that the user
       `<d>` in their own language; unknown lyrics → she does not sing.
 - [ ] Singing only in medium / close shots; wide shots say she does not sing; face photo only in medium / close shots.
 - [ ] Locked camera where a large ground is in view; no "slowly" words; reference images match the output orientation.
+- [ ] With a reference photo: no face / skin / makeup / light / colour / style description - only camera, action,
+      timing and sound.
 - [ ] Intro / interlude / outro are their own segments with no singing in the prompt; no "no X" wording; the reference
       photo is the original (no local retouching).
 - [ ] When the user wants to import: one valid plan JSON block whose lengths, overlaps, offsets and prompts match the shots above.

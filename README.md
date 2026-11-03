@@ -207,16 +207,19 @@ own result) as a slow shift of the 24 latent channels' mean and spread.
   next segment also continues from. Small gain on its own (5 segments, same seed: colour shift 0.29 -> 0.13, sharpness
   −10.6 % -> −7.6 %, saturation unchanged), so it is off by default.
 * v0.2.0: **`drift_correct = auto`** on the save node (H3MD Save Video Interp / Face Refine) fixes what is left, in
-  pixel space, while the video is written: every drifting segment's saturation and sharpness are pulled back to its
-  reference (easing in over 2 s after each seam; tint and brightness untouched). The cache is not changed, so switch it
-  off and save again to compare. On the 3-minute take below: saturation +8.4 % -> −0.2 %, sharpness −18.0 % -> +1.3 %.
-  * **Where it helps and where it does not.** A hard cut always starts a new reference. Inside a shot a segment counts
-    as *drift* only when brightness, contrast, colour and layout stay close and only saturation / sharpness moved (that
-    is what chained continuation does: on the 3-minute take brightness stayed within 0.7 %, contrast 1 %, colour shift
-    < 1). A segment whose brightness, colour or layout clearly changed (night falls, a new room, someone walks in) is
-    a *scene* change: left alone, and it becomes the new reference. Shots of 1–2 segments are not touched. It is a
-    guess from measurements — check `<video>_drift.json` (every segment's decision and why) and switch it off for a
-    film where it guessed wrong. A slow, intended change (a gradual sunset) can be mistaken for drift until it is large.
+  pixel space, while the video is written. The cache is not changed, so switch it off and save again to compare.
+  * **How it decides.** A hard cut always starts a new reference. Inside a shot, a clear change of brightness,
+    contrast or colour (night falls, indoors -> outdoors) also starts a new reference: drift does not do that (3-minute
+    take: brightness within 0.7 %, contrast 1 %, colour shift < 1 over 14 segments). Then, per stretch with the same
+    reference, saturation and sharpness are corrected only when they follow a clear, steady trend (drift creeps a
+    little every segment); values that jump around with the content (a dancer, someone walking in) are left alone.
+    Only the drift is removed, smoothed over neighbouring segments; sharpness is only ever raised back, never blurred.
+    Stretches of 1–2 segments are not touched. Every decision and the reason: `<video>_drift.json`.
+  * **Measured.** 3-minute single take (saved through the node from its cache): saturation +8.4 % -> at most +1.5 %,
+    sharpness −18 % -> at most +3.1 %, brightness and contrast unchanged. 11-shot music video (all hard cuts): nothing
+    changed. A 16-segment dance (motion copy): only a gentle 2–6 % colour pull, sharpness untouched. A synthetic day ->
+    night shot: the night part was recognised as a new scene and kept dark. It is a guess from measurements: check the
+    report and switch it off for a film where it guessed wrong.
   * Finished videos (or not made with H3MD): [`tools/drift_correct.py`](tools/drift_correct.py)
     `video.mp4 --segments 294,362,362,362:0,362` (`:0` = hard cut) or `--plan workflow.json` (plans without autosplit).
   * Related work: the same "pull back to scene one in RGB" idea is in matlowai's ComfyUI-MAINodes (H3 Delta Color

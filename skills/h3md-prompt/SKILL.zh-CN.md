@@ -127,11 +127,12 @@ non_diegetic_music:
   - non_diegetic_music 写乐器和 `no singing voice`；overall_soundscape 不写她的歌声。
   - 动作给一个具体的事：闭嘴微笑、慢慢呼吸、闭眼再睁开、看远处。
 - **唱歌段第一句前还有几秒纯音乐**：写 `From 00:00.0 to 00:02.1 <Audio 1> is purely instrumental, with no singing voice at all, so she is only listening ...`，配合上面的拆段用。
-- **"不要什么"不起作用。** H3 是去掉 CFG 蒸馏过的，负面提示词无效；正面提示词里写 `no shine, no oil, no gloss` 也一样。要什么就正面写：`She wears no makeup: her face looks bare and natural, like in a candid documentary photograph, with visible pores ...`
+- **"不要什么"不起作用。** H3 是去掉 CFG 蒸馏过的，负面提示词无效；正面提示词里写 `no shine, no oil, no gloss` 也一样。干脆不写这件事（见下面"有参考图时"那条）。
 - **参考图不要做局部修图**（去油、局部调色）。修过的图把黄边和背景橙色偏色带进了整条视频，原图没有。参考图有问题就重新出图。
 - **画面出现黄斑 / 偏色：先查参考图，再怀疑种子。**
 - **种子：对比测试才固定种子（只改一个变量），正式出片用随机种子。**
-- **油光主要来自参考图和模型本身，不是提示词。** 光线写成柔和、固定的散射光：`Soft, diffused afternoon light through a thin high haze falls evenly on her, with gentle, low contrast; the light stays exactly the same from start to end`。
+- **有参考图时，不写人物长相、灯光、色彩，交给图片。** 同一张参考图、同一个种子实测：提示词里写了脸、"素颜……额头鼻子脸颊看得见毛孔"、"true-to-life skin texture"、"music-video footage"、"光落在她脸上和手上"，结果满脸像出汗、手像抹了油，而参考图本身是哑光的；同一段改成 `<Subject 1> is the woman shown in <Picture 1>.`、地点写"`<Picture 1>` 里的房间"、不写任何光线色彩风格词，出来和参考图一样哑光。只写图里看不出来的：机位、景别、动作、时间、声音。写皮肤、质感，模型就会去"刻画"皮肤，油光就是这么来的。（缎面裙子会反光，那是面料本身。）
+- **油光也和 LoRA 组合有关。** 同一张图、同一个种子，换成 FL2V turbo 4 步 v1.2 768p、Enhancer 0.55（低清）、realism-people 0.6（高清）、电影感两边都开，油光去掉大半；再配合上面的极简提示词，剩下的也没了。长片开跑前先用第 1 段试 LoRA 组合。
 
 ## 11. 跑之前的工作习惯
 - 先只跑第 1 段（Loop 的 `stop_after = 1`），满意后改回 0，第 1 段从缓存取。
@@ -178,5 +179,6 @@ non_diegetic_music:
 - [ ] 每个镜头都写了构图、人物位置、环境光线、动作、运镜和声音；对白歌词在 `<d>` 里，保留原语言；不知道歌词就写不唱。
 - [ ] 只在中景、近景唱歌；远景写明不唱；脸部特写照片只给中景和近景。
 - [ ] 近处有大片地面时机位固定；没有 slowly 类词；参考图横竖和成片一致。
+- [ ] 有参考图时：没有写长相、皮肤、妆容、灯光、色彩、风格，只写机位、动作、时间和声音。
 - [ ] 前奏 / 间奏 / 尾奏是单独的段，提示词里没有任何"唱"的意思；没有"no X"这类负面写法；参考图是原图，没有做过局部修图。
 - [ ] 用户要导入时：给了一个合法的计划 JSON，长度、重叠、offset 和提示词与上面各段一致。
