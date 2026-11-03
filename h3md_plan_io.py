@@ -29,6 +29,7 @@ import json
 import logging
 import os
 import re
+import urllib.parse
 import zipfile
 
 LOG = logging.getLogger("H3MD")
@@ -495,7 +496,7 @@ def register() -> bool:
             return web.json_response({"error": str(exc)}, status=400)
         fname = manifest["name"] + (" (plan + media)" if manifest["with_media"] else " (plan)") + ".zip"
         return web.Response(body=data, content_type="application/zip", headers={
-            "Content-Disposition": "attachment; filename*=UTF-8''" + __import__("urllib.parse").parse.quote(fname)})
+            "Content-Disposition": "attachment; filename*=UTF-8''" + urllib.parse.quote(fname)})
 
     @routes.post("/h3md/plan/import")
     async def h3md_plan_import(request):

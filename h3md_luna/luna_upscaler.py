@@ -366,7 +366,7 @@ def _model_from_state_dict(state) -> LatentResizer3D:
     state = {key: value.to(torch.float16) if value.dtype == torch.float8_e4m3fn else value
              for key, value in state.items()}
     model.load_state_dict(state, strict=True, assign=True)
-    return model.eval().requires_grad_(False)
+    return model.train(False).requires_grad_(False)
 
 
 def _load_model(name: str) -> LatentResizer3D:

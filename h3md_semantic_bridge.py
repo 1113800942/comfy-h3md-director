@@ -311,7 +311,7 @@ def load_net(path: str, sha: str, info: dict) -> nn.Module:
     if any(not k.startswith(prefix) for k in sd):
         raise ValueError(f"{_TAG} unexpected tensor names in {path}")
     net.load_state_dict({k[len(prefix):]: v.float() for k, v in sd.items()}, strict=True)
-    net.to(device="cpu", dtype=torch.float32).eval()
+    net.to(device="cpu", dtype=torch.float32).train(False)   # inference mode
     _NET_CACHE[sha] = net
     while len(_NET_CACHE) > MAX_STAGES:
         _NET_CACHE.popitem(last=False)

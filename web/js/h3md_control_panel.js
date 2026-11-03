@@ -45,7 +45,7 @@ export function parseSegments(text) {
   for (let part of raw.replace(/\s+/g, ",").split(",")) {
     part = part.trim();
     if (!part) continue;
-    const m = /^(\d+)(?:-(\d+))?$/.exec(part);
+    const m = part.match(/^(\d+)(?:-(\d+))?$/);
     if (!m) return null;
     let lo = Number(m[1]), hi = Number(m[2] ?? m[1]);
     if (lo > hi) [lo, hi] = [hi, lo];

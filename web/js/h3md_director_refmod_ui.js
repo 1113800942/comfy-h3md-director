@@ -636,7 +636,7 @@ class DirectorEditor {
       const cores = new Set(labs.map((l) => l.core).filter(Boolean));
       // the shot prompt may also use the resolved core label directly (e.g. <Video 2>)
       for (let k = v.warnings.length - 1; k >= 0; k--) {
-        const w = v.warnings[k], m = /^prompt mentions (<(?:Picture|Video|Audio) \d+>) but/.exec(String(w.msg));
+        const w = v.warnings[k], m = String(w.msg).match(/^prompt mentions (<(?:Picture|Video|Audio) \d+>) but/);
         if (w.seg === i && m && cores.has(m[1])) v.warnings.splice(k, 1);
       }
       for (const l of labs) {
@@ -777,7 +777,7 @@ class DirectorEditor {
       if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || `HTTP ${r.status}`); }
       const blob = await r.blob();
       const cd = r.headers.get("Content-Disposition") || "";
-      const m = /filename\*=UTF-8''([^;]+)/.exec(cd);
+      const m = String(cd).match(/filename\*=UTF-8''([^;]+)/);
       const name = m ? decodeURIComponent(m[1]) : `${wfName}.zip`;
       const a = h("a", { href: URL.createObjectURL(blob), download: name });
       document.body.append(a); a.click(); a.remove();
@@ -1424,7 +1424,7 @@ class DirectorEditor {
     const update = () => {
       const c = ta.selectionStart;
       if (c !== ta.selectionEnd || document.activeElement !== ta) return close();
-      const m = /@([^\s@<>]*)$/.exec(ta.value.slice(0, c));
+      const m = String(ta.value.slice(0, c)).match(/@([^\s@<>]*)$/);
       if (!m) return close();
       const q = m[1].toLowerCase();
       const items = labels().filter((l) => !q || l.id.toLowerCase().includes(q) || l.tag.toLowerCase().includes(q) || String(l.file || "").toLowerCase().includes(q));
