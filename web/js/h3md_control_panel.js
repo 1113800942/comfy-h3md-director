@@ -71,7 +71,7 @@ function hintText(text, total = totalSegments()) {
   if (total && s.length && s[s.length - 1] > total)
     return { bad: true, t: `超出范围：本片只有 ${total} 段（段号按导演台自动拆分后的顺序，和日志一致）· out of range: ${total} segment(s)` };
   if (!s.length) return { bad: false, t: `全部跑完：有缓存的段直接用${all ? "（" + all + "）" : ""} · Run all (cached segments are reused)` };
-  return { bad: false, t: `这次只生成第 ${s.join("、")} 段${all ? "（" + all + "）" : ""}，有缓存的也重新生成，跑完自动清空 · Only segment(s) ${s.join(", ")} this time; cleared after the run` };
+  return { bad: false, set: true, t: `⚠ 已设定：只跑第 ${s.join("、")} 段${all ? "（" + all + "）" : ""}，有缓存的也重新生成。要跑完整片请清空此框 · Set: only segment(s) ${s.join(", ")} (cached ones again too). Clear the box to run everything` };
 }
 
 // a wrong "which segments" box blocks the queue (instead of failing after the models are loaded)
@@ -100,7 +100,9 @@ function el(tag, attrs = {}, ...kids) {
 
 const CSS = `
 .h3mdcp{font:12px sans-serif;color:#ddd;display:flex;flex-direction:column;gap:6px;padding:2px 2px 6px}
-.h3mdcp .hint{font-size:11px;color:#9ab;padding:0 4px}.h3mdcp .hint.bad{color:#f77}
+.h3mdcp .hint{font-size:11px;color:#9ab;padding:0 4px;display:flex;align-items:center;gap:6px}.h3mdcp .hint.bad{color:#fff;background:#8a2a2a;border-radius:4px;padding:4px 6px}
+.h3mdcp .hint.set{color:#1a1a1a;background:#f0a020;border-radius:4px;padding:4px 6px;font-weight:bold}
+.h3mdcp .hint button{margin-left:auto;font-size:11px;padding:1px 6px;border:1px solid #333;border-radius:4px;background:#fff3;color:inherit;cursor:pointer}
 .h3mdcp .styles{display:flex;gap:4px}.h3mdcp .styles button{flex:1;padding:5px 2px;border:1px solid #555;border-radius:5px;background:#2a2a2a;color:#ccc;cursor:pointer;font-size:11px}
 .h3mdcp .styles button.on{background:#2f5d8a;border-color:#4a8bd0;color:#fff}
 .h3mdcp .box{border:1px solid #444;border-radius:6px;padding:4px}.h3mdcp .head{display:flex;align-items:center;gap:6px;margin-bottom:3px}
@@ -178,13 +180,22 @@ class Panel {
     return box;
   }
 
+  // hint under the "which segments" box: grey = run all; orange banner + Clear = only some segments are set (kept
+  // after the run on purpose, so the same segment can be generated again); red = wrong / out of range
+  hintEl(h) {
+    const cls = `hint${h.bad ? " bad" : h.set ? " set" : ""}`;
+    const box = el("div", { class: cls }, el("span", {}, "↑ " + h.t));
+    if (h.set || h.bad) box.append(el("button", { title: "clear the box: run everything (cached segments reused)",
+      onclick: () => { const w = W(this.node, "segments_to_run"); if (w) { w.value = ""; w.callback?.(""); } this.render(); } }, "清空 Clear"));
+    return box;
+  }
+
   // cheap refresh of the hint line only (the Director's auto-split count arrives later / changes)
   updateHint() {
-    const el2 = this.root.querySelector(".hint");
-    if (!el2) return;
+    const old = this.root.querySelector(".hint");
+    if (!old) return;
     const h = hintText(W(this.node, "segments_to_run")?.value);
-    const t = "↑ " + h.t;
-    if (el2.textContent !== t) { el2.textContent = t; el2.className = `hint${h.bad ? " bad" : ""}`; }
+    if (old.firstChild?.textContent !== "↑ " + h.t) old.replaceWith(this.hintEl(h));
   }
 
   render() {
@@ -192,7 +203,7 @@ class Panel {
     const h = hintText(W(this.node, "segments_to_run")?.value);
     const style = W(this.node, "style")?.value || "balanced";
     this.root.replaceChildren(
-      el("div", { class: `hint${h.bad ? " bad" : ""}` }, "↑ " + h.t),
+      this.hintEl(h),
       el("div", { class: "styles" }, ...["balanced", "high_motion", "motion_copy"].map((s) =>
         el("button", { class: s === style ? "on" : "", title: STYLE_TIP[s], onclick: () => this.setStyle(s) }, STYLE_LABEL[s]))),
       this.table("low"), this.table("high"));
@@ -232,24 +243,7 @@ app.registerExtension({
         return queue(...args);
       };
     }
-    // "which segments" is cleared after a FINISHED run of a prompt that contained the panel
-    const pending = new Map();   // prompt_id -> [node ids]
-    api.addEventListener("executed", (ev) => {
-      const d = ev.detail || {};
-      if (!d.output?.h3md_panel) return;
-      const ids = pending.get(d.prompt_id) || [];
-      ids.push(d.node);
-      pending.set(d.prompt_id, ids);
-    });
-    api.addEventListener("execution_success", (ev) => {
-      const id = ev.detail?.prompt_id;
-      for (const nid of pending.get(id) || []) {
-        const node = app.graph?.getNodeById?.(Number(nid)) ?? app.graph?.getNodeById?.(nid);
-        const w = node && W(node, "segments_to_run");
-        if (w && w.value) { w.value = ""; node.__h3mdPanel?.render(); node.setDirtyCanvas?.(true, true); }
-      }
-      pending.delete(id);
-    });
+    // (v0.3: the box is NOT cleared after a run - the same segment can be generated again; it shows an orange banner)
   },
   async beforeRegisterNodeDef(nodeType, nodeData) {
     if (nodeData?.name !== NODE) return;

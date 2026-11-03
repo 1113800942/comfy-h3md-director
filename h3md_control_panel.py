@@ -215,8 +215,8 @@ class H3MDControlPanel:
                                  "tooltip": "Fixed or random (control after generate). 种子：固定或随机。"}),
                 "segments_to_run": ("STRING", {"default": "", "tooltip":
                                     "Empty: run everything (cached segments reused). 2 / 1-2 / 3, 6-7, 9: generate "
-                                    "only these this time (cached ones again too). Cleared after a finished run.\n"
-                                    "空 = 全部跑完；填 2 / 1-2 / 3, 6-7, 9 = 这次只生成这几段，跑完自动清空。"}),
+                                    "only these (cached ones again too). The box keeps its value (orange banner) until you clear it.\n"
+                                    "空 = 全部跑完；填 2 / 1-2 / 3, 6-7, 9 = 只生成这几段。框里的值会保留（橙色提示），要跑完整片请清空。"}),
                 "style": (STYLES, {"default": "balanced", "tooltip":
                           "balanced: drama, walking, dancing · high_motion: fights, gunfights · motion_copy: "
                           "dance / motion transfer. Sets the recommended LoRAs and the semantic bridge."}),
