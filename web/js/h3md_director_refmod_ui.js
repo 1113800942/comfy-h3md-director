@@ -947,7 +947,7 @@ class DirectorEditor {
     const p = this.plan;
     if (!advanced()) {   // v0.3: fixed auto, row not shown (auto follows the VRAM estimate)
       if (p.refVideoHeight == null) { p.refVideoHeight = "auto"; queueMicrotask(() => this.commit()); }
-      return null;
+      return h("div", { style: { display: "none" }, "data-ref-video-height": "auto" });
     }
     const raw = String(p.refVideoHeight ?? "native").trim().toLowerCase();
     const cur = REF_VIDEO_HEIGHTS.includes(raw) ? raw : "native";
