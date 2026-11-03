@@ -55,11 +55,34 @@ export function parseSegments(text) {
   return [...out].sort((a, b) => a - b);
 }
 
-function hintText(text) {
+// segments the Loop will run = the Director's auto-split result (numbered as in the log), or null if unknown yet
+function totalSegments() {
+  for (const n of app.graph?._nodes || []) {
+    const a = n.__h3md?.as;
+    if (a && a.ok && Number.isFinite(Number(a.segments))) return Number(a.segments);
+  }
+  return null;
+}
+
+function hintText(text, total = totalSegments()) {
   const s = parseSegments(text);
+  const all = total ? `共 ${total} 段 · ${total} segment(s)` : "";
   if (s === null) return { bad: true, t: "写法有误 / cannot read it — 例 e.g.  2   1-2   3, 6-7, 9" };
-  if (!s.length) return { bad: false, t: "全部跑完：有缓存的段直接用 · Run all (cached segments are reused)" };
-  return { bad: false, t: `这次只生成第 ${s.join("、")} 段（有缓存的也重新生成），跑完自动清空 · Only segment(s) ${s.join(", ")} this time; cleared after the run` };
+  if (total && s.length && s[s.length - 1] > total)
+    return { bad: true, t: `超出范围：本片只有 ${total} 段（段号按导演台自动拆分后的顺序，和日志一致）· out of range: ${total} segment(s)` };
+  if (!s.length) return { bad: false, t: `全部跑完：有缓存的段直接用${all ? "（" + all + "）" : ""} · Run all (cached segments are reused)` };
+  return { bad: false, t: `这次只生成第 ${s.join("、")} 段${all ? "（" + all + "）" : ""}，有缓存的也重新生成，跑完自动清空 · Only segment(s) ${s.join(", ")} this time; cleared after the run` };
+}
+
+// a wrong "which segments" box blocks the queue (instead of failing after the models are loaded)
+export function panelProblems() {
+  const out = [];
+  for (const n of app.graph?._nodes || []) {
+    if (n.type !== NODE || n.mode === 2 || n.mode === 4) continue;
+    const h = hintText(W(n, "segments_to_run")?.value);
+    if (h.bad) out.push(h.t);
+  }
+  return out;
 }
 
 function el(tag, attrs = {}, ...kids) {
@@ -155,6 +178,15 @@ class Panel {
     return box;
   }
 
+  // cheap refresh of the hint line only (the Director's auto-split count arrives later / changes)
+  updateHint() {
+    const el2 = this.root.querySelector(".hint");
+    if (!el2) return;
+    const h = hintText(W(this.node, "segments_to_run")?.value);
+    const t = "↑ " + h.t;
+    if (el2.textContent !== t) { el2.textContent = t; el2.className = `hint${h.bad ? " bad" : ""}`; }
+  }
+
   render() {
     injectCss();
     const h = hintText(W(this.node, "segments_to_run")?.value);
@@ -185,6 +217,21 @@ class Panel {
 app.registerExtension({
   name: "H3MD.ControlPanel",
   setup() {
+    setInterval(() => { for (const n of app.graph?._nodes || []) if (n.type === NODE) n.__h3mdPanel?.updateHint(); }, 1000);
+    const queue = app.queuePrompt?.bind(app);
+    if (queue) {
+      app.queuePrompt = async function (...args) {
+        const bad = panelProblems();
+        if (bad.length) {
+          const msg = "H3MD Control Panel · 跑哪几段: " + bad[0];
+          try { app.extensionManager?.toast?.add?.({ severity: "error", summary: "H3MD", detail: msg, life: 6000 }); }
+          catch { /* older frontend */ }
+          console.warn("[H3MD]", msg);
+          return false;
+        }
+        return queue(...args);
+      };
+    }
     // "which segments" is cleared after a FINISHED run of a prompt that contained the panel
     const pending = new Map();   // prompt_id -> [node ids]
     api.addEventListener("executed", (ev) => {
