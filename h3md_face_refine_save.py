@@ -133,6 +133,16 @@ def is_original_vosr2(model) -> bool:
     return type(model).__name__ == "VOSR2Model" or hasattr(model, "denoise_one_step")
 
 
+def _seedvr2_numz():
+    """v0.3.3: the common ComfyUI-SeedVR2_VideoUpscaler (numz) 'SeedVR2 Video Upscaler' node, or None."""
+    return _registry().get("SeedVR2VideoUpscaler")
+
+
+def is_numz_seedvr2(model) -> bool:
+    """A DiT from numz's 'SeedVR2 (Down)Load DiT Model' (SEEDVR2_DIT is a config dict), not a TE-Speed MODEL."""
+    return isinstance(model, dict)
+
+
 def _seedvr2_class():
     cls = _registry().get("TESpeedSeedVR2Integrated")
     if cls is None:
@@ -895,7 +905,15 @@ class FaceRefiner:
         absent = transform.get("absent") or [False] * len(w)
         self.todo = [(not absent[i]) and w[i] > REFINE_MIN_WEIGHT for i in range(len(w))]
         self.seedvr2_vae = seedvr2_vae
-        if seedvr2_model is not None:
+        self.numz = None
+        if seedvr2_model is not None and is_numz_seedvr2(seedvr2_model):   # v0.3.3: plain SeedVR2 (numz)
+            self.model = seedvr2_model
+            self.numz = _seedvr2_numz()
+            if self.numz is None:
+                raise RuntimeError(f"{_TAG} the SeedVR2 model comes from ComfyUI-SeedVR2_VideoUpscaler, but its "
+                                   "'SeedVR2 Video Upscaler' node is not loaded")
+            self.vosr2 = None
+        elif seedvr2_model is not None:
             self.model = seedvr2_model
             sv_cls = _seedvr2_class()
             sv = sv_cls()
@@ -931,6 +949,15 @@ class FaceRefiner:
                     # was trained at; wavelet colour alignment as the TE-Speed default
                     tile = 512 if max(self.cw, self.ch) > 512 else 0
                     r = _unwrap_image(self.orig.execute(self.model, part, 1, self.seed, "wavelet", tile, 32, 0, 32))
+                elif self.numz is not None:
+                    # plain SeedVR2: shortest edge = the crop's (scale 1), its own defaults otherwise
+                    r = _unwrap_image(self.numz.execute(image=part, dit=self.model, vae=self.seedvr2_vae,
+                                                        seed=self.seed, resolution=min(self.cw, self.ch),
+                                                        max_resolution=0, batch_size=5, uniform_batch_size=False,
+                                                        temporal_overlap=0, prepend_frames=0,
+                                                        color_correction="wavelet", input_noise_scale=0.0,
+                                                        latent_noise_scale=0.0, offload_device="cpu",
+                                                        enable_debug=False))
                 elif self.vosr2 is None:
                     r = _unwrap_image(self.sv_fn(model=self.model, vae=self.seedvr2_vae, images=part,
                                                  max_long_edge=max(self.cw, self.ch), seed=self.seed, **self.sv_kw))
@@ -1257,9 +1284,11 @@ class H3MDSaveVideoFaceRefineInterp:
                             "refine_model = VOSR2: 'VOSR 2.0 Model Loader' of the original ComfyUI-VOSR2 (recommended) "
                             "or the TE-Speed VOSR2 loader."}),
             "vosr2_settings": ("TE_SPEED_VOSR2_SETTINGS", {"lazy": True, "tooltip": "Optional TE-Speed VOSR2 settings."}),
-            "seedvr2_model": ("MODEL", {"lazy": True, "tooltip": "TE-Speed SeedVR2 Loader 'model', used when "
-                                        "refine_model = SeedVR2. Its other parameters run at that node's own defaults."}),
-            "seedvr2_vae": ("VAE", {"lazy": True, "tooltip": "TE-Speed SeedVR2 Loader 'vae' (with seedvr2_model)."}),
+            "seedvr2_model": ("MODEL,SEEDVR2_DIT", {"lazy": True, "tooltip": "SeedVR2 model, used when refine_model "
+                              "= SeedVR2: 'SeedVR2 (Down)Load DiT Model' of ComfyUI-SeedVR2_VideoUpscaler, or the "
+                              "TE-Speed SeedVR2 Loader 'model'. Other parameters run at that node's own defaults."}),
+            "seedvr2_vae": ("VAE,SEEDVR2_VAE", {"lazy": True, "tooltip": "SeedVR2 VAE: 'SeedVR2 (Down)Load VAE Model' "
+                            "or the TE-Speed SeedVR2 Loader 'vae' (from the same pack as seedvr2_model)."}),
             "identity_reference": ("IMAGE", {"tooltip": "Optional: a picture of the person to follow "
                                                         "(H3 Face Track + Crop identity_reference)."}),
         }
@@ -1348,7 +1377,9 @@ class H3MDSaveVideoFaceRefineInterp:
         if refine_model == "SeedVR2":
             if seedvr2_model is None or seedvr2_vae is None:
                 raise ValueError(f"{_TAG} refine_model=SeedVR2 needs seedvr2_model + seedvr2_vae "
-                                 f"(TE-Speed SeedVR2 Loader 'model' and 'vae')")
+                                 f"(SeedVR2 Load DiT / VAE Model, or TE-Speed SeedVR2 Loader 'model' and 'vae')")
+            if is_numz_seedvr2(seedvr2_model) != isinstance(seedvr2_vae, dict):
+                raise ValueError(f"{_TAG} seedvr2_model and seedvr2_vae must come from the same SeedVR2 pack")
             vosr2_model = vosr2_settings = None
         else:
             if vosr2_model is None:
@@ -1356,7 +1387,10 @@ class H3MDSaveVideoFaceRefineInterp:
             seedvr2_model = seedvr2_vae = None
         fr = _fr_module()
         _stitch_class()
-        if seedvr2_model is not None:
+        if seedvr2_model is not None and is_numz_seedvr2(seedvr2_model):
+            if _seedvr2_numz() is None:
+                raise RuntimeError(f"{_TAG} 'SeedVR2 Video Upscaler' (ComfyUI-SeedVR2_VideoUpscaler) is not loaded")
+        elif seedvr2_model is not None:
             _seedvr2_class()
         elif not is_original_vosr2(vosr2_model):
             _vosr2_class()
