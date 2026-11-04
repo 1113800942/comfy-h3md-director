@@ -363,6 +363,16 @@ class BridgeChain(tuple):
         return [{"sha256": s["sha256"], "kind": s["kind"], "alpha": round(float(s["alpha"]), 6)} for s in self]
 
 
+def stage_from_path(name: str, path: str, alpha: float, mode: str, info: dict = None) -> dict:
+    """One validated stage from a bridge file path (strict layout check + load now)."""
+    info = inspect(path) if info is None else info
+    sha = file_sha(path)
+    stage = {"name": name, "path": path, "sha256": sha, "alpha": float(alpha), "mode": mode,
+             **{k: v for k, v in info.items() if k != "default_alpha"}}
+    load_net(path, sha, stage)   # strict load now -> errors appear on this node, not mid-run
+    return stage
+
+
 def make_stage(name: str, strength_mode: str, strength: float, adapters: dict = None) -> dict:
     adapters = scan() if adapters is None else adapters
     if name not in adapters:
@@ -386,10 +396,66 @@ def make_stage(name: str, strength_mode: str, strength: float, adapters: dict = 
                              f"{info['contract']['alpha']} (got {alpha}); use strength_mode=auto")
     else:
         raise ValueError(f"{_TAG} unknown strength_mode {strength_mode}")
-    stage = {"name": name, "path": path, "sha256": sha, "alpha": alpha, "mode": strength_mode,
-             **{k: v for k, v in info.items() if k != "default_alpha"}}
-    load_net(path, sha, stage)   # strict load now -> errors appear on this node, not mid-run
-    return stage
+    return stage_from_path(name, path, alpha, strength_mode, info)
+
+
+# ---------------------------------------------------------------------------
+# T8 interop (v0.3.3): the Loop also accepts the output of T8's "H3 Semantic Bridge / 模型与设置", "自动模型参数"
+# and "多桥组合" nodes (socket type T8_SEMANTIC_BRIDGE).  Only public fields of T8's config objects are read
+# (path, alpha, enabled, sha256, magnitude_match, token_scope / bridges); the file is loaded and applied by the
+# H3MD code above.  No T8 code is imported.
+# ---------------------------------------------------------------------------
+
+T8_TYPE = "T8_SEMANTIC_BRIDGE"
+
+
+def _t8_configs(obj):
+    if obj is None:
+        return []
+    if hasattr(obj, "bridges"):                           # T8 multi-bridge stack (ordered serial)
+        if not getattr(obj, "enabled", True):
+            return []
+        out = []
+        for item in tuple(obj.bridges or ()):
+            out.extend(_t8_configs(item))
+        return out
+    if hasattr(obj, "path") and hasattr(obj, "alpha"):    # T8 single bridge config
+        return [obj]
+    raise ValueError(f"{_TAG} semantic_bridge input is neither an H3MD bridge chain nor a T8 bridge config "
+                     f"({type(obj).__name__})")
+
+
+def from_t8(obj):
+    """T8 bridge config / stack -> H3MD BridgeChain (same stage dicts as the H3MD node builds)."""
+    stages = []
+    for cfg in _t8_configs(obj):
+        alpha = float(getattr(cfg, "alpha", 0) or 0)
+        path = str(getattr(cfg, "path", "") or "")
+        if not getattr(cfg, "enabled", True) or alpha == 0 or not path:
+            continue
+        if not math.isfinite(alpha) or not 0 < alpha <= 1:
+            raise ValueError(f"{_TAG} T8 bridge {os.path.basename(path)}: alpha must be in (0, 1] (got {alpha})")
+        if not os.path.isfile(path):
+            raise ValueError(f"{_TAG} T8 bridge file not found: {path}")
+        mm, scope = getattr(cfg, "magnitude_match", "per_token"), getattr(cfg, "token_scope", "all_tokens")
+        if mm != "per_token" or scope != "all_tokens":
+            LOG.warning("%s T8 bridge %s: magnitude_match=%s, token_scope=%s - H3MD applies per_token / all_tokens",
+                        _TAG, os.path.basename(path), mm, scope)
+        want = str(getattr(cfg, "sha256", "") or "")
+        stage = stage_from_path("T8:" + os.path.basename(path), path, alpha, "t8")
+        if want and want != stage["sha256"]:
+            raise ValueError(f"{_TAG} T8 bridge {os.path.basename(path)} changed since the T8 node ran; re-run it")
+        stages = list(chain_append(stages, stage))
+    return BridgeChain(stages)
+
+
+def to_chain(obj):
+    """Loop input -> BridgeChain: H3MD chain (tuple of stage dicts) as is, T8 config / stack converted."""
+    if not obj:
+        return BridgeChain()
+    if isinstance(obj, (list, tuple)) and all(isinstance(s, dict) for s in obj):
+        return BridgeChain(obj)
+    return from_t8(obj)
 
 
 def chain_append(chain, stage: dict) -> BridgeChain:
@@ -490,12 +556,15 @@ NODE_DISPLAY_NAME_MAPPINGS = {"H3MDSemanticBridge": "H3MD Semantic Bridge"}
 # Loop Sampler glue (h3md_loop.py only needs one-line hooks)
 # ---------------------------------------------------------------------------
 
-LOOP_INPUTS = {"semantic_bridge": (TYPE, {"tooltip": "Optional H3MD Semantic Bridge chain. Not connected = off."})}
+LOOP_INPUTS = {"semantic_bridge": (TYPE + "," + T8_TYPE, {"tooltip":
+    "Optional semantic bridge: H3MD Semantic Bridge chain, H3MD Control Panel, or T8's H3 Semantic Bridge "
+    "config / multi-bridge node. Not connected = off.\n"
+    "可选语义桥：H3MD 语义桥节点、总控台，或 T8 的语义桥「模型与设置 / 多桥组合」节点。不接 = 关。"})}
 
 
 class BridgeHook:
     def __init__(self, chain):
-        self.chain = BridgeChain(chain) if chain else BridgeChain()
+        self.chain = to_chain(chain)
         self.active = len(self.chain) > 0
         self._last = None
         if not self.active:

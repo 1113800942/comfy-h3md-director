@@ -563,10 +563,10 @@ class H3MDLoopSampler:
             "清晰度变化也会一段段累积（3 分钟长镜头实测：只开 lowres_anchor 时饱和度 +8%、锐度 -15%）。开了以后，每个续接段"
             "新生成的高清 latent（不含重叠部分）在解码前、下一段接续前，把 24 个通道的均值和幅度拉回本镜头第一段。0 = 关，1 = 全量。"})
         # v0.3 H3MD Control Panel, appended LAST: one box for "which segments" (empty / not connected = old widgets)
-        opt["segments_to_run"] = ("STRING", {"default": "", "forceInput": True, "tooltip":
-            "From H3MD Control Panel. Empty: run everything (cached segments reused). '2' / '1-2' / '3, 6-7, 9': "
+        opt["segments_to_run"] = ("STRING", {"default": "", "tooltip":
+            "Type here or connect H3MD Control Panel. Empty: run everything (cached segments reused). '2' / '1-2' / '3, 6-7, 9': "
             "generate only these this time (cached ones again too); missing earlier segments are generated as well. "
-            "Overrides rerun_segments / stop_after when not empty.\n来自总控台。空 = 全部跑完（有缓存的直接用）；"
+            "Overrides rerun_segments / stop_after when not empty.\n直接填或接总控台。空 = 全部跑完（有缓存的直接用）；"
             "填 2 / 1-2 / 3, 6-7, 9 = 这次只生成这几段（有缓存的也重新生成），前面缺的段一起生成。"})
         # hidden 'prompt' (no widget / no slot): only to warn when 'images' (now a placeholder) is used downstream
         return {"required": req, "optional": opt, "hidden": {"unique_id": "UNIQUE_ID", "prompt": "PROMPT"}}
