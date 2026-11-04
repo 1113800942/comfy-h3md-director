@@ -2,6 +2,18 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.3.3] — 2026-11-04
+* Loop `semantic_bridge` also takes **T8's semantic bridge** ("H3 Semantic Bridge / 模型与设置", auto config, multi-bridge
+  stack). H3MD reads the bridge file and strength from it and applies them with its own code (no T8 code imported);
+  disabled or strength 0 = off; a stack is applied in order; same file + strength = same cache as our own bridge node.
+  Loop 的语义桥输入也能接 T8 的语义桥节点（单桥、多桥组合）。
+* Face refine also takes the plain **ComfyUI-SeedVR2_VideoUpscaler** (numz): connect `SeedVR2 (Down)Load DiT Model`
+  and `(Down)Load VAE Model` to `seedvr2_model` / `seedvr2_vae`, `refine_model = SeedVR2`. TE-Speed SeedVR2 still works;
+  both inputs must come from the same pack. 修脸也能接普通版 SeedVR2（numz），TE-Speed 加速版照常可用。
+* Loop `segments_to_run` is a box you can type in (e.g. `1`, `2, 5, 7-9`); connecting the Control Panel still works.
+  Loop 上的"跑哪几段"可以直接填，也照样能接总控台。
+* Old workflows: unchanged. 旧工作流不受影响。
+
 ## [0.3.2] — 2026-11-03
 * Removed `H3MD hard cut example.json`: with the Eve music video every example's shots are hard cuts already; for a
   short test type `1-2` in the Control Panel's "which segments" box. Examples now: `H3MD Director simple.json`
