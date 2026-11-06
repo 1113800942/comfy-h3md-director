@@ -2,6 +2,7 @@
 
 Top to bottom: resolution, fps + interpolation, face refine, seed, "which segments", style buttons
 (balanced / high motion / motion copy), low-res LoRA list, high-res LoRA list.
+0.3.4: every row is a normal LoRA; a style button also sets the model subgraph's high-res 768 turbo strength.
 
 The node applies the two LoRA lists to the low-res and high-res models itself (no rgthree / Crystools nodes), picks the
 semantic bridge from the style and hands every other value to the Director, Loop and Save nodes through its outputs.
@@ -28,11 +29,11 @@ _TAG = "[H3MD Control Panel]"
 CATEGORY = "MiniMax H3/H3MD"
 STYLES = ["balanced", "high_motion", "motion_copy"]
 
-# Recommended LoRAs (11-02 measured mix + the old workflow notes). key -> file. 'bypass': applied like the old
-# H3MD LowVRAM LoRA Loader (Dasiwa), the rest like ComfyUI's LoraLoaderModelOnly (as the old Power Lora Loader did).
+# Recommended LoRAs (11-02 measured mix, 0.3.4 rework 2026-11-05). key -> file.  Every panel row is a NORMAL LoRA
+# (ComfyUI LoraLoaderModelOnly): the one bypass speed LoRA (768 turbo) lives in the model subgraph, one per pass, so a
+# panel row can never replace it (ComfyUI keeps only the LAST bypass LoRA of a chain - measured 11-05, runs 0095-0098).
 FILES = {
-    "dasiwa": "minimax_h3_turbo_v4_step600_ema_DasiwaREF2VAHybridV1_0_curveproj1025_compat_v001.safetensors",
-    "turbo": "minimax_h3_turbo_4step_10ErosMax_test4_pruned_curveproj1025_exp_v001-T8.safetensors",
+    "combat": "H3_Combat_V2.safetensors",
     "weapon": "H3-Bunny_weapon_combatV1.safetensors",
     "fightflow": "H3_Fight_Flow_V1-Unarmed combat interaction Melee weapon interaction Gun-fu interaction "
                  "一采 0.65 - 二采 0.25.safetensors",
@@ -44,31 +45,37 @@ FILES = {
     "realism": "h3-realism-people-r34l1sm-1.0 strong 0.6-0.8 light.safetensors",
     "lms": "minimax_h3_lms_v1.0_r64.safetensors",
 }
-BYPASS = {"dasiwa"}
-ORDER = {   # application order (as in the old chains: Dasiwa loader first, then the Power Lora rows)
-    "low": ["dasiwa", "turbo", "weapon", "fightflow", "motion_repair", "speed", "cinematic", "vbvr", "enhancer"],
-    "high": ["dasiwa", "turbo", "realism", "weapon", "fightflow", "motion_repair", "cinematic", "lms", "vbvr"],
+# 0.3.4: removed rows.  dasiwa was a bypass row (it replaced the model subgraph's speed LoRA), turbo (10ErosMax) was
+# stacked on top of it; both are dropped from saved lists when they run (logged), and by the editor.
+REMOVED = {"dasiwa", "turbo"}
+BYPASS = set()   # no bypass rows any more (kept as a name for old imports)
+ORDER = {   # application order (Combat first, where it sat in the old model subgraph)
+    "low": ["combat", "weapon", "fightflow", "motion_repair", "speed", "cinematic", "vbvr", "enhancer"],
+    "high": ["combat", "realism", "weapon", "fightflow", "motion_repair", "cinematic", "lms", "vbvr"],
 }
 # style -> pass -> {key: strength}; recommended keys not listed are switched off
 PRESETS = {
     "balanced": {
-        "low": {"dasiwa": 0.9, "turbo": 0.5, "motion_repair": 0.75, "speed": 3.0, "cinematic": 0.5, "vbvr": 1.0,
-                "enhancer": 0.55},
-        "high": {"dasiwa": 0.5, "turbo": 0.7, "realism": 0.6, "motion_repair": 0.25, "cinematic": 0.2, "lms": 0.2,
-                 "vbvr": 0.5},
+        "low": {"combat": 0.7, "motion_repair": 0.75, "speed": 3.0, "cinematic": 0.5, "vbvr": 1.0, "enhancer": 0.55},
+        "high": {"combat": 0.49, "realism": 0.6, "motion_repair": 0.25, "cinematic": 0.2, "lms": 0.2, "vbvr": 0.5},
     },
     "high_motion": {
-        "low": {"dasiwa": 0.9, "turbo": 0.5, "motion_repair": 0.75, "speed": 6.0, "cinematic": 0.5, "vbvr": 1.0,
-                "fightflow": 0.65, "enhancer": 0.5},
-        "high": {"dasiwa": 1.0, "turbo": 0.7, "realism": 0.7, "motion_repair": 0.25, "cinematic": 0.2, "vbvr": 0.5,
+        "low": {"combat": 0.7, "motion_repair": 0.75, "speed": 6.0, "cinematic": 0.5, "vbvr": 1.0, "fightflow": 0.65,
+                "enhancer": 0.5},
+        "high": {"combat": 0.49, "realism": 0.7, "motion_repair": 0.25, "cinematic": 0.2, "vbvr": 0.5,
                  "fightflow": 0.25, "lms": 0.2},
     },
     "motion_copy": {
-        "low": {"dasiwa": 0.9, "turbo": 0.5, "enhancer": 0.5},
-        "high": {"dasiwa": 0.5, "turbo": 0.7, "realism": 0.5, "lms": 0.2},
+        "low": {"combat": 0.7, "enhancer": 0.5},
+        "high": {"combat": 0.49, "realism": 0.5, "lms": 0.2},
     },
 }
 OFF_STRENGTH = {"low": {"weapon": 0.45, "fightflow": 0.65}, "high": {"weapon": 0.6, "fightflow": 0.25}}
+# style -> strength of the model subgraph's HIGH-res 768 turbo (bypass) LoRA.  The editor writes it into that loader
+# when a style button is clicked (drama 0.5 / high motion 1.0, like the old full workflow's Drama / High Motion switch).
+# The low-res 768 turbo stays 1.0.
+TURBO_HIGH = {"balanced": 0.5, "high_motion": 1.0, "motion_copy": 0.5}
+TURBO_FILE = "minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors"
 # style -> semantic bridge (file name fragment, strength); motion copy: none
 BRIDGES = {"balanced": ("MiniMaxH3_SemanticBridge_v1_T8_Compat", 0.12),
            "high_motion": ("BUNNY_H3_ActionLogic_Bridge_V1_T8_Compat", 0.12),
@@ -92,6 +99,8 @@ def apply_style(rows: list, style: str, which: str) -> list:
     out, seen = [], set()
     for r in rows or []:
         k = r.get("key")
+        if k in REMOVED:   # 0.3.4: Dasiwa / 10ErosMax rows are dropped
+            continue
         if k in rec:
             out.append(dict(r, on=rec[k]["on"], strength=rec[k]["strength"]))
             seen.add(k)
@@ -121,6 +130,10 @@ def parse_rows(text) -> list:
             s = float(r.get("strength", 1.0))
         except (TypeError, ValueError):
             s = 1.0
+        if r.get("key") in REMOVED:   # 0.3.4: dasiwa / turbo rows of an older workflow
+            LOG.info("%s row '%s' (%s) removed in 0.3.4 - the speed LoRA is the 768 turbo in the model subgraph; "
+                     "skipped. 0.3.4 已移除这一行（加速改由模型区 768 负责），已跳过。", _TAG, r.get("key"), r["lora"])
+            continue
         out.append({"key": r.get("key"), "lora": str(r["lora"]), "on": bool(r.get("on", True)), "strength": s})
     return out
 
@@ -161,6 +174,7 @@ def apply_rows(model, rows: list, cache: _LoraCache, which: str):
             model, _, _ = HL.apply_lowvram_bypass(model, lora, r["strength"])
         else:
             model, _ = comfy.sd.load_lora_for_models(model, None, lora, r["strength"], 0)
+        HL.add_lora_sig(model, ("lora", r["lora"], round(float(r["strength"]), 6)))
     LOG.info("%s %s-res LoRAs: %s", _TAG, which,
              ", ".join(f"{r['lora']} {r['strength']:g}" for r in active) or "none")
     return model, used
@@ -268,6 +282,9 @@ def register_routes() -> bool:
             "styles": STYLES,
             "presets": {s: {w: preset_rows(s, w) for w in ("low", "high")} for s in STYLES},
             "installed": {k: f in installed for k, f in FILES.items()},
+            "removed": sorted(REMOVED),
+            "turbo_high": TURBO_HIGH,
+            "turbo_file": TURBO_FILE,
             "loras": sorted(installed),
         })
 

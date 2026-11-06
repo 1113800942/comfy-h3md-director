@@ -7,6 +7,7 @@ export const HIDDEN_WIDGETS = {
   H3MDLoopSampler: ["delete_cache"],   // legacy node
   H3MDLoopSampler2: ["delete_cache"],  // "H3MD Loop Sampler" main node
   H3MDDepthControl: ["sam3_enabled"],   // 2026-10-27 sam3box: ignored by the backend; the per-video SAM3 box in the Director decides
+  H3MDMotionControl: ["sam3_enabled"],  // 2026-11-04 pose-exp: same as H3MD Depth Control
   // H3MDLoopOptions: handled by h3md_options_view.js since 2026-10-27 (basic / advanced view, recommended values)
 };
 

@@ -93,6 +93,25 @@ try:  # v0.2.0 plan export / import routes; never blocks node loading
 except Exception as _exc:
     logging.warning("[H3MD] plan export/import routes not loaded: %s", _exc)
 
+def _read_version():
+    """Version from pyproject.toml (the one source of truth), shown on the Director node so the installed build is
+    visible at a glance (2026-11-04)."""
+    import os
+    import re
+    try:
+        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "pyproject.toml"), encoding="utf-8") as f:
+            m = re.search(r'^version\s*=\s*"([^"]+)"', f.read(), re.M)
+        return m.group(1) if m else "?"
+    except Exception:
+        return "?"
+
+
+H3MD_VERSION = _read_version()
+for _k in ("H3MDDirectorRefMod", "H3MDDirector"):   # display name only: node ids, widgets and caches unchanged
+    if _k in NODE_DISPLAY_NAME_MAPPINGS:
+        NODE_DISPLAY_NAME_MAPPINGS[_k] = f"{NODE_DISPLAY_NAME_MAPPINGS[_k]} v{H3MD_VERSION}"
+logging.info("[H3MD] H3MD Director v%s loaded", H3MD_VERSION)
+
 # Frontend: H3MD Director plan editor (web/js). plan_json stays the serialized widget.
 WEB_DIRECTORY = "./web/js"
 

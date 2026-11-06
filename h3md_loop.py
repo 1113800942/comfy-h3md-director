@@ -173,6 +173,18 @@ def segment_range(plan: dict, stop_after: int = 0):
     return list(range(stop if stop > 0 else n))
 
 
+def model_lora_sig(low, high) -> dict:
+    """0.3.4: LoRAs recorded on the models by H3MD LowVRAM LoRA Loader / H3MD Control Panel (model_options
+    'h3md_lora_sig').  Changing one of them now changes the segment cache keys (before, a resume reused the old
+    segments).  Core loaders are not recorded.  Empty -> {} (keys exactly as before)."""
+    out = {}
+    for name, m in (("low", low), ("high", high)):
+        sig = ((getattr(m, "model_options", None) or {}).get("h3md_lora_sig")) if m is not None else None
+        if sig:
+            out[name] = sig
+    return out
+
+
 def parse_segments(text: str, n: int) -> list:
     """'8-10, 13-14, 16' (1-based, as in the log and the Director) -> sorted 0-based indices.  '' -> []."""
     raw = str(text or "").strip()
@@ -196,9 +208,13 @@ def parse_segments(text: str, n: int) -> list:
                              f"重跑段落写法有误：'{part}'（示例：3、4-6、8-10, 13-14）。") from None
         if lo > hi:
             lo, hi = hi, lo
-        if lo < 1 or hi > n:
+        if lo < 1 or lo > n:
             raise ValueError(f"{_TAG} rerun_segments: {part} is outside segments 1..{n}. "
                              f"重跑段落 {part} 超出范围（本分镜共 {n} 段，从 1 数）。")
+        if hi > n:   # 0.3.4: a range running past the end is cut there (e.g. 1-2 on a 1-segment plan)
+            LOG.warning("%s rerun_segments: %s runs past segment %d (the plan has %d); using %d-%d. 重跑段落 %s 超出"
+                        "段数（共 %d 段），已按 %d-%d 处理。", _TAG, part, n, n, lo, n, part, n, lo, n)
+            hi = n
         out.update(range(lo - 1, hi))
     return sorted(out)
 
@@ -718,6 +734,7 @@ class H3MDLoopSampler:
         prev_tail = None  # decoded frames of the previous segment's tail (disk-cache mode), for the low-res prefix
         prev_low = None   # Beta: previous segment's low-res stage endpoint (native low-res grid, CPU)
         ctx_clips = int(getattr(self, "_ctx_clips", 0) or 0)  # H3MD-Exp seam_decode_context
+        lora_sig = model_lora_sig(low_res_model, high_res_model)   # 0.3.4: {} = old keys unchanged
         ctx_prevs = []    # H3MD-Exp: previous final latent per entry of `finals` (None = no decode context)
         depth = getattr(self, "_depth", None) or DC.LoopDepth(None, {"segments": []})  # H3MD depth (inactive = no-op)
         beta = lowres_prefix_mode == BETA
@@ -777,6 +794,8 @@ class H3MDLoopSampler:
             dkey = depth.segment_cache_settings(plan, k)  # H3MD depth: per-segment, None for a depth-off segment
             if key is not None and dkey is not None:
                 key = C._sha({"key": key, "depth_control": dkey})
+            if key is not None and lora_sig:   # 0.3.4: LoRAs recorded by H3MD loaders / the Control Panel
+                key = C._sha({"key": key, "loras": lora_sig})
             if rerun:  # H3MD rerun: not selected = cached (validated above), selected = re-rendered
                 hit = k not in rerun
                 if hit and not cache.has(k, key):

@@ -378,6 +378,10 @@ MiniMax H3 单次最多十几秒。要做两三分钟的长视频，难点不在
 - **重跑选定段**：选中的段开头接上一段，**结尾也锁成下一段的旧开头**（高清 latent、低清结果、音频三样都锁），所以换进去的新段两头都无缝，其他段一帧不动。不用为一处跳变重跑 5 小时。
 
 ### 5. 动作复刻：深度只驱动 ControlNet
+- 激烈动作可以另外用第三方的 **TARA** 动作迁移 LoRA（Alissonerdx，配 ComfyUI-BFSNodes），当作普通节点接进 H3MD 工作流：
+  原片当普通 `<Video 1>`（不勾 depth）、加 TARA LoRA、BFS 的 TARA 节点只接低清模型、提示词加 `motion_transfer:`，
+  把清爽版里的「Sage 低清」节点旁路掉（Sage 会让 TARA 失效）。清爽版的模型区已经放好两个 TARA 节点（平常旁路，旁边有说明）：在总控台点「动作复刻」会自动打开它们并旁路「Sage 低清」，点「均衡」「高动态」自动恢复。TARA 不属于本节点包：请自己安装 ComfyUI-BFSNodes（Manager → 安装缺失节点）和 LoRA（缺少模型窗口里下载）。
+
 - 参考视频 → Depth Anything V2 深度图 → SAM3 只保留人物 → Fun ControlNet，**只作用在低清阶段**。
 - **实测教训**：把黑底白人形的剪影同时当 `<Video N>` 参考喂进去，模型会把黑底、灰色影棚照搬进画面。现在深度视频只驱动 ControlNet，不当参考。
 

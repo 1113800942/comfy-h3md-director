@@ -417,7 +417,7 @@ function injectStyles() {
 .h3md-tl2+.h3md-small,.h3md-tlhint{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .h3md-pf{position:relative;background:var(--comfy-input-bg,#111);border-radius:4px}
 .h3md-pf-back,.h3md-pf textarea{font-family:ui-monospace,Consolas,monospace;font-size:11px;line-height:1.4;padding:2px 4px;border:1px solid transparent;white-space:pre-wrap;overflow-wrap:break-word;word-break:normal;letter-spacing:normal;tab-size:4}
-.h3md-pf-back{position:absolute;top:0;left:0;overflow:hidden;color:transparent;pointer-events:none;border-radius:4px}
+.h3md-pf-back{position:absolute;top:0;left:0;right:0;bottom:0;overflow:hidden;color:transparent;pointer-events:none;border-radius:4px}
 .h3md-root .h3md-pf textarea{position:relative;display:block;background:transparent;border-color:var(--border-color,#555);margin:0}
 .h3md-pf-back mark{color:transparent;border-radius:3px;background:rgba(255,255,255,.15);box-shadow:0 0 0 1px rgba(255,255,255,.25)}
 .h3md-pf-back mark.image{background:rgba(80,140,60,.55);box-shadow:0 0 0 1px #6fae55}
@@ -1377,9 +1377,10 @@ class DirectorEditor {
     const pop = h("div", { class: "h3md-at", style: { display: "none" } });
     wrap.append(back, ta, pop);
     const markKind = (tagWord) => TAG_KIND[tagWord] || "image";
+    // 2026-11-05: the layer is stretched over the wrapper by CSS (left/right/top/bottom 0), so it always has the
+    // textarea's exact, fractional size - a px width copied from offsetWidth lagged behind the A-/A+ UI scale and
+    // the tag highlights drifted off their words.  Only the scrollbar gap and the scroll position are copied here.
     const sync = () => {
-      back.style.width = ta.offsetWidth + "px";
-      back.style.height = ta.offsetHeight + "px";
       back.style.paddingRight = (4 + Math.max(0, ta.offsetWidth - ta.clientWidth - 2)) + "px";
       back.scrollTop = ta.scrollTop;
     };
@@ -1399,7 +1400,7 @@ class DirectorEditor {
     let st = null;
     const close = () => { st = null; pop.style.display = "none"; };
     const caretXY = (pos) => {
-      const m = h("div", { class: "h3md-pf-back", style: { visibility: "hidden", width: back.style.width, paddingRight: back.style.paddingRight, height: "auto" } });
+      const m = h("div", { class: "h3md-pf-back", style: { visibility: "hidden", paddingRight: back.style.paddingRight, bottom: "auto", height: "auto" } });
       m.innerHTML = escHTML(ta.value.slice(0, pos)) + '<span>\u200b</span>';
       wrap.append(m);
       const sp = m.lastChild;
@@ -1463,6 +1464,9 @@ class DirectorEditor {
       }
     });
     if (typeof ResizeObserver !== "undefined") new ResizeObserver(sync).observe(ta);
+    // UI scale (A-/A+) changes the font, so the scrollbar can appear / go away: re-sync once the new layout is in
+    const onScale = () => { if (!wrap.isConnected) return window.removeEventListener("h3md-ui-scale", onScale); setTimeout(sync, 0); };
+    window.addEventListener("h3md-ui-scale", onScale);
     paint();
     requestAnimationFrame(sync);
     return wrap;

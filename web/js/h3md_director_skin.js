@@ -199,7 +199,7 @@ const CSS = `
 [data-h3sk] .h3md-pf,[data-h3sk] .h3md-pf *,[data-h3sk] input,[data-h3sk] select,[data-h3sk] textarea,[data-h3sk] .h3md-tl2 .so,[data-h3sk] .h3md-tl2 .ov{text-shadow:none!important}
 [data-h3sk] .h3md-pf-back,[data-h3sk] .h3md-pf textarea{font-size:calc(12.5px*var(--s))!important;line-height:1.55!important}
 [data-h3sk] .h3md-pf textarea{padding:2px 4px!important}
-[data-h3sk] .h3md-pf textarea{background:transparent!important}   /* the highlight layer sits UNDER the textarea: an opaque textarea hides it */   /* must equal .h3md-pf-back (refmod_ui.js:404), else the tag highlights drift */
+[data-h3sk] .h3md-pf textarea{background:transparent!important}   /* the highlight layer sits UNDER the textarea: an opaque textarea hides it */   /* must equal .h3md-pf-back (refmod_ui.js .h3md-pf-back rule), else the tag highlights drift */
 [data-h3sk] .h3md-pf-back mark{border-radius:4px!important;background:rgba(255,255,255,.28)!important;box-shadow:0 0 0 1.5px rgba(255,255,255,.7)!important}
 [data-h3sk] .h3md-pf-back mark.image{background:rgba(70,165,60,.88)!important;box-shadow:0 0 0 1.5px #9be27f!important}
 [data-h3sk] .h3md-pf-back mark.video{background:rgba(45,115,220,.92)!important;box-shadow:0 0 0 1.5px #9cc4ff!important}
@@ -290,7 +290,7 @@ function scale() { const v = parseFloat(ls.get(LS_SCALE, "1.1")); return isFinit
 function tools(root) {
   const box = document.createElement("span");
   box.className = "h3sk-tools";
-  const mk = (txt, title, fn) => { const b = document.createElement("button"); b.textContent = txt; b.title = title; b.onclick = (e) => { e.stopPropagation(); fn(); decorateAll(); }; return b; };
+  const mk = (txt, title, fn) => { const b = document.createElement("button"); b.textContent = txt; b.title = title; b.onclick = (e) => { e.stopPropagation(); fn(); decorateAll(); window.dispatchEvent(new Event("h3md-ui-scale")); }; return b; };
   box.append(
     mk("A−", "", () => ls.set(LS_SCALE, String(Math.round((scale() - 0.1) * 10) / 10))),
     Object.assign(document.createElement("span"), { className: "pct" }),

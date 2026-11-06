@@ -78,6 +78,16 @@ ROUTE = "controlnet_only"  # cache-key tag (depth-on segments only), 2026-10-30 
                            # stretches of the output black / studio grey)
 SAM3_CKPT = "sam3.1_multiplex_fp16.safetensors"   # core SAM3.1 (models/checkpoints), text-prompted video tracking
 SAM3_MASK = "sam3.1_videotrack_union_black"       # cache-key tag (SAM3-masked depth segments only)
+# 2026-11-04 pose mode (branch pose-exp): the same node / Loop path can feed a DWPose-style skeleton video to the Fun
+# ControlNet instead of depth.  control_kind "depth" (default) keeps every depth cache key byte-identical.
+CONTROL_KINDS = ("depth", "pose")
+POSE_ENGINES = ("sdpose", "dwpose")
+SDPOSE_CKPT = "sdpose_wholebody_fp16.safetensors"       # core SDPose (models/checkpoints)
+SDPOSE_BATCH = 16
+POSE_STICK, POSE_FACE_POINT, POSE_SCORE = 4, 2, 0.3     # SDPoseDrawKeypoints settings of the user's pose workflow
+DWPOSE_NODE = "DWPreprocessor"                          # comfyui_controlnet_aux
+DWPOSE_DET = "yolox_l.onnx"
+DWPOSE_EST = "dw-ll_ucoco_384_bs5.torchscript.pt"       # the TorchScript file already on disk (no download)
 
 
 # ---------------------------------------------------------------------------
@@ -160,8 +170,34 @@ def window_frames_needed(mode: str, length: int, overlap: int, ref_is_on: bool) 
     return max(5, int(length) - int(overlap))
 
 
+def control_kind(dc) -> str:
+    k = str((dc or {}).get("control_kind", "depth"))
+    return k if k in CONTROL_KINDS else "depth"
+
+
+def pose_options(dc: dict) -> dict:
+    eng = str(dc.get("pose_engine", "sdpose"))
+    return {"engine": eng if eng in POSE_ENGINES else "sdpose", "hands": bool(dc.get("pose_hands", True)),
+            "face": bool(dc.get("pose_face", False)), "feet": bool(dc.get("pose_feet", False)),
+            "resolution": int(dc.get("depth_resolution", 512))}
+
+
+def pose_cache_part(dc: dict) -> dict:
+    o = pose_options(dc)
+    if o["engine"] == "sdpose":   # SDPose stretches to its own 768x1024; resolution does not change it
+        o.pop("resolution")
+        o.update(ckpt=SDPOSE_CKPT, stick=POSE_STICK, face_point=POSE_FACE_POINT, score=POSE_SCORE)
+    else:
+        o.update(det=DWPOSE_DET, est=DWPOSE_EST)
+    return o
+
+
 def depth_settings(dc: dict) -> dict:
-    """Cache-key part (weights are not hashed; the VAE reference is not part of the key)."""
+    """Cache-key part (weights are not hashed; the VAE reference is not part of the key).  Depth: unchanged."""
+    if control_kind(dc) == "pose":
+        return {"strength": round(float(dc["strength"]), 6), "start": round(float(dc["start_percent"]), 6),
+                "end": round(float(dc["end_percent"]), 6), "control": str(dc["control_model"]),
+                "kind": "pose", "pose": pose_cache_part(dc), "fit": FIT_MODE}
     return {"strength": round(float(dc["strength"]), 6), "start": round(float(dc["start_percent"]), 6),
             "end": round(float(dc["end_percent"]), 6), "control": str(dc["control_model"]),
             "depth_model": str(dc["depth_model"]), "resolution": int(dc["depth_resolution"]),
@@ -292,6 +328,87 @@ def run_depth(frames, depth_model: str, resolution: int):
             import h3md_vram
         h3md_vram.soft_empty_cache("(depth model released)")
     return out
+
+
+def _release_comfy_model(patcher, reason: str):
+    """Unload a core ModelPatcher (and its clones) from ComfyUI's loaded list, then drop it."""
+    try:
+        import comfy.model_management as mm
+        inner = getattr(patcher, "model", None)
+        for lm in list(getattr(mm, "current_loaded_models", [])):
+            m = getattr(lm, "model", None)
+            if m is not None and (m is patcher or getattr(m, "model", None) is inner):
+                try:
+                    lm.model_unload()
+                except Exception:
+                    pass
+                try:
+                    mm.current_loaded_models.remove(lm)
+                except ValueError:
+                    pass
+    except Exception as e:   # never fail a run on cleanup
+        LOG.warning("%s pose model release: %s", _TAG, e)
+    gc.collect()
+    try:
+        from . import h3md_vram
+    except ImportError:
+        import h3md_vram
+    h3md_vram.soft_empty_cache(reason)
+
+
+def _sdpose(frames, opts):
+    import nodes
+    from comfy_extras import nodes_sdpose as SP
+    model, vae = None, None
+    try:
+        model, _clip, vae = nodes.CheckpointLoaderSimple().load_checkpoint(SDPOSE_CKPT)[:3]
+        kps = SP.SDPoseKeypointExtractor.execute(model=model, vae=vae, image=frames, batch_size=SDPOSE_BATCH)[0]
+    finally:
+        if model is not None:
+            _release_comfy_model(model, "(SDPose model released)")
+        del model, vae
+        gc.collect()
+    out = SP.SDPoseDrawKeypoints.execute(keypoints=kps, draw_body=True, draw_hands=opts["hands"],
+                                         draw_face=opts["face"], draw_feet=opts["feet"], stick_width=POSE_STICK,
+                                         face_point_size=POSE_FACE_POINT, score_threshold=POSE_SCORE,
+                                         draw_head=True)[0]
+    return out
+
+
+def _dwpose(frames, opts):
+    import nodes
+    cls = getattr(nodes, "NODE_CLASS_MAPPINGS", {}).get(DWPOSE_NODE)
+    if cls is None:
+        raise RuntimeError(f"{_TAG} '{DWPOSE_NODE}' not found: comfyui_controlnet_aux is not installed or failed to "
+                           "load (pose_engine dwpose needs it; or choose pose_engine sdpose)")
+    node = cls()
+    try:
+        r = node.estimate_pose(frames, detect_hand="enable" if opts["hands"] else "disable", detect_body="enable",
+                               detect_face="enable" if opts["face"] else "disable", resolution=opts["resolution"],
+                               bbox_detector=DWPOSE_DET, pose_estimator=DWPOSE_EST)
+        return r["result"][0] if isinstance(r, dict) else r[0]
+    finally:
+        del node
+        gc.collect()
+        try:
+            from . import h3md_vram
+        except ImportError:
+            import h3md_vram
+        h3md_vram.soft_empty_cache("(DWPose model released)")
+
+
+def run_pose(frames, opts: dict):
+    """Skeleton video (black background, OpenPose colours) from raw frames -> CPU IMAGE at the source size."""
+    if opts["engine"] == "sdpose":
+        try:
+            from comfy_extras import nodes_sdpose  # noqa: F401
+        except ImportError as e:
+            raise RuntimeError(f"{_TAG} core SDPose nodes not available ({e}): update ComfyUI or choose pose_engine "
+                               "dwpose") from e
+        out = _sdpose(frames, opts)
+    else:
+        out = _dwpose(frames, opts)
+    return out.to("cpu").float()[..., :3].contiguous()
 
 
 def load_control_patch(name: str):
@@ -497,6 +614,8 @@ class LoopDepth:
         self.prev_tail = None   # last frames of the previous segment's control (CPU)
         ld = loaders or {}
         self._run_depth = ld.get("run_depth", run_depth)
+        self._run_pose = ld.get("run_pose", run_pose)
+        self.kind = control_kind(dc)
         self._load_patch = ld.get("load_patch", load_control_patch)
         self._apply = ld.get("apply", apply_control)
         self._release = ld.get("release", _default_release)
@@ -523,7 +642,7 @@ class LoopDepth:
         if ref is None:
             return None
         out = dict(depth_settings(self.dc), route=ROUTE)
-        if sam3_active(self.dc, ref):   # SAM3-masked segment only (its prompt is in the segment signature)
+        if self.kind == "depth" and sam3_active(self.dc, ref):   # SAM3-masked segment only (its prompt is in the segment signature)
             out["sam3_mask"] = SAM3_MASK
             r = tuple(int(self.dc.get(k, 0)) for k in ("sam3_fill", "sam3_grow", "sam3_blur"))
             if any(r):
@@ -566,6 +685,19 @@ class LoopDepth:
         frames = load_video(info["file"], origin, dur, max_frames=need)   # raw window, no crop
         native = (int(frames.shape[2]), int(frames.shape[1]))
         masks, sam3 = None, None
+        if self.kind == "pose":
+            opts = pose_options(self.dc)
+            self.loads["pose"] = self.loads.get("pose", 0) + 1
+            if sam3_active(self.dc, ref):
+                LOG.info("%s %s: pose mode: SAM3 prompt ignored (person selection comes in a later version)", _TAG,
+                         where)
+            depth = self._run_pose(frames, opts)
+            del frames
+            gc.collect()
+            LOG.info("%s %s: pose skeleton of '%s' %d frames %dx%d (%s, hands %s, face %s, feet %s), %s", _TAG, where,
+                     ref["id"], depth.shape[0], native[0], native[1], opts["engine"], opts["hands"], opts["face"],
+                     opts["feet"], al["why"])
+            return self._finish_prepare(enc_plan, seg, ref, al, where, D, depth, native, None)
         if sam3_active(self.dc, ref):   # SAM3 on the SAME raw window frames, unloaded before the depth model loads
             sam3 = {"prompt": sam3_prompt(ref), "threshold": float(self.dc["sam3_threshold"])}
             self.loads["sam3"] = self.loads.get("sam3", 0) + 1
@@ -585,6 +717,9 @@ class LoopDepth:
                      "outside = black", _TAG, where, sam3["prompt"], sam3["threshold"], sam3["refine"], ref["id"])
         LOG.info("%s %s: depth of '%s' %d frames %dx%d -> %s (%s), %s", _TAG, where, ref["id"], depth.shape[0],
                  native[0], native[1], f"{depth.shape[2]}x{depth.shape[1]}", self.dc["depth_model"], al["why"])
+        return self._finish_prepare(enc_plan, seg, ref, al, where, D, depth, native, sam3)
+
+    def _finish_prepare(self, enc_plan, seg, ref, al, where, D, depth, native, sam3):
         # depth-only route: the depth frames ALWAYS replace the raw video as its <Video N> (ref flag on or off), at
         # the raw window's native size, so the reference path fits them exactly like it fitted the raw video
         # (apply_ref_video_height + core _resize "disabled") = the same full-frame stretch as the ControlNet copy
@@ -601,7 +736,7 @@ class LoopDepth:
             LOG.info("%s %s: route = DEPTH ONLY: depth of '%s' -> ControlNet + <Video> reference (%d frames %dx%d); raw "
                      "video NOT encoded (window / duration only)%s", _TAG, where, ref["id"], override.shape[0], native[0],
                      native[1], "" if ref_on(ref) else ", ref off -> slot added for the depth video")
-        st = {"ref_id": ref["id"], "ref_on": ref_on(ref), "depth": depth, "override": override, "drop_video": drop,
+        st = {"ref_id": ref["id"], "ref_on": ref_on(ref), "kind": self.kind, "depth": depth, "override": override, "drop_video": drop,
               "mode": al["mode"], "overlap": al["overlap"], "native": native}
         if sam3 is not None:
             st["sam3"] = sam3
@@ -665,7 +800,7 @@ class LoopDepth:
         if handle is not None:
             handle.release("(segment end)")
         self.last_report = None if not st else {"video": st.get("ref_id"), "ref": st.get("ref_on"),
-                                                "route": ROUTE,
+                                                "route": ROUTE, "kind": self.kind,
                                                 "video_input": "none" if st.get("drop_video") else "depth",
                                                 "align": st.get("mode"), "overlap": st.get("overlap"),
                                                 "control": st.get("geometry"), "patched": handle is not None}
@@ -746,7 +881,8 @@ class H3MDDepthControl:
 
     def build(self, control_model, vae, strength=0.7, start_percent=0.0, end_percent=0.6,
               depth_model=DEFAULT_DEPTH, depth_resolution=512, sam3_enabled=False, sam3_threshold=0.3,
-              sam3_fill=SAM3_FILL, sam3_grow=SAM3_GROW, sam3_blur=SAM3_BLUR, sam3_output="silhouette"):
+              sam3_fill=SAM3_FILL, sam3_grow=SAM3_GROW, sam3_blur=SAM3_BLUR, sam3_output="silhouette",
+              control_kind="depth", pose_engine="sdpose", pose_hands=True, pose_face=False, pose_feet=False):
         if float(start_percent) > float(end_percent):
             raise ValueError(f"{_TAG} start_percent {start_percent} > end_percent {end_percent}")
         if depth_model not in DEPTH_MODELS:
@@ -756,8 +892,49 @@ class H3MDDepthControl:
                  "depth_model": str(depth_model), "depth_resolution": int(depth_resolution),
                  "sam3_enabled": bool(sam3_enabled), "sam3_threshold": float(sam3_threshold),
                  "sam3_fill": int(sam3_fill), "sam3_grow": int(sam3_grow), "sam3_blur": int(sam3_blur),
-                 "sam3_output": str(sam3_output) if sam3_output in SAM3_OUTPUTS else "silhouette"},)
+                 "sam3_output": str(sam3_output) if sam3_output in SAM3_OUTPUTS else "silhouette",
+                 "control_kind": control_kind if control_kind in CONTROL_KINDS else "depth",
+                 "pose_engine": pose_engine if pose_engine in POSE_ENGINES else "sdpose",
+                 "pose_hands": bool(pose_hands), "pose_face": bool(pose_face), "pose_feet": bool(pose_feet)},)
 
 
-NODE_CLASS_MAPPINGS = {"H3MDDepthControl": H3MDDepthControl}
-NODE_DISPLAY_NAME_MAPPINGS = {"H3MDDepthControl": "H3MD Depth Control"}
+DEFAULT_CONTROL_V2 = "minimax_h3_fun_controlnet_union_2.0_pruned_int8_convrot.safetensors"
+
+
+class H3MDMotionControl(H3MDDepthControl):
+    """2026-11-04 (0.3.4 pose-exp): a NEW node next to H3MD Depth Control (which stays exactly as in 0.3.3).
+    Same output type, so it plugs into the Loop's depth_control input; adds control_kind depth / pose."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        spec = H3MDDepthControl.INPUT_TYPES()
+        names = _patch_names()
+        cm = spec["required"]["control_model"]
+        spec["required"]["control_model"] = (cm[0], dict(cm[1], default=DEFAULT_CONTROL_V2 if DEFAULT_CONTROL_V2 in names
+                                                          else cm[1]["default"]))
+        req = {"control_kind": (list(CONTROL_KINDS), {"default": "pose",
+                                "tooltip": "pose = skeleton (body motion only, any character / outfit; Fun ControlNet "
+                                           "2.0 recommended). depth = Depth Anything V2, same as H3MD Depth Control."}),
+               "pose_engine": (list(POSE_ENGINES), {"default": "sdpose",
+                               "tooltip": "pose only. sdpose = ComfyUI core SDPose wholebody (models/checkpoints/"
+                                          "sdpose_wholebody_fp16.safetensors). dwpose = comfyui_controlnet_aux DWPose "
+                                          "(yolox_l.onnx + dw-ll_ucoco_384_bs5.torchscript.pt; uses depth_resolution)."}),
+               "pose_hands": ("BOOLEAN", {"default": True, "tooltip": "pose only: draw hands / fingers."}),
+               "pose_face": ("BOOLEAN", {"default": False,
+                             "tooltip": "pose only: draw face points (off: the prompt / reference decides the face)."}),
+               "pose_feet": ("BOOLEAN", {"default": False, "tooltip": "pose only (sdpose): draw feet points."})}
+        r = spec["required"]
+        spec["required"] = {k: r[k] for k in ("control_model", "vae", "strength", "start_percent", "end_percent")}
+        spec["required"].update(req)
+        spec["required"].update({k: v for k, v in r.items() if k not in spec["required"]})
+        return spec
+
+    RETURN_NAMES = ("motion_control",)
+    DESCRIPTION = ("H3MD Loop motion control: pose skeleton (SDPose / DWPose) or depth (Depth Anything V2) + MiniMax H3 "
+                   "Fun ControlNet on the low-res stage. Connect to the Loop's depth_control input. Tick 'depth' on a "
+                   "video in the Director editor to use it as the motion source.")
+
+
+NODE_CLASS_MAPPINGS = {"H3MDDepthControl": H3MDDepthControl, "H3MDMotionControl": H3MDMotionControl}
+NODE_DISPLAY_NAME_MAPPINGS = {"H3MDDepthControl": "H3MD Depth Control",
+                              "H3MDMotionControl": "H3MD Motion Control (pose / depth)"}

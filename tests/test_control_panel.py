@@ -14,12 +14,33 @@ def test_presets_match_measured_mix():
     lo = {r["key"]: r for r in CP.preset_rows("balanced", "low")}
     hi = {r["key"]: r for r in CP.preset_rows("balanced", "high")}
     assert lo["enhancer"]["on"] and lo["enhancer"]["strength"] == 0.55
-    assert hi["realism"]["strength"] == 0.6 and hi["cinematic"]["on"] and hi["dasiwa"]["strength"] == 0.5
+    assert hi["realism"]["strength"] == 0.6 and hi["cinematic"]["on"]
     assert not lo["fightflow"]["on"] and not lo["weapon"]["on"]
     hm = {r["key"]: r for r in CP.preset_rows("high_motion", "high")}
-    assert hm["dasiwa"]["strength"] == 1.0 and hm["fightflow"]["on"]          # old 武戏 switch
+    assert hm["fightflow"]["on"]
     mc = {r["key"]: r for r in CP.preset_rows("motion_copy", "low") if r["on"]}
-    assert set(mc) == {"dasiwa", "turbo", "enhancer"}
+    assert set(mc) == {"combat", "enhancer"}
+    mch = {r["key"]: r["strength"] for r in CP.preset_rows("motion_copy", "high") if r["on"]}
+    assert mch == {"combat": 0.49, "realism": 0.5, "lms": 0.2}
+
+
+def test_034_no_bypass_rows_turbo_high_and_combat():
+    """0.3.4: no bypass rows; Dasiwa / 10ErosMax removed (old saved rows dropped); Combat V2 in every style;
+    the high-res 768 turbo strength follows the style (drama 0.5 / high motion 1.0 / motion copy 0.5)."""
+    assert CP.BYPASS == set() and "dasiwa" not in CP.FILES and "turbo" not in CP.FILES
+    assert CP.TURBO_HIGH == {"balanced": 0.5, "high_motion": 1.0, "motion_copy": 0.5}
+    for st in CP.STYLES:
+        lo = {r["key"]: r for r in CP.preset_rows(st, "low")}
+        hi = {r["key"]: r for r in CP.preset_rows(st, "high")}
+        assert lo["combat"]["on"] and lo["combat"]["strength"] == 0.7
+        assert hi["combat"]["on"] and hi["combat"]["strength"] == 0.49
+    old = [{"key": "dasiwa", "lora": "d.safetensors", "on": True, "strength": 0.9},
+           {"key": "turbo", "lora": "t.safetensors", "on": True, "strength": 0.5},
+           {"key": None, "lora": "mine.safetensors", "on": True, "strength": 0.3}]
+    assert [r["lora"] for r in CP.parse_rows(old)] == ["mine.safetensors"]
+    out = CP.apply_style(old, "balanced", "low")
+    assert not [r for r in out if r.get("key") in ("dasiwa", "turbo")]
+    assert [r for r in out if r["lora"] == "mine.safetensors"]
 
 
 def test_style_button_keeps_user_rows():

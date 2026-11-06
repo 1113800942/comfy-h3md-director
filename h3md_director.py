@@ -371,6 +371,12 @@ def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = Fa
     notes = []
     w = int(width) if int(width or 0) > 0 else int(raw.get("width") or 0)
     h = int(height) if int(height or 0) > 0 else int(raw.get("height") or 0)
+    pw, ph = int(raw.get("width") or 0), int(raw.get("height") or 0)
+    if int(width or 0) > 0 and int(height or 0) > 0 and pw > 0 and ph > 0 and (pw, ph) != (w, h):
+        # 0.3.4: the node's width / height (usually wired from the Control Panel) win over the plan's size
+        notes.append(f"size {w}x{h} from the node / Control Panel (the plan says {pw}x{ph}; the Control Panel wins)")
+        LOG.info("[H3MD Director] size %dx%d from the node / Control Panel; the plan's %dx%d is ignored. 尺寸以总控台为准"
+                 "（%dx%d），计划里的 %dx%d 不用。", w, h, pw, ph, w, h, pw, ph)
     if w <= 0 or h <= 0:
         raise ValueError("H3MD Director: width/height missing (set them in plan_json or on the node)")
     if w % SIZE_ALIGN or h % SIZE_ALIGN:

@@ -26,13 +26,76 @@ const setRows = (node, which, rows) => { const w = W(node, `lora_${which}`); if 
 function applyStyle(rows, style, which, P) {
   const rec = {};
   for (const r of P.presets?.[style]?.[which] || []) rec[r.key] = r;
-  const out = [], seen = new Set();
+  const out = [], seen = new Set(), removed = new Set(P.removed || ["dasiwa", "turbo"]);
   for (const r of rows) {
+    if (r.key && removed.has(r.key)) continue;   // 0.3.4: Dasiwa / 10ErosMax rows removed (speed LoRA = model-area 768)
     if (r.key && rec[r.key]) { out.push({ ...r, on: rec[r.key].on, strength: rec[r.key].strength }); seen.add(r.key); }
     else out.push({ ...r });
   }
   for (const [k, r] of Object.entries(rec)) if (!seen.has(k)) out.push({ ...r });
   return out;
+}
+
+// 0.3.4: the style buttons also set the HIGH-res 768 turbo (bypass) loader in the model subgraph
+// (drama 0.5 / high motion 1.0 / motion copy 0.5, from /h3md/control_panel/presets).  That loader is found by its
+// property h3md_role = "turbo768_high" (set in the example workflow), else by a title with "768" and 高清 / high.
+function allGraphs() {
+  const out = [], seen = new Set();
+  const add = (g) => { if (g && !seen.has(g)) { seen.add(g); out.push(g); } };
+  add(app.graph);
+  for (const g of app.graph?.subgraphs?.values?.() || []) add(g);
+  for (const g of app.graph?._subgraphs?.values?.() || []) add(g);
+  return out;
+}
+export function turboHighLoaders() {
+  const hits = [];
+  for (const g of allGraphs()) for (const n of g._nodes || g.nodes || []) {
+    if (n.type !== "H3MDLowVRAMLoraLoader" || n.mode === 4 || n.mode === 2) continue;
+    const role = n.properties?.h3md_role, t = String(n.title || "");
+    if (role === "turbo768_high" || (!role && /768/.test(t) && /高清|high/i.test(t))) hits.push(n);
+  }
+  return hits;
+}
+// 0.3.4: the "motion copy" style switches the simple workflow's third-party TARA nodes on (TARA LoRA + BFS TARA
+// alignment, found by property h3md_role = tara_lora / tara_temporal) and bypasses "Sage low-res" (h3md_role sage_low,
+// Sage stops TARA); every other style switches them back (TARA off, Sage low-res follows Sage high-res).  Without
+// ComfyUI-BFSNodes or the TARA LoRA nothing is switched on (a missing node would stop the run) - a note says why.
+const TARA_NODE = "BFSMiniMaxH3NativeTemporal";
+const TARA_LORA = "minimax_h3_motion_transfer_tara_v1.0_ref2va.safetensors";
+function roleNodes(role, titleRe) {
+  const hits = [];
+  for (const g of allGraphs()) for (const n of g._nodes || g.nodes || []) {
+    const r = n.properties?.h3md_role;
+    if (r === role || (!r && titleRe && titleRe.test(String(n.title || "")))) hits.push(n);
+  }
+  return hits;
+}
+function setMode(n, mode) { if (n.mode !== mode) { n.mode = mode; n.setDirtyCanvas?.(true, true); n.graph?.setDirtyCanvas?.(true, true); } }
+export function taraSwitch(style, P) {
+  const lora = roleNodes("tara_lora"), temporal = roleNodes("tara_temporal");
+  const sageLow = roleNodes("sage_low", /Sage.*(低清|low)/i), sageHigh = roleNodes("sage_high", /Sage.*(高清|high)/i);
+  if (!lora.length && !temporal.length) return "";   // workflow without the TARA nodes: nothing to do
+  const LG = globalThis.LiteGraph || window.LiteGraph;
+  const hasNode = !!LG?.registered_node_types?.[TARA_NODE];
+  const hasLora = !(P?.loras?.length) || P.loras.includes(TARA_LORA);
+  const want = style === "motion_copy";
+  if (want && (!hasNode || !hasLora)) {
+    for (const n of [...lora, ...temporal]) setMode(n, 4);
+    return !hasNode ? "TARA 动作复刻需要第三方 ComfyUI-BFSNodes（Manager → 安装缺失节点），没装：TARA 节点保持关闭 · TARA needs ComfyUI-BFSNodes (not installed): TARA stays off"
+      : "TARA LoRA 未下载（minimax_h3_motion_transfer_tara_v1.0_ref2va）：TARA 节点保持关闭 · TARA LoRA missing: TARA stays off";
+  }
+  for (const n of [...lora, ...temporal]) setMode(n, want ? 0 : 4);
+  const highMode = sageHigh.length ? sageHigh[0].mode : 0;
+  for (const n of sageLow) setMode(n, want ? 4 : highMode);
+  return want ? "动作复刻：TARA 已打开，Sage 低清已旁路（原片当 <Video 1>、不勾 depth，提示词开头写 motion_transfer:） · TARA on, Sage low-res bypassed" : "";
+}
+
+function setTurboHigh(v) {
+  if (typeof v !== "number") return;
+  for (const n of turboHighLoaders()) {
+    const w = n.widgets?.find((x) => x.name === "strength_model");
+    if (w) { w.value = v; w.callback?.(v); n.setDirtyCanvas?.(true, true); }
+  }
 }
 
 // "3, 6-7, 9" -> [3,6,7,9] (1-based) or null when the writing is wrong; "" -> []
@@ -104,6 +167,7 @@ const CSS = `
 .h3mdcp .hint button{margin-left:auto;font-size:11px;padding:1px 6px;border:1px solid #333;border-radius:4px;background:#fff3;color:inherit;cursor:pointer}
 .h3mdcp .styles{display:flex;gap:4px}.h3mdcp .styles button{flex:1;padding:5px 2px;border:1px solid #555;border-radius:5px;background:#2a2a2a;color:#ccc;cursor:pointer;font-size:11px}
 .h3mdcp .styles button.on{background:#2f5d8a;border-color:#4a8bd0;color:#fff}
+.h3mdcp .taranote{margin:4px 0 2px;padding:4px 6px;border-radius:5px;background:rgba(80,120,60,.25);border:1px solid #6a8f50;color:#dfe9d6;font-size:11px;line-height:1.4}
 .h3mdcp .box{border:1px solid #444;border-radius:6px;padding:4px}.h3mdcp .head{display:flex;align-items:center;gap:6px;margin-bottom:3px}
 .h3mdcp .head b{flex:1}.h3mdcp .head button,.h3mdcp .add{font-size:11px;padding:2px 6px;border:1px solid #555;border-radius:4px;background:#2a2a2a;color:#ccc;cursor:pointer}
 .h3mdcp .row{display:flex;align-items:center;gap:4px;margin:2px 0}.h3mdcp .row select{flex:1;min-width:0;background:#1e1e1e;color:#ddd;border:1px solid #444;border-radius:3px;font-size:11px}
@@ -143,6 +207,8 @@ class Panel {
     const sw = W(this.node, "style");
     if (sw) { sw.value = style; sw.callback?.(style); }
     for (const which of ["low", "high"]) setRows(this.node, which, applyStyle(rowsOf(this.node, which), style, which, P));
+    setTurboHigh(P.turbo_high?.[style]);
+    this.taraNote = taraSwitch(style, P);
     this.render();
   }
 
@@ -205,6 +271,7 @@ class Panel {
       this.hintEl(h),
       el("div", { class: "styles" }, ...["balanced", "high_motion", "motion_copy"].map((s) =>
         el("button", { class: s === style ? "on" : "", title: STYLE_TIP[s], onclick: () => this.setStyle(s) }, STYLE_LABEL[s]))),
+      ...(this.taraNote ? [el("div", { class: "taranote" }, this.taraNote)] : []),
       this.table("low"), this.table("high"));
     this.fit();
   }

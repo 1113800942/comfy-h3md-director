@@ -2,6 +2,44 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.3.4] — 2026-11-05
+**In short / 简要：**
+* Fixed one or two cosmetic UI bugs (no effect on use). 修复了一两个界面美化上的 bug，不影响使用。
+* Added skeleton (pose) support: new **H3MD Motion Control** node (pose / depth). 添加了对骨骼图的支持（新节点 H3MD Motion Control）。
+* Motion copy in the workflow: the simple workflow now includes the **TARA LoRA** and the **BFS Nodes** TARA node
+  (third-party, bypassed by default; install them yourself). 工作流里视频复刻方面添加了 TARA LoRA 和 BFS Nodes 的使用
+  （第三方，默认旁路，需要自己安装）。
+
+**Details / 详细：**
+* **H3MD Motion Control** (new node next to H3MD Depth Control, which is unchanged): `control_kind` pose / depth.
+  新节点 Motion Control（pose / depth），旧的 Depth Control 不变。
+* **LoRA area rework** (measured: ComfyUI keeps only the LAST bypass LoRA of a chain, so the model area's DMAD and
+  shared 768 were always replaced by the panel's Dasiwa row):
+  * model subgraph: one 768 turbo (bypass) per pass — low 1.0, high follows the style (drama 0.5 / high motion 1.0 /
+    motion copy 0.5); DMAD and the shared 768 are bypassed (removed in a later version); Combat V2 moved to the panel.
+  * Control Panel: every row is a normal LoRA; **Dasiwa and 10ErosMax rows removed** (dropped from older saved lists,
+    logged); Combat V2 row (0.7 / 0.49) in every style.
+  模型区每条线只留一个 768 旁路加速（低清 1.0、高清跟风格联动），总控台只有普通 LoRA，删掉 Dasiwa 和 10ErosMax，
+  Combat V2 移到总控台。
+  * simple workflow: Sage split into **Sage low-res** and **Sage high-res** (both on). Bypass the low-res one when you add a
+    third-party TARA node (Sage stops TARA). 清爽版 Sage 拆成低清、高清两个（都开）；自己接 TARA 时把低清那个旁路。
+  * simple workflow: two **third-party TARA** nodes (Motion Transfer TARA LoRA + BFS TARA alignment on the low-res line),
+    bypassed by default, with a note; the TARA LoRA is in the missing-models list. Needs ComfyUI-BFSNodes when enabled
+    (opening the workflow without it shows the node as missing; bypassed, the workflow still runs).
+    清爽版放好两个第三方 TARA 节点（默认旁路，附说明），要用时打开并旁路「Sage 低清」；需要自己装 ComfyUI-BFSNodes。
+  * Control Panel: the **motion copy** button switches those TARA nodes on and bypasses "Sage low-res"; balanced / high
+    motion switch back (TARA off, Sage low-res like Sage high-res). Without BFSNodes or the TARA LoRA, TARA stays off
+    (a note says why). 点「动作复刻」自动打开 TARA、旁路 Sage 低清；点「均衡」「高动态」自动恢复；没装就不打开并提示。
+* Cache: LoRAs loaded by **H3MD LowVRAM LoRA Loader** and the **Control Panel** are now part of each segment's cache
+  key, so changing one re-renders instead of resuming the old result (core LoRA loaders are not tracked). Caches written
+  by 0.3.3 with panel LoRAs are re-rendered once. 换 LoRA 后缓存会重算（之前会直接拿旧结果）；0.3.3 的缓存会重跑一次。
+* Loop: `rerun_segments` running past the last segment is cut there (e.g. `1-2` on a one-segment plan) instead of
+  failing. 重跑段落超出段数时自动截掉。
+* Director: logs when the Control Panel's size overrides the plan's size. 尺寸以总控台为准时日志提示。
+* Director editor: the `<Picture N>` / `<Video N>` highlights stay on their words at every A− / A+ UI scale.
+  导演台放大缩小后提示词标签颜色不再错位。
+* The Director node shows the version in its title (e.g. "H3MD Director + RefMod v0.3.4").
+
 ## [0.3.3] — 2026-11-04
 * Loop `semantic_bridge` also takes **T8's semantic bridge** ("H3 Semantic Bridge / 模型与设置", auto config, multi-bridge
   stack). H3MD reads the bridge file and strength from it and applies them with its own code (no T8 code imported);

@@ -304,7 +304,20 @@ class H3MDLowVRAMLoraLoader:
             lora = comfy.utils.load_torch_file(lora_path, safe_load=True)
             self.loaded_lora = (lora_path, lora)
         new, _, _ = apply_lowvram_bypass(model, lora, strength_model, stack_mode, chunk_tokens)
+        add_lora_sig(new, ("bypass", str(lora_name), round(float(strength_model), 6), str(stack_mode)))
         return (new,)
+
+
+LORA_SIG = "h3md_lora_sig"   # 0.3.4: model_options entry the H3MD Loop puts into each segment's cache key
+
+
+def add_lora_sig(model, item):
+    """Record a LoRA on a (cloned) ModelPatcher so the Loop's cache key changes with it (new list, never mutated)."""
+    try:
+        opts = model.model_options
+        opts[LORA_SIG] = list(opts.get(LORA_SIG) or []) + [list(item)]
+    except Exception:
+        pass
 
 
 NODE_CLASS_MAPPINGS = {"H3MDLowVRAMLoraLoader": H3MDLowVRAMLoraLoader}
