@@ -54,6 +54,7 @@ import json
 import logging
 import math
 import os
+import re
 import sys
 
 import torch
@@ -101,8 +102,48 @@ def snap_length(frames: float) -> int:
 def aligned_up(frames: float) -> int:
     """Smallest H3 frame count (5+17n) >= frames - core comfy_extras/nodes_minimax_h3.align_frame_count
     rounds the same way (while n % 17 != 5: n += 1)."""
-    f = max(5, int(math.ceil(float(frames) - 1e-6)))
+    f = max(5, int(math.ceil(float(frames) - 1e-3)))   # 1e-3: seconds x 24 float noise (12.041667 s -> 289.000008 f)
     return 5 + 17 * ((f - 5 + 16) // 17)
+
+
+def aligned_down(frames: float) -> int:
+    """Largest H3 frame count (5+17n) <= frames (minimum 5)."""
+    f = int(math.floor(float(frames) + 1e-3))
+    return 5 + 17 * max(0, (f - 5) // 17)
+
+
+MOTION_TRIGGER = "motion_transfer:"   # TARA motion copy trigger (third-party LoRA); its prompt must start with it
+
+
+def is_motion_copy(global_prompt: str, prompt: str) -> bool:
+    return MOTION_TRIGGER in f"{global_prompt or ''}\n{prompt or ''}"
+
+
+def fit_video_length(overlap: int, content: float, avail, motion: bool = False) -> int:
+    """Length of a shot that follows its reference video: rounded UP to 5+17n (unchanged).
+    v0.3.5 motion copy (TARA, prompt with 'motion_transfer:'): rounded DOWN when rounding up would run past the
+    end of the clip (new frames > avail = clip frames from trimStart to its end) - TARA needs a source frame for
+    every generated frame ('identical temporal grids' error otherwise).  Loses at most 16 frames (0.7 s) at the
+    clip end; nothing for the user to set."""
+    up = aligned_up(overlap + content)
+    if motion and avail is not None and up - overlap > float(avail) + 1e-3:
+        down = aligned_down(overlap + content)
+        if down - overlap >= 1:
+            return down
+    return up
+
+
+DURATION_LINE = re.compile(r"^[ \t]*Duration:[^\n]*$", re.M)
+
+
+def fix_duration_line(prompt: str, length: int, overlap: int) -> str:
+    """v0.3.5: the prompt's first 'Duration: ...' line is rewritten to the segment's real length (after the
+    video-following length and the auto-split), so nobody has to count frames.  No such line: unchanged."""
+    if not prompt or "Duration:" not in prompt:
+        return prompt
+    tail = f"; the first {overlap} frames continue the previous shot" if overlap else ""
+    line = f"Duration: {length / FPS:.2f} s ({length} frames{tail})."
+    return DURATION_LINE.sub(lambda m: line, prompt, count=1)
 
 
 def video_shot_length(segment: dict, media_videos: dict):
@@ -113,6 +154,21 @@ def video_shot_length(segment: dict, media_videos: dict):
     None when the shot has no video ref or the clip duration is unknown: its stored 'length' is used."""
     content = video_content_frames(segment, media_videos)
     return None if content is None else aligned_up(content)
+
+
+def video_available_frames(segment: dict, media_videos: dict):
+    """Frames (24 fps, float) of the shot's first reference video from trimStart to the clip end, or None."""
+    for v in segment.get("videos") or []:
+        v = {"id": v} if isinstance(v, str) else (v or {})
+        info = media_videos.get(str(v.get("id")))
+        if info is None:
+            continue
+        src_dur = _num(info.get("duration"))
+        if src_dur is None:
+            return None
+        rem = src_dur - max(0.0, _num(v.get("trimStart"), 0.0))
+        return rem * FPS if rem > 0 else None
+    return None
 
 
 def video_content_frames(segment: dict, media_videos: dict):
@@ -441,6 +497,8 @@ def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = Fa
         requested = s.get("overlapRequest")          # editor: the user's overlap when the stored one was shrunk
         requested = int(requested) if requested is not None and i > 0 and overlap > 0 else overlap
         content = video_content_frames(s, media["videos"])
+        avail = video_available_frames(s, media["videos"])
+        motion = is_motion_copy(global_prompt, s.get("prompt", ""))
         if i > 0 and valid_overlap(requested) and requested not in OVERLAP_STEPS:
             notes.append(f"WARNING segment {n} overlapIn {requested} is not one of 0/22/39 (older plan); kept as saved")
         if content is not None:
@@ -448,16 +506,17 @@ def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = Fa
             if cont:
                 # no length cap: the requested overlap is always kept, the new content follows the overlap
                 overlap = requested
-                auto_len = aligned_up(overlap + content)
+                auto_len = fit_video_length(overlap, content, avail, motion)
                 if i > 0 and overlap != int(s.get("overlapIn", 0) or 0):
                     lengths_moved = True
             else:
-                auto_len = aligned_up(content)
+                auto_len = fit_video_length(0, content, avail, motion)
             if length is not None and int(length) != auto_len:
                 lengths_moved = True
                 what = (f"overlap {overlap} + {content / FPS:.2f}s new content" if i > 0 and overlap > 0
                         else "its first reference video duration")
-                notes.append(f"segment {n} length {int(length)} -> {auto_len} (follows {what}, rounded up to 5+17n)")
+                notes.append(f"segment {n} length {int(length)} -> {auto_len} (follows {what}, "
+                             f"{'motion copy: rounded down to 5+17n so it does not run past the clip end' if auto_len < (overlap if i > 0 else 0) + content - 1e-3 else 'rounded up to 5+17n'})")
             length = auto_len
         if length is None:
             raise ValueError(f"H3MD Director: segment {n} needs 'length' (frames, 5+17n)")
@@ -581,6 +640,7 @@ def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = Fa
     for seg in segments:
         for key in ("_raw_prompt", "_content"):
             seg.pop(key, None)
+        seg["prompt"] = fix_duration_line(seg["prompt"], int(seg["length"]), int(seg["overlapIn"]))
         if continuity and seg["overlapIn"] > 0:
             seg["prompt"] = continuity_note(seg["overlapIn"]) + "\n\n" + seg["prompt"]
     ref_video_height = normalize_ref_video_height(raw.get("refVideoHeight"))

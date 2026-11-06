@@ -450,6 +450,10 @@ how we solved them — feel free to build on them.
   workflow as ordinary extra nodes: the source video as a normal `<Video 1>` (depth not ticked), the TARA LoRA, the BFS
   TARA node on the low-res model only, `motion_transfer:` in the prompt, and bypass the simple workflow's "Sage low-res" node (Sage stops
   TARA). The simple workflow already has both TARA nodes in the model subgraph (bypassed, with a note): the Control Panel's "motion copy" button switches them on and bypasses "Sage low-res" ("balanced" / "high motion" switch back). TARA is not part of this node pack: install ComfyUI-BFSNodes (Manager → Install Missing Custom Nodes) and the LoRA (missing-models popup) yourself.
+  Shot length in motion copy: a shot that follows the source video takes its length from the video, aligned to H3's
+  5+17n frames. With `motion_transfer:` in the prompt it is rounded **down** at the clip end (TARA needs a source frame
+  for every frame, so up to 0.7 s of the clip end is left out); in every other use it is rounded **up** as before.
+  You never set it yourself, and the prompt's `Duration:` line is updated automatically.
 
 - Reference video → Depth Anything V2 depth → SAM3 keeps only the person → Fun ControlNet, **on the low-res pass
   only**.

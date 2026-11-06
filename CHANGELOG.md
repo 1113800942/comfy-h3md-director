@@ -2,6 +2,31 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.3.5] — 2026-11-05
+**In short / 简要：**
+* Motion copy (TARA) no longer fails at the end of a video: the shot length that follows the source video is now
+  rounded **down** in motion copy, so it never runs past the clip. 动作复刻（TARA）跑到视频结尾不再报错：跟随原片的镜头
+  长度在动作复刻时改为**向下取整**，不会超出原片。
+* The `Duration:` line of a prompt is rewritten to the real segment length automatically. 提示词第一行的
+  `Duration:` 自动改成实际段长。
+
+**Details / 详细：**
+* A shot that follows its reference video gets its length from the video. H3 needs 5+17n frames, so the length is
+  rounded:
+  * **motion copy** (the prompt or global prompt contains `motion_transfer:`, i.e. the TARA LoRA): rounded **down**
+    when rounding up would run past the end of the clip. TARA needs a source frame for every generated frame
+    (BFS error "Native temporal guide and output must have identical temporal grids"). At most 16 frames (0.7 s) of
+    the clip end are left out.
+  * everything else (reference video, depth / pose control, music videos): rounded **up** as before.
+  跟随参考视频的镜头，长度取视频长度，再对齐到 5+17n：**动作复刻**（提示词或全局提示词里有 `motion_transfer:`，
+  即用 TARA LoRA）在向上取整会超出原片结尾时**向下取整**（TARA 要求每一帧都有原片对应，否则 BFS 报 identical
+  temporal grids），最多少原片结尾 16 帧（0.7 秒）；**其他功能**（参考视频、深度 / 骨骼控制、MV 等）照旧**向上取整**。
+* Float noise in video durations (e.g. 12.041667 s × 24 = 289.000008) no longer rounds a length up a whole 17-frame
+  step. 视频时长的小数误差不再把段长多进一档（17 帧）。
+* `Duration: ...` (first such line of a prompt) is rewritten per segment after auto-split, e.g.
+  `Duration: 12.96 s (311 frames; the first 39 frames continue the previous shot).` Prompts without it are unchanged.
+  提示词里的 `Duration:` 行按每个小段（自动分段之后）的实际长度改写；没有这一行的提示词不变。
+
 ## [0.3.4] — 2026-11-05
 **In short / 简要：**
 * Fixed one or two cosmetic UI bugs (no effect on use). 修复了一两个界面美化上的 bug，不影响使用。

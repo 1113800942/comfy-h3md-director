@@ -51,7 +51,32 @@ export const validOverlap = (n) => n === 0 || isAlignedLength(n);
 // User-set shot length -> NEAREST 5+17n (ties go up, minimum 5), no maximum (mirrors h3md_director.snap_length).
 export const snapShotLength = (frames) => 5 + 17 * Math.max(0, Math.floor((Number(frames) - 5) / 17 + 0.5));
 // Smallest 5+17n >= frames (core nodes_minimax_h3.align_frame_count rounds up the same way).
-export const alignedUp = (frames) => { const f = Math.max(5, Math.ceil(Number(frames) - 1e-6)); return 5 + 17 * Math.floor((f - 5 + 16) / 17); };
+export const alignedUp = (frames) => { const f = Math.max(5, Math.ceil(Number(frames) - 1e-3)); return 5 + 17 * Math.floor((f - 5 + 16) / 17); };
+export const alignedDown = (frames) => { const f = Math.floor(Number(frames) + 1e-3); return 5 + 17 * Math.max(0, Math.floor((f - 5) / 17)); };
+// v0.3.5 motion copy (TARA: prompt contains "motion_transfer:"): a video-following shot is rounded DOWN when
+// rounding up would run past the clip end (TARA needs a source frame for every frame). Mirrors fit_video_length.
+export const MOTION_TRIGGER = "motion_transfer:";
+export const isMotionCopy = (globalPrompt, prompt) => `${globalPrompt || ""}\n${prompt || ""}`.includes(MOTION_TRIGGER);
+export function fitVideoLength(overlap, content, avail, motion = false) {
+  const up = alignedUp(overlap + content);
+  if (motion && avail !== null && avail !== undefined && up - overlap > avail + 1e-3) {
+    const down = alignedDown(overlap + content);
+    if (down - overlap >= 1) return down;
+  }
+  return up;
+}
+export function videoAvailableFrames(s, mediaVideos) {
+  for (const r of (s && s.videos) || []) {
+    const v = videoRef(r);
+    const info = mediaVideos[pyStr(v.id)];
+    if (!info) continue;
+    const d = num(info.duration);
+    if (d === null) return null;
+    const rem = d - Math.max(0, num(v.trimStart, 0));
+    return rem > 0 ? rem * FPS : null;
+  }
+  return null;
+}
 export const videoTokens = (n) => (n <= 5 ? 2 : Math.floor((n - 5) / 17) * 5 + 2);
 export const snap32 = (v) => Math.max(32, Math.trunc(pyRound(Math.trunc(v) / 32)) * 32);
 export const SIZE_ALIGN = 64;   // video width/height (h3md_director.SIZE_ALIGN)
@@ -333,11 +358,12 @@ export function autoShotGeometry(plan, i, mediaVideos = null) {
   if (content === null) return null;
   const req = requestedOverlap(s, i);
   const cont = i > 0 && req > 0 && validOverlap(req);
+  const avail = videoAvailableFrames(s, mv), motion = isMotionCopy(plan.globalPrompt, s && s.prompt);
   if (cont) {
     // no length cap (2026-10-20): the requested overlap is always kept, the new content follows it
-    return { length: alignedUp(req + content), overlap: req, content, requested: req, status: "ok", max: 0, dropped: 0 };
+    return { length: fitVideoLength(req, content, avail, motion), overlap: req, content, requested: req, status: "ok", max: 0, dropped: 0 };
   }
-  return { length: alignedUp(content), overlap: Math.trunc(num((s && s.overlapIn) || 0, 0)), content, requested: req, status: "ok", max: 0, dropped: 0 };
+  return { length: fitVideoLength(0, content, avail, motion), overlap: Math.trunc(num((s && s.overlapIn) || 0, 0)), content, requested: req, status: "ok", max: 0, dropped: 0 };
 }
 export const shotLengthIsAuto = (plan, i) => videoShotLength((plan.segments || [])[i], mediaMaps(plan).videos) !== null;
 // New-content frames of shot i (length minus the frames shared with the previous shot).
@@ -623,14 +649,14 @@ export function validatePlan(raw, opts = {}) {
       const cont = i > 0 && requested > 0 && validOverlap(requested);
       if (cont) {
         // no length cap: the requested overlap is always kept, the new content follows the overlap
-        autoLen = alignedUp(requested + content); autoStatus = "ok";
+        autoLen = fitVideoLength(requested, content, videoAvailableFrames(s, media.videos), isMotionCopy(globalPrompt, s.prompt)); autoStatus = "ok";
         if (i > 0 && requested !== overlap) lengthsMoved = true;
         overlap = requested;
-      } else autoLen = alignedUp(content);
+      } else autoLen = fitVideoLength(0, content, videoAvailableFrames(s, media.videos), isMotionCopy(globalPrompt, s.prompt));
       if (length !== null && length !== autoLen) {
         lengthsMoved = true;
         const what = i > 0 && overlap > 0 ? `overlap ${overlap} + ${f2(content / FPS)}s new content` : "its first reference video duration";
-        res.notes.push(`segment ${n} length ${length} -> ${autoLen} (follows ${what}, rounded up to 5+17n)`);
+        res.notes.push(`segment ${n} length ${length} -> ${autoLen} (follows ${what}, ${autoLen < (i > 0 ? overlap : 0) + content - 1e-3 ? "motion copy: rounded down to 5+17n so it does not run past the clip end" : "rounded up to 5+17n"})`);
       }
       length = autoLen;
     }
