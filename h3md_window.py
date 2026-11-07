@@ -167,6 +167,44 @@ def pick_span_cond(cond_in, window):
     return best
 
 
+def make_overlap_monitor(handler):
+    """Ghost check: how much neighbouring windows disagree on their shared latent frames, per step.  A window pair
+    that still disagrees late in sampling is fused as a double exposure (11-07: two faces in one frame).  Logged
+    per step; handler._h3md_overlap keeps [(sigma, [(pair, value), ...]), ...] for reports."""
+    import torch
+    state = {"sigma": None, "store": {}, "pairs": {}, "win": {}}
+    handler._h3md_overlap = []
+
+    def flush():
+        if state["sigma"] is not None and state["pairs"]:
+            vals = sorted((k, sum(v) / len(v)) for k, v in state["pairs"].items())
+            handler._h3md_overlap.append((state["sigma"], vals))
+            LOG.info("%s overlap disagreement at sigma %.3f: %s", _TAG, state["sigma"],
+                     ", ".join(f"w{a + 1}-w{b + 1} {v:.3f}" for (a, b), v in vals))
+
+    def combine(h, x_in, sub_conds_out, sub_conds, window, window_idx, total_windows, timestep, *rest):
+        if not getattr(window, "modality_windows", None) or not sub_conds_out:
+            return                                            # audio modality / nothing to compare
+        sigma = float(timestep.flatten()[0])
+        if sigma != state["sigma"]:
+            flush()
+            state.update(sigma=sigma, store={}, pairs={})
+        out = sub_conds_out[0]
+        for pos, idx in enumerate(window.index_list):
+            cur = out.narrow(window.dim, pos, 1)
+            prev = state["store"].get(idx)
+            if prev is not None:
+                pw, pt = prev
+                d = (cur - pt).abs().mean() / ((cur.abs().mean() + pt.abs().mean()) / 2 + 1e-6)
+                state["pairs"].setdefault((pw, window_idx), []).append(float(d))
+            state["store"][idx] = (window_idx, cur.detach())
+        if window_idx + 1 == total_windows:
+            flush()
+            state.update(sigma=None, store={}, pairs={})
+
+    return combine
+
+
 def install(handler, crop_guide: bool):
     """Turn a core IndexListContextHandler into the H3MD one (window prompts + guide crop)."""
     import comfy.context_windows as cw
@@ -190,6 +228,8 @@ def install(handler, crop_guide: bool):
 
     handler.__class__ = H3MDWindowHandler
     handler._h3md_seen = set()
+    pe.add_callback_with_key(cw.IndexListCallbacks.COMBINE_CONTEXT_WINDOW_RESULTS, _KEY, make_overlap_monitor(handler),
+                             handler.callbacks)
     if crop_guide:
         pe.add_callback_with_key(cw.IndexListCallbacks.RESIZE_COND_ITEM, _KEY,
                                  make_resize_callback(handler, True, set()), handler.callbacks)

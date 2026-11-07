@@ -51,3 +51,16 @@ assert h.get_resized_cond(conds, x, w0, device="cpu")[0]["tag"] == "A"
 one = h.get_resized_cond([conds[0]], x, vw, device="cpu")
 assert one[0]["tag"] == "A"
 print("window core check OK: window span", (a, b), "-> prompt B; guide cropped to 37; layout rebuilt; window 0 -> A")
+# overlap monitor: two windows that agree -> 0, disagree -> > 0
+mon = WIN.make_overlap_monitor(h)
+wa = cw.IndexListContextWindow(list(range(0, 10)), dim=2, total_frames=20); wa.modality_windows = {1: None}
+wb = cw.IndexListContextWindow(list(range(6, 20)), dim=2, total_frames=20); wb.modality_windows = {1: None}
+t = torch.tensor([0.5])
+mon(h, None, [torch.ones(1, 2, 10, 2, 2)], None, wa, 0, 2, t)
+mon(h, None, [torch.cat([torch.ones(1, 2, 4, 2, 2), torch.zeros(1, 2, 10, 2, 2)], 2)], None, wb, 1, 2, t)
+sig, vals = h._h3md_overlap[-1]
+assert abs(sig - 0.5) < 1e-6 and vals[0][0] == (0, 1) and abs(vals[0][1] - 0.0) < 1e-6, vals
+mon(h, None, [torch.ones(1, 2, 10, 2, 2)], None, wa, 0, 2, t)
+mon(h, None, [-torch.ones(1, 2, 14, 2, 2)], None, wb, 1, 2, t)
+assert h._h3md_overlap[-1][1][0][1] > 1.5, h._h3md_overlap[-1]
+print("overlap monitor OK", h._h3md_overlap[-2:])
