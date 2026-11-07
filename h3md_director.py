@@ -648,7 +648,8 @@ def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = Fa
         notes.append(f"token budget {budget:,} per segment (available {b['avail_gib']} GiB"
                      + (f" after ComfyUI's reserve {b['reserve_gib']} GiB" if b["reserve_gib"] is not None else "")
                      + f", safety {b['safety']})")
-    segments = AS.apply(sys.modules[__name__], segments, media, raw, w, h, rvh_mode, notes, motion=motion,
+    as_raw = dict(raw, autoSplit=False) if window_mode is not None else raw   # window mode: never split a shot
+    segments = AS.apply(sys.modules[__name__], segments, media, as_raw, w, h, rvh_mode, notes, motion=motion,
                         extra_tokens=extra_tokens, budget=budget, sizes=sizes, report=report)
     for seg in segments:
         for key in ("_raw_prompt", "_content"):

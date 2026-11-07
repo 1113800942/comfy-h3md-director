@@ -58,6 +58,13 @@ class PlanParse(unittest.TestCase):
         self.assertTrue(wps[1]["prompt"].startswith("g"))
         self.assertTrue(any("window mode" in n for n in p["notes"]))
 
+    def test_window_mode_never_splits_with_budget(self):
+        p = D.parse_plan(plan(True), budget=50000)
+        self.assertEqual(len(p["segments"]), 1)
+        self.assertEqual(p["segments"][0]["length"], LONG)
+        p_off = D.parse_plan(plan(), budget=50000)
+        self.assertGreater(len(p_off["segments"]), 1)
+
     def test_window_prompts_ignored_when_off(self):
         p = D.parse_plan(plan(None, [{"at": 0, "prompt": "a"}, {"at": 10, "prompt": "b"}], length=345))
         self.assertNotIn("windowPrompts", p["segments"][0])
