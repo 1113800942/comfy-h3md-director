@@ -46,6 +46,7 @@ try:
     from . import h3md_depth_control as DC        # H3MD depth ControlNet (optional input depth_control)
     from . import h3md_lowres_anchor as LA        # H3MD low-res anchor (2026-10-30)
     from . import h3md_window as WIN              # window-exp branch (2026-11-07)
+    from . import h3md_progress as PROG           # window-exp: per-step progress cache
 except ImportError:  # flat import (tests)
     import h3md_director as D
     import h3md_sampler as S
@@ -58,6 +59,7 @@ except ImportError:  # flat import (tests)
     import h3md_depth_control as DC
     import h3md_lowres_anchor as LA
     import h3md_window as WIN
+    import h3md_progress as PROG
 
 LOG = logging.getLogger("H3MD")
 _TAG = "[H3MD Loop]"
@@ -913,6 +915,13 @@ class H3MDLoopSampler:
                     LOG.warning("%s %s: lowres_anchor has no reference (the shot's first segment has no low-res "
                                 "result in the cache); not applied", _TAG, where)
             low_model, high_model, dctl = model, high_res_model, None
+            progress = None
+            if cache is not None and key and isinstance(plan, dict) and plan.get("windowMode"):
+                try:  # window-exp: low-res result + per-step state on disk, resume after a crash / stop
+                    progress = PROG.ProgressStore(cache.path(k, "_progress"), key)
+                    extra["h3md_progress"] = progress
+                except Exception as exc:
+                    LOG.warning("%s %s: progress cache unavailable (%s)", _TAG, where, exc)
             nxt_ov = segs[indices[step + 1]]["overlapIn"] if step + 1 < len(indices) else 0
             try:
                 if dseg is not None:  # H3MD depth: int8 patch loaded now, on a CLONE of the low-res model only
@@ -935,6 +944,8 @@ class H3MDLoopSampler:
                 del low_model, dctl
             out = res["result"][0] if isinstance(res, dict) else res[0]
             final = _to_cpu(out)  # only 'samples' ever leaves the sampler; this is the handoff
+            if progress is not None:
+                progress.finish()
             if hires_strength > 0:  # H3MD hi-res anchor (v0.2.0)
                 final, hires_ref, hinfo = hires_anchor_step(final, hires_ref, continued, overlap, hires_strength, where,
                                                           tail_ov if tail_lat is not None else 0)

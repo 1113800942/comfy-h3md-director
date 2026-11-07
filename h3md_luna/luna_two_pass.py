@@ -173,7 +173,7 @@ def _sample(model, noise, latent, masks, nested, positive, negative, cfg, sample
 def two_pass_sample(low_res_model, positive, negative, vae, latent_image, sampler_low, sampler_high, scheduler,
                     total_steps, transition, noise_seed, cfg_low, cfg_high, lowres_scale, rho, w_min, w_max,
                     latent_lifter=None, high_res_model=None, low_res_head=None, highres_denoise=None,
-                    sigmas_low=None, sigmas_high=None, lift=None, low_res_tail=None):
+                    sigmas_low=None, sigmas_high=None, lift=None, low_res_tail=None, pass1_store=None):
     """Return (latent, low_res_latent), both ComfyUI LATENT dicts in VAE space.
 
     `sigmas_low` / `sigmas_high` override the computed schedules. `lift` defaults to `luna_lift.lift_video`.
@@ -234,9 +234,19 @@ def two_pass_sample(low_res_model, positive, negative, vae, latent_image, sample
     low_in = [low_video] + audio
     low_latent = _pack(low_in, nested)
     last_x0 = {}
-    state_vae = _sample(low_res_model, comfy.sample.prepare_noise(low_latent, noise_seed, batch_index), low_latent,
-                        low_masks, nested, _keyframes_at(positive, h, w), _keyframes_at(negative, h, w), cfg_low,
-                        sampler_low, sigmas_low, noise_seed, on_x0=lambda x0: last_x0.__setitem__("x0", x0))
+    cached = pass1_store.load_pass1() if pass1_store is not None else None   # H3MD progress cache
+    if cached is not None:
+        last_x0["x0"], state_vae = cached[0].to(device), cached[1].to(device)
+    else:
+        state_vae = _sample(low_res_model, comfy.sample.prepare_noise(low_latent, noise_seed, batch_index),
+                            low_latent, low_masks, nested, _keyframes_at(positive, h, w),
+                            _keyframes_at(negative, h, w), cfg_low, sampler_low, sigmas_low, noise_seed,
+                            on_x0=lambda x0: last_x0.__setitem__("x0", x0))
+        if pass1_store is not None and "x0" in last_x0:
+            try:
+                pass1_store.save_pass1(last_x0["x0"], state_vae)
+            except Exception as exc:
+                logging.warning("[H3MD Progress] could not save the low-res pass (%s)", exc)
     if "x0" not in last_x0:
         raise RuntimeError("Luna-H3-Sampler: pass 1 gave no clean estimate (the sampler reported no step)")
     x0_streams = [s.to(device).float() for s in _split(last_x0["x0"])[0]]

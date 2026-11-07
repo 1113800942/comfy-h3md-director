@@ -175,7 +175,7 @@ def _vram_gib():
     return None, None
 
 
-def timed_sampler(sampler, stage: str, total: int, log: list | None = None):
+def timed_sampler(sampler, stage: str, total: int, log: list | None = None, progress=None):
     """KSAMPLER that logs '[H3MD timing] <stage> step i/n <sec>s ...' per step (step 1 includes model loading and is
     tagged 'setup').  Samplers that are not KSAMPLERs are returned unchanged."""
     import comfy.samplers
@@ -186,6 +186,14 @@ def timed_sampler(sampler, stage: str, total: int, log: list | None = None):
     @functools.wraps(inner)
     def fn(model, x, sigmas, *a, callback=None, **kw):
         state = {"t": time.perf_counter(), "n": 0}
+        offset = 0
+        n_sig = int(sigmas.shape[-1])
+        if progress is not None:   # window-exp progress cache: restart this pass at the last saved step
+            got = progress.resume(stage, n_sig)
+            if got is not None:
+                offset, saved = got
+                x = saved.to(device=x.device, dtype=x.dtype)
+                sigmas = sigmas[offset:]
         try:
             if torch.cuda.is_available():
                 torch.cuda.reset_peak_memory_stats()
@@ -195,7 +203,12 @@ def timed_sampler(sampler, stage: str, total: int, log: list | None = None):
         def cb(d):
             now = time.perf_counter()
             state["n"] += 1
-            i = int(d.get("i", state["n"] - 1))
+            i = int(d.get("i", state["n"] - 1)) + offset
+            if progress is not None and d.get("x") is not None:
+                try:
+                    progress.save_step(stage, i, d["x"], n_sig)
+                except Exception as exc:  # a full disk must not kill the run
+                    LOG.warning("[H3MD Progress] could not save %s step %d (%s)", stage, i + 1, exc)
             sec = now - state["t"]
             state["t"] = now
             alloc, peak = _vram_gib()
@@ -209,7 +222,7 @@ def timed_sampler(sampler, stage: str, total: int, log: list | None = None):
                             "vram_gib": None if alloc is None else round(alloc, 2),
                             "peak_gib": None if peak is None else round(peak, 2)})
             if callback is not None:
-                return callback(d)
+                return callback(dict(d, i=i) if offset else d)
 
         return inner(model, x, sigmas, *a, callback=cb, **kw)
 
@@ -315,7 +328,8 @@ class H3MDSampler:
                high_res_model=None, highres_tiling=True, tiling_axis="auto", tiling_overlap=8, ff_chunk_rows=0,
                release_upscaler=True, unload_idle_models=True,
                h3md_low_res_prefix=None, h3md_low_res_prefix_source="pixel_reencode", h3md_capture_lowres=False,
-               h3md_on_lowres_end=None, h3md_low_res_suffix=None, h3md_lowres_anchor=None, unique_id=None, **unknown):
+               h3md_on_lowres_end=None, h3md_low_res_suffix=None, h3md_lowres_anchor=None, h3md_progress=None,
+               unique_id=None, **unknown):
         """Internal keyword inputs (set by the H3MD Loop):
         h3md_low_res_prefix: [1,24,vt,h,w] low-grid latent of the kept overlap prefix (engine low_res_head);
         h3md_capture_lowres: keep the low-res pass endpoint in self.last_lowres (next segment's native carry);
@@ -395,11 +409,12 @@ class H3MDSampler:
         try:
             latent, low_latent = LUNA.two_pass_sample(
                 low, positive, negative, vae, latent_in,
-                timed_sampler(sampler, "low_res", n_low, self.last_steps),
-                timed_sampler(sampler, "high_res", n_high, self.last_steps),
+                timed_sampler(sampler, "low_res", n_low, self.last_steps, h3md_progress),
+                timed_sampler(sampler, "high_res", n_high, self.last_steps, h3md_progress),
                 "simple", n_low + n_high, n_low, int(seed), float(cfg), float(cfg), float(lowres_scale),
                 float(rho), float(w_min), float(w_max), latent_lifter=lifter, high_res_model=high,
-                low_res_head=head, sigmas_low=sig_low, sigmas_high=sig_high, lift=lift, low_res_tail=tail)
+                low_res_head=head, sigmas_low=sig_low, sigmas_high=sig_high, lift=lift, low_res_tail=tail,
+                pass1_store=h3md_progress)
         except BaseException as exc:
             if not TILED.is_oom(exc) or isinstance(exc, TILED.HighResOutOfMemory):
                 raise
