@@ -16,7 +16,8 @@ H3MD adds three things on top of the core MiniMaxH3ContextWindows patch:
    action list of the one prompt (11-07 test: the hair-brush gesture came back every window).
 
 Plan keys (Director passes them through; old plans are unchanged):
-  "windowMode": true | {"length": 124, "overlap": 56, "freenoise": true, "cropGuide": true}
+  "windowMode": true | {"length": 124, "overlap": 56, "highLength": 175, "highOverlap": 56, "freenoise": true,
+                        "cropGuide": true}     (high* default to the low-res values)
   segment "windowPrompts": [{"at": 0.0, "prompt": "..."}, {"at": 5.0, "prompt": "..."}]   (seconds from shot start)
 Window mode turns autosplit off (one sampling run per shot); hard cuts and continuation segments stay as before.
 """
@@ -28,7 +29,9 @@ LOG = logging.getLogger("H3MD")
 _TAG = "[H3MD Window]"
 _KEY = "h3md_window"
 SPAN_KEY = "h3md_window_span"          # conditioning dict key: (start_frame, end_frame) in shot pixel frames
-DEFAULTS = {"length": 124, "overlap": 56, "freenoise": True, "cropGuide": True}
+DEFAULTS = {"length": 124, "overlap": 56, "highLength": None, "highOverlap": None, "freenoise": True,
+            "cropGuide": True}
+MAX_TRAINED = 362          # H3 was trained on ~124-362 frame clips; longer windows are outside that range
 FPS = 24
 
 
@@ -49,6 +52,12 @@ def normalize_window_mode(value):
                 out[k] = value[k]
     out["length"] = _round_17(out["length"], 22)
     out["overlap"] = min(_round_17(out["overlap"], 5), out["length"] - 17)
+    # 11-07: the high-res pass may need a smaller window than low-res (243 filled a 32 GB card at 1088x1664)
+    out["highLength"] = _round_17(out["highLength"] or out["length"], 22)
+    out["highOverlap"] = min(_round_17(out["highOverlap"] or out["overlap"], 5), out["highLength"] - 17)
+    for k in ("length", "highLength"):
+        if out[k] > MAX_TRAINED:
+            LOG.warning("%s window %s %d frames is longer than H3's trained range (<= %d)", _TAG, k, out[k], MAX_TRAINED)
     out["freenoise"] = bool(out["freenoise"])
     out["cropGuide"] = bool(out["cropGuide"])
     return out
@@ -251,11 +260,12 @@ def wrap_models(window_mode: dict, low, high):
     wm = normalize_window_mode(window_mode)
     if wm is None:
         return low, high
-    LOG.info("%s window mode: windows %d / overlap %d frames, freenoise %s, crop guide %s", _TAG, wm["length"],
-             wm["overlap"], wm["freenoise"], wm["cropGuide"])
+    LOG.info("%s window mode: low-res windows %d / overlap %d, high-res windows %d / overlap %d frames, freenoise %s, "
+             "crop guide %s", _TAG, wm["length"], wm["overlap"], wm["highLength"], wm["highOverlap"], wm["freenoise"],
+             wm["cropGuide"])
     low = apply(low, wm["length"], wm["overlap"], "pyramid", wm["freenoise"], wm["cropGuide"])
     if high is not None:
-        high = apply(high, wm["length"], wm["overlap"], "pyramid", wm["freenoise"], wm["cropGuide"])
+        high = apply(high, wm["highLength"], wm["highOverlap"], "pyramid", wm["freenoise"], wm["cropGuide"])
     return low, high
 
 

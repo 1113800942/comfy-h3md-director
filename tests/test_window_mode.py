@@ -34,6 +34,9 @@ class Normalize(unittest.TestCase):
         self.assertEqual((wm["length"], wm["overlap"]), (124, 56))
         wm = WIN.normalize_window_mode({"length": 130, "overlap": 40})
         self.assertEqual((wm["length"], wm["overlap"]), (124, 39))
+        self.assertEqual((wm["highLength"], wm["highOverlap"]), (124, 39))
+        wm = WIN.normalize_window_mode({"length": 294, "overlap": 56, "highLength": 180})
+        self.assertEqual((wm["length"], wm["highLength"], wm["highOverlap"]), (294, 175, 56))
 
     def test_window_prompts(self):
         wps = WIN.normalize_window_prompts([{"at": 5, "prompt": "b"}, {"at": 0.4, "prompt": "a"},
