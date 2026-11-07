@@ -45,6 +45,7 @@ try:
     from . import h3md_stream_save as SS          # H3MD stream save ('long video' output)
     from . import h3md_depth_control as DC        # H3MD depth ControlNet (optional input depth_control)
     from . import h3md_lowres_anchor as LA        # H3MD low-res anchor (2026-10-30)
+    from . import h3md_window as WIN              # window-exp branch (2026-11-07)
 except ImportError:  # flat import (tests)
     import h3md_director as D
     import h3md_sampler as S
@@ -56,6 +57,7 @@ except ImportError:  # flat import (tests)
     import h3md_stream_save as SS
     import h3md_depth_control as DC
     import h3md_lowres_anchor as LA
+    import h3md_window as WIN
 
 LOG = logging.getLogger("H3MD")
 _TAG = "[H3MD Loop]"
@@ -606,6 +608,8 @@ class H3MDLoopSampler:
         for gone in ("start_index", "end_index", "previous_latent"):  # removed 2026-10-30 (API-format prompts)
             if sampler_kwargs.pop(gone, None) is not None:
                 LOG.warning("%s '%s' was removed: use rerun_segments / stop_after", _TAG, gone)
+        if isinstance(plan, dict) and plan.get("windowMode"):   # window-exp: core context windows + H3MD additions
+            low_res_model, high_res_model = WIN.wrap_models(plan["windowMode"], low_res_model, high_res_model)
         run_text = str(sampler_kwargs.pop("segments_to_run", "") or "").strip()   # v0.3 Control Panel box
         if run_text:
             parse_segments(run_text, len(plan["segments"]))   # wrong writing -> error before anything runs

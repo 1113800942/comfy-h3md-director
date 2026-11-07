@@ -63,10 +63,12 @@ try:
     from . import h3md_vram
     from . import h3md_autosplit as AS   # H3MD autosplit (2026-10-27)
     from . import h3md_paths as PATHS    # v0.2.1: shared-ComfyUI path limits
+    from . import h3md_window as WIN     # window-exp branch (2026-11-07)
 except ImportError:  # flat import (tests)
     import h3md_vram
     import h3md_autosplit as AS
     import h3md_paths as PATHS
+    import h3md_window as WIN
 
 LOG = logging.getLogger("H3MD")
 
@@ -476,6 +478,8 @@ def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = Fa
     # 2026-10-20: no maximum shot length and no automatic splitting.  Legacy split keys (plan/shot
     # maxSegmentLength, subOverlap, shot subPrompts) are accepted with any value and ignored.
     legacy = [k for k in ("maxSegmentLength", "subOverlap") if raw.get(k) is not None]
+    # window-exp (2026-11-07): window mode = one sampling run per shot with core context windows (no autosplit)
+    window_mode = WIN.normalize_window_mode(raw.get("windowMode"))
 
     segs_raw = raw.get("segments") or []
     if not segs_raw:
@@ -618,6 +622,12 @@ def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = Fa
         }
         if not seg["prompt"]:
             raise ValueError(f"H3MD Director: segment {n} has no prompt (segment prompt and globalPrompt empty)")
+        if s.get("windowPrompts"):
+            if window_mode is None:
+                notes.append(f"segment {n}: windowPrompts ignored (windowMode is off)")
+            else:
+                seg["windowPrompts"] = WIN.normalize_window_prompts(
+                    s.get("windowPrompts"), length, lambda t: resolve_prompt(global_prompt, global_mode, t))
         seg["labels"] = compute_labels(seg, media)
         n_soundtracks = sum(1 for lab in seg["labels"] if lab["kind"] == "video_soundtrack")
         if n_soundtracks > MAX_VIDEOS:
@@ -629,7 +639,10 @@ def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = Fa
     # H3MD autosplit (2026-10-27): over-budget shots -> equal continuation parts (plan "autoSplit": false = off)
     rvh_mode = normalize_ref_video_height(raw.get("refVideoHeight")) or "native"
     budget_info = None
-    if budget is None and raw.get("autoSplit", True) is not False:
+    if window_mode is not None:
+        notes.append(f"window mode: windows {window_mode['length']} / overlap {window_mode['overlap']} frames; "
+                     f"autosplit off (each shot is one sampling run)")
+    if budget is None and raw.get("autoSplit", True) is not False and window_mode is None:
         b = budget_info = AS.token_budget(raw, REF_VIDEO_AUTO_TOKEN_LIMIT)
         budget = b["tokens"]
         notes.append(f"token budget {budget:,} per segment (available {b['avail_gib']} GiB"
@@ -641,6 +654,8 @@ def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = Fa
         for key in ("_raw_prompt", "_content"):
             seg.pop(key, None)
         seg["prompt"] = fix_duration_line(seg["prompt"], int(seg["length"]), int(seg["overlapIn"]))
+        for wp in seg.get("windowPrompts") or ():
+            wp["prompt"] = fix_duration_line(wp["prompt"], int(seg["length"]), int(seg["overlapIn"]))
         if continuity and seg["overlapIn"] > 0:
             seg["prompt"] = continuity_note(seg["overlapIn"]) + "\n\n" + seg["prompt"]
     ref_video_height = normalize_ref_video_height(raw.get("refVideoHeight"))
@@ -659,6 +674,8 @@ def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = Fa
         "tokenBudgetInfo": budget_info,
         "notes": notes,
     }
+    if window_mode is not None:
+        out["windowMode"] = window_mode
     return out
 
 
@@ -1634,6 +1651,19 @@ class H3MDSegmentPick:
                 json.dumps(seg["labels"], ensure_ascii=False))
 
 
+def window_prompts_for(plan: dict, seg: dict):
+    """window-exp: the segment's window prompts when window mode is on and the shot is longer than one window."""
+    wps = seg.get("windowPrompts") or None
+    wm = plan.get("windowMode")
+    if not wps or not wm:
+        return None
+    if int(seg["length"]) <= int(wm.get("length", 124)) or len(wps) < 2:
+        LOG.info("[H3MD Encode] segment %d: window prompts not needed (one window / one prompt) - first prompt used",
+                 seg["index"])
+        return [dict(wps[0], start=0, end=int(seg["length"]))] if wps else None
+    return wps
+
+
 class H3MDSegmentEncode:
     @classmethod
     def INPUT_TYPES(cls):
@@ -1663,10 +1693,25 @@ class H3MDSegmentEncode:
         prompt = (prompt_override or "").strip() or seg["prompt"]
         core = _core_h3()
         kwargs = build_core_kwargs(picked)
-        out = core.MiniMaxH3ReferenceToVideo.execute(
-            clip=clip, prompt=prompt, width=plan["width"], height=plan["height"], length=seg["length"],
-            ref_image_size=ref_image_size, vae=vae, audio_vae=audio_vae, **kwargs)
-        positive, latent = _unwrap_node_output(out)[:2]
+        wps = window_prompts_for(plan, seg) if not (prompt_override or "").strip() else None
+        if wps:
+            # window-exp: one conditioning per window prompt, tagged with its frame span (h3md_window picks per window)
+            positive, latent = [], None
+            for wp in wps:
+                out = core.MiniMaxH3ReferenceToVideo.execute(
+                    clip=clip, prompt=wp["prompt"], width=plan["width"], height=plan["height"], length=seg["length"],
+                    ref_image_size=ref_image_size, vae=vae, audio_vae=audio_vae, **kwargs)
+                pos, lat = _unwrap_node_output(out)[:2]
+                latent = latent or lat
+                positive += [[c[0], dict(c[1], **{WIN.SPAN_KEY: (wp["start"], wp["end"])})] for c in pos]
+            prompt = "\n\n".join(f"[frames {wp['start']}-{wp['end']}]\n{wp['prompt']}" for wp in wps)
+            LOG.info("[H3MD Encode] segment %d: %d window prompts %s", seg["index"], len(wps),
+                     [(wp["start"], wp["end"]) for wp in wps])
+        else:
+            out = core.MiniMaxH3ReferenceToVideo.execute(
+                clip=clip, prompt=prompt, width=plan["width"], height=plan["height"], length=seg["length"],
+                ref_image_size=ref_image_size, vae=vae, audio_vae=audio_vae, **kwargs)
+            positive, latent = _unwrap_node_output(out)[:2]
         latent = {"samples": latent["samples"]}
         negative = zero_out_conditioning(positive)
         labels = json.dumps(seg["labels"], ensure_ascii=False)
