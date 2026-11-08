@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 
 import torch
 
@@ -469,6 +470,18 @@ def _to_cpu(latent: dict) -> dict:
 # ---------------------------------------------------------------------------
 # node
 # ---------------------------------------------------------------------------
+
+def progress_store(cache, k, key, plan, where=""):
+    """window-exp: the segment's progress cache (low-res result + per-step state) in the segment cache folder, or None
+    (no disk cache, no key, or not a window-mode plan)."""
+    if cache is None or not key or not isinstance(plan, dict) or not plan.get("windowMode"):
+        return None
+    try:
+        return PROG.ProgressStore(os.path.join(cache.dir, f"seg_{int(k):03d}_progress"), key)
+    except Exception as exc:
+        LOG.warning("%s %s: progress cache unavailable (%s)", _TAG, where, exc)
+        return None
+
 
 class H3MDLoopSampler:
     @classmethod
@@ -915,13 +928,9 @@ class H3MDLoopSampler:
                     LOG.warning("%s %s: lowres_anchor has no reference (the shot's first segment has no low-res "
                                 "result in the cache); not applied", _TAG, where)
             low_model, high_model, dctl = model, high_res_model, None
-            progress = None
-            if cache is not None and key and isinstance(plan, dict) and plan.get("windowMode"):
-                try:  # window-exp: low-res result + per-step state on disk, resume after a crash / stop
-                    progress = PROG.ProgressStore(cache.path(k, "_progress"), key)
-                    extra["h3md_progress"] = progress
-                except Exception as exc:
-                    LOG.warning("%s %s: progress cache unavailable (%s)", _TAG, where, exc)
+            progress = progress_store(cache, k, key, plan, where)
+            if progress is not None:
+                extra["h3md_progress"] = progress
             nxt_ov = segs[indices[step + 1]]["overlapIn"] if step + 1 < len(indices) else 0
             try:
                 if dseg is not None:  # H3MD depth: int8 patch loaded now, on a CLONE of the low-res model only

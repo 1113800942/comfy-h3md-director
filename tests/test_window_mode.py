@@ -91,3 +91,19 @@ class PlanParse(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LoopProgress(unittest.TestCase):
+    """The Loop builds the progress store from the real SegmentCache (11-07 bug: SegmentCache has no .path)."""
+
+    def test_progress_store_from_segment_cache(self):
+        import tempfile
+        import h3md_loop as L
+        with tempfile.TemporaryDirectory() as d:
+            cache = C.SegmentCache(d, "abc" * 6, True)
+            plan_on = D.parse_plan(plan(True, length=345))
+            st = L.progress_store(cache, 0, "k", plan_on)
+            self.assertIsNotNone(st)
+            self.assertTrue(st.dir.endswith("seg_000_progress"))
+            self.assertIsNone(L.progress_store(cache, 0, "k", D.parse_plan(plan(length=345))))
+            self.assertIsNone(L.progress_store(None, 0, "k", plan_on))
