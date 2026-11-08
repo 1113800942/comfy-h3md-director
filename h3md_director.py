@@ -714,6 +714,19 @@ def _strip_continuity(prompt: str, overlap: int) -> str:
     return prompt[len(note):] if note and prompt.startswith(note) else prompt
 
 
+def _shifted(seg: dict, drift: int) -> dict:
+    """3e: a group / shot moved `drift` frames on the output timeline; a locked SONG follows the timeline (offset
+    moved too, so the music stays continuous across groups).  A video lock keeps its offset (sound tied to the
+    video's own frames)."""
+    if not drift:
+        return seg
+    seg = dict(seg, startFrame=seg["startFrame"] + drift)
+    lk = seg.get("locked")
+    if seg.get("audioMode") == "locked" and isinstance(lk, dict) and lk.get("kind") == "audio":
+        seg["locked"] = dict(lk, offset=float(lk["offset"]) + drift / FPS)
+    return seg
+
+
 def group_window_segments(segments: list, window_mode: dict, notes: list, continuity: bool = True) -> list:
     """window-exp 3e: the user's normal multi-shot plan -> one continuous timeline per GROUP, sampled in one run.
     Continued shots (overlapIn > 0) are joined into the timeline (no continuation, no seam); hard cuts (overlapIn 0)
@@ -737,14 +750,18 @@ def group_window_segments(segments: list, window_mode: dict, notes: list, contin
             groups.append(cur[:k])
             cur = cur[k:]
     groups.append(cur)
-    out = []
+    out, drift = [], 0
     for gi, parts in enumerate(groups):
         if len(parts) == 1:
-            out.append(parts[0])
+            out.append(_shifted(parts[0], drift))
             continue
         g0 = parts[0]["startFrame"]
         length = parts[-1]["startFrame"] + parts[-1]["length"] - g0
-        pad = (5 - length) % 17          # a hard cut adds a 17n+5 shot: keep the timeline 17n+5 (last shot <=16 frames longer)
+        # a hard cut adds a 17n+5 shot, so the timeline may be off the 17n+5 grid: the last shot gets up to 8 frames
+        # longer or shorter, chosen so the shift of the later shots against the song stays within 8 frames
+        r = (length - 5) % 17
+        up, down = (17 - r) % 17, -r
+        pad = up if abs(drift + up) <= abs(drift + down) else down
         length += pad
         images = []
         for p in parts:
@@ -768,7 +785,8 @@ def group_window_segments(segments: list, window_mode: dict, notes: list, contin
                                      "images": gp["images"]} for gp in gparts]})
         g["windowPrompts"][0]["start"] = 0
         g.pop("windowPromptsAuto", None)
-        out.append(g)
+        out.append(_shifted(g, drift))
+        drift += pad
         notes.append(f"window mode: shots {parts[0]['index'] + 1}-{parts[-1]['index'] + 1} -> one timeline "
                      f"({length / FPS:.1f} s, {sum(1 for gp in gparts if gp['cut'])} hard cut(s) inside, "
                      f"{sum(1 for gp in gparts[1:] if not gp['cut'])} continuation(s) joined without a seam)")
