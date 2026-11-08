@@ -318,10 +318,10 @@ class Groups(unittest.TestCase):
         p = D.parse_plan(multi_plan())
         self.assertEqual(len(p["segments"]), 1)
         g = p["segments"][0]
-        self.assertEqual(g["length"], 345 + 306 + 243 + 306 + 12)
+        self.assertEqual(g["length"], 345 + 306 + 243 + 306 - 5)   # back on the 17n+5 grid, nearest way
         self.assertEqual(g["length"] % 17, 5)
         gps = g["groupParts"]
-        self.assertEqual([(gp["start"], gp["end"]) for gp in gps], [(0, 345), (345, 651), (651, 894), (894, 1212)])
+        self.assertEqual([(gp["start"], gp["end"]) for gp in gps], [(0, 345), (345, 651), (651, 894), (894, 1195)])
         self.assertEqual([gp["cut"] for gp in gps], [False, False, True, False])
         self.assertEqual(g["windowCuts"], [646])      # 651 snapped to the 17-frame grid
         self.assertEqual(g["images"], ["a", "b"])
@@ -329,7 +329,7 @@ class Groups(unittest.TestCase):
         for gp in gps:
             self.assertNotIn("Continuity", gp["prompt"])
         self.assertIn("Duration: 12.75 s (306 frames).", gps[1]["prompt"])
-        self.assertEqual(p["total_frames"], 1212)
+        self.assertEqual(p["total_frames"], 1195)
         self.assertIn("groupParts", C.segment_signature(p, 0))
 
     def test_split_at_last_cut(self):
