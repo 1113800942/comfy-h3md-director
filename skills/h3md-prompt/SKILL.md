@@ -107,7 +107,8 @@ non_diegetic_music:
   - Timing is accurate to about one window, not to the second.
   - Without marks every window gets the whole prompt: write only a continuous, loopable state.
 - The `Duration:` line is rewritten by H3MD (each window gets its own length).
-- Hard cuts inside a window-mode shot are not supported yet; use two shots.
+- A scene / framing change inside a shot (hard cut): write `[7s cut] [Shot 2] close-up by the lake at sunset ...`. The cut snaps to 17 frames (about 0.7 s); the windows break there with no fusion, so the cut is clean. Put each shot's setting, framing and light after its own `[Ns cut]`; the first shot is `[0s cut] [Shot 1] ...`.
+- **summary and retention_analysis describe only what stays the same for the whole shot; no "first ... then ..."** (tested: a summary saying "then appears by the lake" made the windows after the cut start in the meadow and push in to the lake).
 
 ## 3. Seams: hard cut or continuation
 - `overlapIn = 0`, hard cut: generated independently, joined end to end. Use it when the scene or background changes.
@@ -297,7 +298,7 @@ After the prompts, also give the whole plan as ONE JSON code block that the user
 - [ ] Times start at 0; the last shot time is inside the length; in continued shots new action starts after the overlap.
 - [ ] Lengths are 5+17n; total counted as length − overlap; motion copy total within the reference video.
 - [ ] Long shots that will autosplit describe a steady state, no ordered events or sub-shots.
-- [ ] Window mode: time marks all at the end of detailed_description, shared description before the first mark, actions about 8 s or more apart.
+- [ ] Window mode: time marks all at the end of detailed_description, shared description before the first mark, actions about 8 s or more apart; with hard cuts, no "then" in the summary and each shot's setting after its own `[Ns cut]`.
 - [ ] Tag numbers match the shot's media order; depth videos have no `<Video N>`; RefMods written `<RefMod j>`; no
       undefined tags.
 - [ ] Each `<Picture N>`'s role (person / outfit / location) matches the actual picture; no plain / grey photo
