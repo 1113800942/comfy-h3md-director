@@ -188,6 +188,12 @@ def segment_signature(plan: dict, k: int) -> dict:
             sig["windowPrompts"] = seg["windowPrompts"]
         if seg.get("windowCuts"):
             sig["windowCuts"] = seg["windowCuts"]
+        if seg.get("groupParts"):   # 3e: every shot of the group, with its own media files
+            sig["groupParts"] = [{"start": gp["start"], "end": gp["end"], "origin": gp["origin"], "prompt": gp["prompt"],
+                                  "seg": {k: gp["seg"].get(k) for k in keep},
+                                  "files": [[v["id"], _file_sig(media["videos"].get(v["id"], {}).get("file", ""))]
+                                            for v in gp["seg"].get("videos") or []]}
+                                 for gp in seg["groupParts"]]
     # refVideoHeight: only non-native values enter the key, so native (and old plans) keep their old keys
     rvh = D.normalize_ref_video_height(plan.get("refVideoHeight")) or "native"
     if rvh != "native" and seg["videos"]:

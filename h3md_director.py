@@ -686,6 +686,8 @@ def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = Fa
                 wp["prompt"] = fix_duration_line(wp["prompt"], int(seg["length"]), int(seg["overlapIn"]))
         if continuity and seg["overlapIn"] > 0:
             seg["prompt"] = continuity_note(seg["overlapIn"]) + "\n\n" + seg["prompt"]
+    if window_mode is not None and window_mode.get("groups", True) and len(segments) > 1:
+        segments = group_window_segments(segments, window_mode, notes, continuity)
     ref_video_height = normalize_ref_video_height(raw.get("refVideoHeight"))
     if ref_video_height is None:
         notes.append(f"refVideoHeight {raw.get('refVideoHeight')!r} unknown -> native")
@@ -704,6 +706,74 @@ def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = Fa
     }
     if window_mode is not None:
         out["windowMode"] = window_mode
+    return out
+
+
+def _strip_continuity(prompt: str, overlap: int) -> str:
+    note = continuity_note(overlap) + "\n\n" if overlap else ""
+    return prompt[len(note):] if note and prompt.startswith(note) else prompt
+
+
+def group_window_segments(segments: list, window_mode: dict, notes: list, continuity: bool = True) -> list:
+    """window-exp 3e: the user's normal multi-shot plan -> one continuous timeline per GROUP, sampled in one run.
+    Continued shots (overlapIn > 0) are joined into the timeline (no continuation, no seam); hard cuts (overlapIn 0)
+    become window boundaries inside the group (nothing fused across them).  A group is at most
+    windowMode.groupLength frames (default 1445 = ~60 s): when the next shot would not fit, the group ends at the
+    LAST HARD CUT inside it (a cut changes the picture, so a group boundary there shows no seam).  Only when a
+    continuous run has no hard cut within the limit, the group ends at a shot boundary with the old continuation
+    (a seam) and a note tells the user where to put a hard cut.
+    Each shot keeps its own prompt, pictures, reference videos and audio for its own time range (groupParts)."""
+    limit = int(window_mode.get("groupLength") or 1445)
+    groups, cur = [], [segments[0]]
+    for seg in segments[1:]:
+        cur.append(seg)
+        while len(cur) > 1 and cur[-1]["startFrame"] + cur[-1]["length"] - cur[0]["startFrame"] > limit:
+            cuts = [k for k in range(1, len(cur)) if int(cur[k]["overlapIn"]) == 0]
+            k = cuts[-1] if cuts else len(cur) - 1
+            if not cuts:
+                notes.append(f"window mode: shots {cur[0]['index'] + 1}-{cur[-1]['index'] + 1} are one continuous "
+                             f"take longer than a group ({limit / FPS:.0f} s) - continued with a seam at frame "
+                             f"{cur[-1]['startFrame']}; put a hard cut near there to avoid it")
+            groups.append(cur[:k])
+            cur = cur[k:]
+    groups.append(cur)
+    out = []
+    for gi, parts in enumerate(groups):
+        if len(parts) == 1:
+            out.append(parts[0])
+            continue
+        g0 = parts[0]["startFrame"]
+        length = parts[-1]["startFrame"] + parts[-1]["length"] - g0
+        pad = (5 - length) % 17          # a hard cut adds a 17n+5 shot: keep the timeline 17n+5 (last shot <=16 frames longer)
+        length += pad
+        images = []
+        for p in parts:
+            for im in p["images"]:
+                if im not in images:
+                    images.append(im)
+        gparts = []
+        for j, p in enumerate(parts):
+            ov = int(p["overlapIn"]) if j else 0
+            start, end = p["startFrame"] - g0, p["startFrame"] + p["length"] - g0
+            if j == len(parts) - 1:
+                end = length
+            prompt = _strip_continuity(p["prompt"], int(p["overlapIn"]))
+            gparts.append({"start": start + ov, "end": end, "origin": start, "cut": j > 0 and int(p["overlapIn"]) == 0,
+                           "prompt": fix_duration_line(prompt, end - start - ov, 0),
+                           "images": [images.index(im) for im in p["images"]], "seg": p})
+        g = dict(parts[0])
+        g.update({"length": length, "images": images, "videos": [], "audios": [], "groupParts": gparts,
+                  "windowCuts": [17 * round(gp["origin"] / 17) for gp in gparts if gp["cut"]],
+                  "windowPrompts": [{"start": gp["start"], "end": gp["end"], "prompt": gp["prompt"],
+                                     "images": gp["images"]} for gp in gparts]})
+        g["windowPrompts"][0]["start"] = 0
+        g.pop("windowPromptsAuto", None)
+        out.append(g)
+        notes.append(f"window mode: shots {parts[0]['index'] + 1}-{parts[-1]['index'] + 1} -> one timeline "
+                     f"({length / FPS:.1f} s, {sum(1 for gp in gparts if gp['cut'])} hard cut(s) inside, "
+                     f"{sum(1 for gp in gparts[1:] if not gp['cut'])} continuation(s) joined without a seam)")
+    for i, seg in enumerate(out):
+        seg["index"] = i
     return out
 
 
@@ -1212,7 +1282,10 @@ def apply_ref_video_height(plan: dict, seg: dict, result: dict, ref_image_size="
 
 
 def pick_segment_media(plan: dict, index: int, ref_image_size: str = "match", extra_tokens: int = 0) -> dict:
-    seg = get_segment(plan, index)
+    return pick_media_for(plan, get_segment(plan, index), ref_image_size, extra_tokens)
+
+
+def pick_media_for(plan: dict, seg: dict, ref_image_size: str = "match", extra_tokens: int = 0) -> dict:
     media = plan["media"]
     result = {"segment": seg, "images": [], "videos": [], "video_audios": [], "audios": [], "locked_audio": None}
     for image_id in seg["images"]:
@@ -1760,6 +1833,56 @@ def encode_video_windows(core, plan, seg, picked, kwargs, wps, prompt, clip, vae
     return positive, latent, "\n\n".join(texts)
 
 
+def encode_group_windows(core, plan, seg, picked, clip, vae, audio_vae, ref_image_size):
+    """3e: one conditioning per window of both passes; the window belongs to the shot (group part) holding its
+    centre and gets THAT shot's prompt, pictures, reference audio and the matching slice of its reference videos
+    (re-encoded from the window start, 3d).  Tagged with the exact window range (RANGE_KEY) and the hard cuts."""
+    wm = plan["windowMode"]
+    cuts = tuple(seg.get("windowCuts") or ())
+    ranges = WIN.all_window_ranges(int(seg["length"]), wm, cuts)
+    parts = seg["groupParts"]
+    media = {}
+    positive, latent, texts = [], None, []
+    for a, b in ranges:
+        mid = (a + b) / 2.0
+        k = next((i for i, gp in enumerate(parts) if gp["start"] <= mid < gp["end"]), len(parts) - 1)
+        gp = parts[k]
+        if k not in media:
+            media[k] = pick_media_for(plan, gp["seg"], ref_image_size)
+        pm = media[k]
+        kw = build_core_kwargs(pm)
+        vids, auds = {}, {}
+        off = a - gp["origin"]          # window start inside this shot's own reference window
+        for j, frames in enumerate(pm["videos"]):
+            o = max(0, off)
+            sl = frames[o:min(o + (b - a), int(frames.shape[0]))]
+            if off < 0:
+                LOG.info("[H3MD Encode] window %d-%d starts %d frames before shot %d: its video %d starts at the "
+                         "shot start", a, b, -off, k + 1, j + 1)
+            if sl.shape[0] < 5:
+                continue
+            vids[f"ref_video_{j}"] = sl
+            snd = pm["video_audios"][j] if j < len(pm["video_audios"]) else None
+            if snd is not None:
+                auds[f"ref_video_audio_{j}"] = slice_audio(snd, o / FPS, sl.shape[0] / FPS)
+        kw["ref_videos"] = vids or None
+        kw["ref_video_audios"] = auds or None
+        text = fix_duration_line(gp["prompt"], b - a, 0)
+        out = core.MiniMaxH3ReferenceToVideo.execute(
+            clip=clip, prompt=text, width=plan["width"], height=plan["height"], length=seg["length"],
+            ref_image_size=ref_image_size, vae=vae, audio_vae=audio_vae, **kw)
+        pos, lat = _unwrap_node_output(out)[:2]
+        latent = latent or lat
+        tag = {WIN.SPAN_KEY: (gp["start"], gp["end"]), WIN.RANGE_KEY: (a, b)}
+        if cuts:
+            tag[WIN.CUT_KEY] = cuts
+        positive += [[c[0], dict(c[1], **tag)] for c in pos]
+        texts.append(f"[window frames {a}-{b}: shot {gp['seg'].get('shotIndex', k) + 1}]\n{text}")
+    LOG.info("[H3MD Encode] segment %d: %d shots on one timeline (3e), %d window conditionings %s, cuts %s",
+             seg["index"], len(parts), len(ranges), ranges, list(cuts))
+    return positive, latent, "\n\n".join(texts)
+
+
 class H3MDSegmentEncode:
     @classmethod
     def INPUT_TYPES(cls):
@@ -1790,7 +1913,10 @@ class H3MDSegmentEncode:
         core = _core_h3()
         kwargs = build_core_kwargs(picked)
         wps = window_prompts_for(plan, seg) if not (prompt_override or "").strip() else None
-        if video_per_window(plan, seg, picked):
+        if seg.get("groupParts") and not (prompt_override or "").strip():
+            positive, latent, prompt = encode_group_windows(core, plan, seg, picked, clip, vae, audio_vae,
+                                                            ref_image_size)
+        elif video_per_window(plan, seg, picked):
             positive, latent, prompt = encode_video_windows(core, plan, seg, picked, kwargs, wps, prompt, clip, vae,
                                                             audio_vae, ref_image_size)
         elif wps:

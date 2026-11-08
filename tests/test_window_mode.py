@@ -302,6 +302,55 @@ class VideoPerWindow(unittest.TestCase):
         finally:
             WIN.window_pixel_span = orig
 
+
+def multi_plan(window=True, segs=((345, 0), (345, 39), (243, 0), (345, 39))):
+    raw = {"version": 1, "width": 1920, "height": 1088, "globalPrompt": "",
+           "media": {"images": [{"id": "a", "file": "a.png"}, {"id": "b", "file": "b.png"}], "videos": [], "audios": []},
+           "segments": [{"length": ln, "overlapIn": ov, "images": ["a"] if i % 2 == 0 else ["b"],
+                         "prompt": f"Duration: 1 s.\n\nshot {i + 1} <Picture 1>"} for i, (ln, ov) in enumerate(segs)]}
+    if window is not None:
+        raw["windowMode"] = window
+    return json.dumps(raw)
+
+
+class Groups(unittest.TestCase):
+    def test_one_timeline(self):
+        p = D.parse_plan(multi_plan())
+        self.assertEqual(len(p["segments"]), 1)
+        g = p["segments"][0]
+        self.assertEqual(g["length"], 345 + 306 + 243 + 306 + 12)
+        self.assertEqual(g["length"] % 17, 5)
+        gps = g["groupParts"]
+        self.assertEqual([(gp["start"], gp["end"]) for gp in gps], [(0, 345), (345, 651), (651, 894), (894, 1212)])
+        self.assertEqual([gp["cut"] for gp in gps], [False, False, True, False])
+        self.assertEqual(g["windowCuts"], [646])      # 651 snapped to the 17-frame grid
+        self.assertEqual(g["images"], ["a", "b"])
+        self.assertEqual([gp["images"] for gp in gps], [[0], [1], [0], [1]])
+        for gp in gps:
+            self.assertNotIn("Continuity", gp["prompt"])
+        self.assertIn("Duration: 12.75 s (306 frames).", gps[1]["prompt"])
+        self.assertEqual(p["total_frames"], 1212)
+        self.assertIn("groupParts", C.segment_signature(p, 0))
+
+    def test_split_at_last_cut(self):
+        p = D.parse_plan(multi_plan({"groupLength": 1000}))
+        segs = p["segments"]
+        self.assertEqual(len(segs), 2)
+        self.assertEqual(segs[0]["length"], 651)          # shots 1-2, then the group ends at the hard cut of shot 3
+        self.assertEqual(segs[1]["overlapIn"], 0)
+        self.assertEqual(segs[1]["startFrame"], 651)
+
+    def test_no_cut_note(self):
+        p = D.parse_plan(multi_plan({"groupLength": 700}, segs=((345, 0), (345, 39), (345, 39))))
+        self.assertTrue(any("put a hard cut" in n for n in p["notes"]))
+        self.assertEqual(p["segments"][1]["overlapIn"], 39)   # fallback: the old continuation
+
+    def test_off(self):
+        p = D.parse_plan(multi_plan(None))
+        self.assertEqual(len(p["segments"]), 4)
+        p = D.parse_plan(multi_plan({"groups": False}))
+        self.assertEqual(len(p["segments"]), 4)
+
 if __name__ == "__main__":
     unittest.main()
 

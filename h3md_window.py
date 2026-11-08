@@ -32,7 +32,7 @@ _KEY = "h3md_window"
 SPAN_KEY = "h3md_window_span"          # conditioning dict key: (start_frame, end_frame) in shot pixel frames
 DEFAULTS = {"videoPerWindow": "auto", "length": 124, "overlap": 56, "highLength": None, "highOverlap": None, "freenoise": True,
             "cropGuide": True, "preview": False,
-            "refs": True}
+            "refs": True, "groups": True, "groupLength": 1445}
 MAX_TRAINED = 362          # H3 was trained on ~124-362 frame clips; longer windows are outside that range
 FPS = 24
 
@@ -64,6 +64,8 @@ def normalize_window_mode(value):
     out["cropGuide"] = bool(out["cropGuide"])
     out["preview"] = bool(out["preview"])
     out["refs"] = bool(out["refs"])
+    out["groups"] = bool(out["groups"])            # 3e: multi-shot plans -> one timeline per group
+    out["groupLength"] = _round_17(out["groupLength"], 22)
     v = out["videoPerWindow"]   # 3d: "auto" = when a reference video is longer than H3's ~15 s limit
     out["videoPerWindow"] = "auto" if v in ("auto", None) else bool(v)          # 3c: each auto window prompt gets only the pictures it names   # low-res preview: stop after the low-res pass
     return out
