@@ -506,7 +506,9 @@ def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = Fa
         requested = int(requested) if requested is not None and i > 0 and overlap > 0 else overlap
         content = video_content_frames(s, media["videos"])
         avail = video_available_frames(s, media["videos"])
-        motion = is_motion_copy(global_prompt, s.get("prompt", ""))
+        # 11-08: its own name - it used to overwrite the `motion` argument (the reference-motion profile for
+        # autosplit), so autosplit never placed its cuts at quiet moments of the guide (0.3.5 bug)
+        motion_copy = is_motion_copy(global_prompt, s.get("prompt", ""))
         if i > 0 and valid_overlap(requested) and requested not in OVERLAP_STEPS:
             notes.append(f"WARNING segment {n} overlapIn {requested} is not one of 0/22/39 (older plan); kept as saved")
         if content is not None:
@@ -514,11 +516,11 @@ def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = Fa
             if cont:
                 # no length cap: the requested overlap is always kept, the new content follows the overlap
                 overlap = requested
-                auto_len = fit_video_length(overlap, content, avail, motion)
+                auto_len = fit_video_length(overlap, content, avail, motion_copy)
                 if i > 0 and overlap != int(s.get("overlapIn", 0) or 0):
                     lengths_moved = True
             else:
-                auto_len = fit_video_length(0, content, avail, motion)
+                auto_len = fit_video_length(0, content, avail, motion_copy)
             if length is not None and int(length) != auto_len:
                 lengths_moved = True
                 what = (f"overlap {overlap} + {content / FPS:.2f}s new content" if i > 0 and overlap > 0
@@ -616,7 +618,7 @@ def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = Fa
                 locked["offset"] = video_lock_offset(lref["trimStart"], overlap)
         # YJ 11-07: the depth / pose control (Fun ControlNet) is switched off by window mode and by motion copy (TARA):
         # the video stays as a normal reference video (TARA's guide), no depth / pose model, no ControlNet
-        if (window_mode is not None or motion) and any(r.get("depth") for r in videos):
+        if (window_mode is not None or motion_copy) and any(r.get("depth") for r in videos):
             for r in videos:
                 if r.pop("depth", None):
                     r.pop("sam3Prompt", None)

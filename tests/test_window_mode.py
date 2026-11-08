@@ -841,6 +841,33 @@ class LowPassKept(unittest.TestCase):
         self.assertIsNone(L.low_pass_key("h", D.parse_plan(plan(length=345)), 0, 1, 1, False, None, None, {}))
 
 
+class AutosplitMotion(unittest.TestCase):
+    """11-08: the reference-motion profile reaches autosplit (0.3.5 bug: a bool overwrote it); window mode never splits,
+    so it never asks for it."""
+
+    def _raw(self, window=None):
+        raw = json.loads(plan(window, length=LONG))
+        raw["media"]["videos"] = [{"id": "v", "file": "v.mp4", "duration": 60.0, "hasAudio": False}]
+        raw["segments"][0]["videos"] = [{"id": "v", "trimStart": 0.0, "useSoundtrack": False,
+                                         "useDuration": LONG / 24}]
+        return json.dumps(raw)
+
+    def test_profile_used_in_segment_mode_only(self):
+        calls = []
+
+        def motion(seg, content):
+            calls.append(content)
+            return [1.0] * content
+        p = D.parse_plan(self._raw(), budget=300000, motion=motion)
+        self.assertGreater(len(p["segments"]), 1)
+        self.assertTrue(calls, "autosplit must ask for the reference motion")
+        calls.clear()
+        p = D.parse_plan(self._raw({"length": 243, "overlap": 56, "highLength": 175, "highOverlap": 22}),
+                         budget=300000, motion=motion)
+        self.assertEqual(len(p["segments"]), 1)
+        self.assertEqual(calls, [])
+
+
 class DepthOff(unittest.TestCase):
     def _raw(self, window, prompt="shot"):
         raw = json.loads(plan(window, length=345))
