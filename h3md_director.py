@@ -1689,6 +1689,74 @@ def window_prompts_for(plan: dict, seg: dict):
     return wps
 
 
+def video_per_window(plan: dict, seg: dict, picked: dict) -> bool:
+    """window-exp 3d: give every window its own slice of the reference videos (re-encoded, time from 0), so a guide
+    video longer than H3's ~15 s reference limit still fits.  windowMode.videoPerWindow: "auto" (default) = when a
+    reference video is longer than that, true / false = always / never."""
+    wm = plan.get("windowMode")
+    if not wm or not picked.get("videos"):
+        return False
+    v = wm.get("videoPerWindow", "auto")
+    if v == "auto":
+        return max(int(f.shape[0]) for f in picked["videos"]) > WIN.MAX_REF_VIDEO and \
+            int(seg["length"]) > int(wm.get("length", 124))
+    return bool(v)
+
+
+def slice_audio(audio, start_s: float, dur_s: float):
+    """ComfyUI AUDIO dict cut to [start_s, start_s + dur_s)."""
+    if audio is None:
+        return None
+    sr = int(audio["sample_rate"])
+    a, n = int(round(start_s * sr)), int(round(dur_s * sr))
+    return {"waveform": audio["waveform"][..., a:a + n], "sample_rate": sr}
+
+
+def encode_video_windows(core, plan, seg, picked, kwargs, wps, prompt, clip, vae, audio_vae, ref_image_size):
+    """3d: one conditioning per window of BOTH passes (low-res and high-res windows differ), each with the window's
+    own slice of every reference video (and its soundtrack), tagged with the exact window range (RANGE_KEY)."""
+    wm = plan["windowMode"]
+    cuts = tuple(seg.get("windowCuts") or ())
+    ranges = WIN.all_window_ranges(int(seg["length"]), wm, cuts)
+    base = wps or [{"start": 0, "end": int(seg["length"]), "prompt": prompt}]
+    positive, latent, texts = [], None, []
+    for a, b in ranges:
+        mid = (a + b) / 2.0
+        wp = next((w for w in base if w["start"] <= mid < w["end"]), None) or \
+            min(base, key=lambda w: min(abs(mid - w["start"]), abs(mid - w["end"])))
+        kw = dict(kwargs)
+        if wp.get("images") is not None:   # 3c
+            imgs = {f"ref_image_{j}": picked["images"][i] for j, i in enumerate(wp["images"])}
+            kw["ref_images"] = imgs or None
+        vids, auds = {}, {}
+        for k, frames in enumerate(picked["videos"]):
+            sl = frames[a:min(b, int(frames.shape[0]))]
+            if sl.shape[0] < 5:
+                LOG.warning("[H3MD Encode] window %d-%d: reference video %d has no frames here (shorter than the "
+                            "shot) - left out of this window", a, b, k + 1)
+                continue
+            vids[f"ref_video_{k}"] = sl
+            snd = picked["video_audios"][k] if k < len(picked["video_audios"]) else None
+            if snd is not None:
+                auds[f"ref_video_audio_{k}"] = slice_audio(snd, a / FPS, sl.shape[0] / FPS)
+        kw["ref_videos"] = vids or None
+        kw["ref_video_audios"] = auds or None
+        text = fix_duration_line(wp["prompt"], b - a, 0)
+        out = core.MiniMaxH3ReferenceToVideo.execute(
+            clip=clip, prompt=text, width=plan["width"], height=plan["height"], length=seg["length"],
+            ref_image_size=ref_image_size, vae=vae, audio_vae=audio_vae, **kw)
+        pos, lat = _unwrap_node_output(out)[:2]
+        latent = latent or lat
+        tag = {WIN.SPAN_KEY: (wp["start"], wp["end"]), WIN.RANGE_KEY: (a, b)}
+        if cuts:
+            tag[WIN.CUT_KEY] = cuts
+        positive += [[c[0], dict(c[1], **tag)] for c in pos]
+        texts.append(f"[window frames {a}-{b}]\n{text}")
+    LOG.info("[H3MD Encode] segment %d: reference videos per window (3d) - %d window conditionings %s",
+             seg["index"], len(ranges), ranges)
+    return positive, latent, "\n\n".join(texts)
+
+
 class H3MDSegmentEncode:
     @classmethod
     def INPUT_TYPES(cls):
@@ -1719,7 +1787,10 @@ class H3MDSegmentEncode:
         core = _core_h3()
         kwargs = build_core_kwargs(picked)
         wps = window_prompts_for(plan, seg) if not (prompt_override or "").strip() else None
-        if wps:
+        if video_per_window(plan, seg, picked):
+            positive, latent, prompt = encode_video_windows(core, plan, seg, picked, kwargs, wps, prompt, clip, vae,
+                                                            audio_vae, ref_image_size)
+        elif wps:
             # window-exp: one conditioning per window prompt, tagged with its frame span (h3md_window picks per window)
             positive, latent = [], None
             for wp in wps:

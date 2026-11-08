@@ -30,7 +30,7 @@ LOG = logging.getLogger("H3MD")
 _TAG = "[H3MD Window]"
 _KEY = "h3md_window"
 SPAN_KEY = "h3md_window_span"          # conditioning dict key: (start_frame, end_frame) in shot pixel frames
-DEFAULTS = {"length": 124, "overlap": 56, "highLength": None, "highOverlap": None, "freenoise": True,
+DEFAULTS = {"videoPerWindow": "auto", "length": 124, "overlap": 56, "highLength": None, "highOverlap": None, "freenoise": True,
             "cropGuide": True, "preview": False,
             "refs": True}
 MAX_TRAINED = 362          # H3 was trained on ~124-362 frame clips; longer windows are outside that range
@@ -63,7 +63,9 @@ def normalize_window_mode(value):
     out["freenoise"] = bool(out["freenoise"])
     out["cropGuide"] = bool(out["cropGuide"])
     out["preview"] = bool(out["preview"])
-    out["refs"] = bool(out["refs"])          # 3c: each auto window prompt gets only the pictures it names   # low-res preview: stop after the low-res pass
+    out["refs"] = bool(out["refs"])
+    v = out["videoPerWindow"]   # 3d: "auto" = when a reference video is longer than H3's ~15 s limit
+    out["videoPerWindow"] = "auto" if v in ("auto", None) else bool(v)          # 3c: each auto window prompt gets only the pictures it names   # low-res preview: stop after the low-res pass
     return out
 
 
@@ -98,6 +100,8 @@ SECTION = re.compile(r"(?m)^\s*(subject_definitions|summary|retention_analysis|d
 NO_NEW_ACTION = ("No new action starts in this part; whatever is moving keeps moving the same way as the moment "
                  "before.")   # 11-07: no "subject" wording - an empty landscape window must not invite a person
 CUT_KEY = "h3md_window_cuts"
+RANGE_KEY = "h3md_window_range"   # 3d: conditioning made for exactly this window (pixel frames [a, b))
+MAX_REF_VIDEO = 362                # H3 reference videos: ~15 s
 
 
 def video_latent_t(frames: int) -> int:
@@ -188,6 +192,15 @@ def window_spans(total_frames: int, length: int, overlap: int, cuts=()):
         hi = int(total_frames) if i == len(wins) - 1 else (wins[i + 1][0] + b) // 2
         spans.append((lo, hi))
     return wins, spans
+
+
+def all_window_ranges(total_frames: int, window_mode: dict, cuts=()):
+    """3d: pixel ranges of every window the low-res and the high-res pass will use (sorted, unique)."""
+    out = set()
+    for ln, ov in ((window_mode["length"], window_mode["overlap"]),
+                   (window_mode["highLength"], window_mode["highOverlap"])):
+        out.update(window_spans(total_frames, ln, ov, cuts)[0])
+    return sorted(out)
 
 
 def split_timed_prompt(prompt: str):
@@ -386,7 +399,14 @@ def window_pixel_span(window):
 
 def pick_span_cond(cond_in, window):
     """Index of the conditioning whose SPAN_KEY span holds the window centre (nearest span otherwise), or None
-    when the conds carry no spans."""
+    when the conds carry no spans.  3d: conds tagged with RANGE_KEY are matched to the window's exact pixel range."""
+    ranges = [c.get(RANGE_KEY) for c in cond_in]
+    if len(cond_in) >= 2 and all(r is not None for r in ranges):
+        a, b = window_pixel_span(window)
+        for i, r in enumerate(ranges):
+            if tuple(r) == (a, b):
+                return i
+        LOG.warning("%s no conditioning made for window frames %d-%d; using the nearest", _TAG, a, b)
     spans = [c.get(SPAN_KEY) for c in cond_in]
     if len(cond_in) < 2 or any(s is None for s in spans):
         return None

@@ -242,6 +242,66 @@ class RefsPerWindow(unittest.TestCase):
         seg = D.parse_plan(json.dumps(raw))["segments"][0]
         self.assertTrue(all("images" not in w for w in seg["windowPrompts"]))
 
+
+class VideoPerWindow(unittest.TestCase):
+    def _plan(self, length=719, vpw="auto"):
+        p = D.parse_plan(plan({"length": 243, "highLength": 175, "highOverlap": 22, "videoPerWindow": vpw},
+                              length=length))
+        return p, p["segments"][0]
+
+    def test_switch(self):
+        import torch
+        p, seg = self._plan()
+        long_v = {"videos": [torch.zeros(719, 4, 4, 3)]}
+        short_v = {"videos": [torch.zeros(300, 4, 4, 3)]}
+        self.assertTrue(D.video_per_window(p, seg, long_v))
+        self.assertFalse(D.video_per_window(p, seg, short_v))
+        self.assertFalse(D.video_per_window(p, seg, {"videos": []}))
+        p2, seg2 = self._plan(vpw=True)
+        self.assertTrue(D.video_per_window(p2, seg2, short_v))
+        self.assertFalse(D.video_per_window(D.parse_plan(plan(length=719)), seg, long_v))
+
+    def test_encode_slices(self):
+        import torch
+        p, seg = self._plan()
+        frames = torch.arange(719).float().view(719, 1, 1, 1).expand(719, 4, 4, 3)
+        snd = {"waveform": torch.zeros(1, 2, 719 * 2000), "sample_rate": 48000}
+        picked = {"videos": [frames], "video_audios": [snd], "images": []}
+        calls = []
+
+        class FakeCore:
+            class MiniMaxH3ReferenceToVideo:
+                @staticmethod
+                def execute(**kw):
+                    calls.append(kw)
+                    return ([[torch.zeros(1), {}]], {"samples": torch.zeros(1)})
+
+        pos, lat, text = D.encode_video_windows(FakeCore, p, seg, picked, {}, None, "Duration: 30 s.\nx", None,
+                                                None, None, "match")
+        ranges = WIN.all_window_ranges(719, p["windowMode"])
+        self.assertEqual(len(calls), len(ranges))
+        self.assertEqual([c[1][WIN.RANGE_KEY] for c in pos], ranges)
+        for (a, b), kw in zip(ranges, calls):
+            v = kw["ref_videos"]["ref_video_0"]
+            self.assertEqual(int(v[0, 0, 0, 0]), a)                 # the slice starts at the window start
+            self.assertEqual(v.shape[0], b - a)
+            self.assertEqual(kw["ref_video_audios"]["ref_video_audio_0"]["waveform"].shape[-1], round((b - a) / 24 * 48000))
+            self.assertIn(f"({b - a} frames)", kw["prompt"])
+
+    def test_pick_by_range(self):
+        class W:
+            index_list = list(range(15, 90))
+            total_frames = 212
+        cw = [{WIN.SPAN_KEY: (0, 719), WIN.RANGE_KEY: (0, 243)}, {WIN.SPAN_KEY: (0, 719), WIN.RANGE_KEY: (51, 306)}]
+        starts = WIN.latent_pixel_starts(212)
+        orig = WIN.window_pixel_span
+        try:
+            WIN.window_pixel_span = lambda w: (starts[w.index_list[0]], starts[w.index_list[-1] + 1])
+            self.assertEqual((starts[15], starts[90]), (51, 306))
+            self.assertEqual(WIN.pick_span_cond(cw, W), 1)
+        finally:
+            WIN.window_pixel_span = orig
+
 if __name__ == "__main__":
     unittest.main()
 
