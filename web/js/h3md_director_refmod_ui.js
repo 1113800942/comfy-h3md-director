@@ -681,7 +681,7 @@ class DirectorEditor {
     }
     this.val = this.validation();
     // the global prompt lives inside the Shots section, directly under the shot card
-    this.root.append(this.renderBins(), this.renderRefVideoHeight(), this.renderTimeline(), this.renderSegments());
+    this.root.append(this.renderBins(), this.renderWindowMode(), this.renderRefVideoHeight(), this.renderTimeline(), this.renderSegments());
     if (this.statOpen) this.root.append(this.renderStatPop());
     this.renderStatus();
     this.applyAutoSplitUI();
@@ -940,6 +940,24 @@ class DirectorEditor {
     for (const kind of BIN_ORDER) lib.append(this.renderBin(kind));
     sec.append(lib);
     return sec;
+  }
+
+  // window-exp: seamless long video switch (plan.windowMode; off = key absent = the old continuation chain)
+  renderWindowMode() {
+    const p = this.plan;
+    const box = h("input", { type: "checkbox", "data-key": "window-mode",
+      onchange: (e) => {
+        if (e.target.checked) p.windowMode = { length: 243, overlap: 56, highLength: 175, highOverlap: 22 };
+        else delete p.windowMode;
+        this.commit();
+      } });
+    box.checked = !!p.windowMode;
+    return h("div", { class: "h3md-sec", "data-window-mode": "1" },
+      h("div", { class: "h3md-row" },
+        h("label", { title: "Window mode: continued shots are sampled together on one timeline (no continuation seams); " +
+            "hard cuts stay cuts. Long plans are split into groups only at hard cuts. About 25% slower." },
+          box, h("b", {}, " Seamless long video 无接缝长视频（窗口模式）")),
+        h("span", { class: "h3md-small" }, "续接的分镜一起生成、没有接缝；硬切照常；太长时只在硬切处分组 · 约慢 25%")));
   }
 
   // reference-video resolution row (between the media library's 图片 box and the shots); native removes the key
