@@ -89,6 +89,62 @@ class PlanParse(unittest.TestCase):
         self.assertEqual(len(one), 1)
 
 
+
+TIMED = ("summary: a woman dances.\ndetailed_description: A woman on a stage. [2s] she raises both arms. "
+         "[20s] she spins once. [35s] she claps. [50s] she bows.\noverall_soundscape: music.")
+
+
+def timed_plan(window=True, prompt=TIMED, length=1445):
+    raw = json.loads(plan(window, length=length))
+    raw["segments"][0]["prompt"] = prompt
+    return json.dumps(raw)
+
+
+class TimedPrompts(unittest.TestCase):
+    def test_spans_tile_and_hold_centres(self):
+        for total, ln, ov in ((1445, 243, 56), (721, 243, 56), (685, 124, 56), (1445, 175, 22)):
+            wins, spans = WIN.window_spans(total, ln, ov)
+            self.assertEqual(spans[0][0], 0)
+            self.assertEqual(spans[-1][1], total)
+            for a, b in zip(spans, spans[1:]):
+                self.assertEqual(a[1], b[0])
+            for (a, b), (lo, hi) in zip(wins, spans):
+                self.assertTrue(lo <= (a + b) // 2 < hi or (a + b) // 2 == hi == total)
+
+    def test_each_action_once(self):
+        wps = WIN.auto_window_prompts(TIMED, 1445, 243, 56)
+        self.assertEqual(len(wps), 8)
+        self.assertEqual(sum(w["events"] for w in wps), 4)
+        for act in ("raises both arms", "spins once", "claps", "bows"):
+            self.assertEqual(sum(act in w["prompt"] for w in wps), 1, act)
+        for w in wps:
+            self.assertIn("summary: a woman dances.", w["prompt"])
+            self.assertIn("overall_soundscape: music.", w["prompt"])
+            self.assertIn("A woman on a stage.", w["prompt"])
+            self.assertNotIn("[", w["prompt"])
+            if not w["events"]:
+                self.assertIn(WIN.NO_NEW_ACTION, w["prompt"])
+
+    def test_no_marks_or_one_window(self):
+        self.assertIsNone(WIN.auto_window_prompts("detailed_description: a woman sings.", 1445, 243, 56))
+        self.assertIsNone(WIN.auto_window_prompts("[2s] no section", 1445, 243, 56))
+        self.assertIsNone(WIN.auto_window_prompts(TIMED, 243, 243, 56))
+
+    def test_plan_auto(self):
+        p = D.parse_plan(timed_plan())
+        seg = p["segments"][0]
+        self.assertTrue(seg.get("windowPromptsAuto"))
+        self.assertEqual(len(seg["windowPrompts"]), len(WIN.window_spans(1445, 124, 56)[0]))
+
+    def test_plan_off_or_manual_untouched(self):
+        p = D.parse_plan(timed_plan(window=None))
+        self.assertNotIn("windowPrompts", p["segments"][0])
+        raw = json.loads(timed_plan())
+        raw["segments"][0]["windowPrompts"] = [{"at": 0, "prompt": "a"}, {"at": 30, "prompt": "b"}]
+        seg = D.parse_plan(json.dumps(raw))["segments"][0]
+        self.assertEqual(len(seg["windowPrompts"]), 2)
+        self.assertNotIn("windowPromptsAuto", seg)
+
 if __name__ == "__main__":
     unittest.main()
 

@@ -628,6 +628,15 @@ def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = Fa
             else:
                 seg["windowPrompts"] = WIN.normalize_window_prompts(
                     s.get("windowPrompts"), length, lambda t: resolve_prompt(global_prompt, global_mode, t))
+        elif window_mode is not None:
+            # H3MD window 3a (2026-11-07): "[12s] ..." marks in detailed_description -> one prompt per window, each
+            # action given to exactly one window (no action replayed by two windows)
+            auto = WIN.auto_window_prompts(seg["prompt"], length, window_mode["length"], window_mode["overlap"])
+            if auto:
+                seg["windowPrompts"] = [{k: a[k] for k in ("start", "end", "prompt")} for a in auto]
+                seg["windowPromptsAuto"] = True
+                notes.append(f"segment {n}: time marks -> {len(auto)} window prompts (actions per window: "
+                             + ", ".join(str(a["events"]) for a in auto) + ")")
         seg["labels"] = compute_labels(seg, media)
         n_soundtracks = sum(1 for lab in seg["labels"] if lab["kind"] == "video_soundtrack")
         if n_soundtracks > MAX_VIDEOS:

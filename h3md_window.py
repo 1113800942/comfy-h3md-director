@@ -24,6 +24,7 @@ Window mode turns autosplit off (one sampling run per shot); hard cuts and conti
 from __future__ import annotations
 
 import logging
+import re
 
 LOG = logging.getLogger("H3MD")
 _TAG = "[H3MD Window]"
@@ -84,6 +85,107 @@ def normalize_window_prompts(value, length: int, resolve):
     for a, b in zip(items, items[1:] + [None]):
         a["end"] = b["start"] if b else int(length)
     return items
+
+
+# ------------------------------------------------------------------------------------------- 3a: timed prompts
+FRAME_PER_TOKEN = (1, 4, 4, 4, 4)
+TIME_MARK = re.compile(r"\[\s*(\d+(?:\.\d+)?)\s*s\s*\]")
+SECTION = re.compile(r"(?m)^\s*(subject_definitions|summary|retention_analysis|detailed_description|"
+                     r"overall_soundscape|non_diegetic_music|dialogue|sound_effects)\s*:")
+NO_NEW_ACTION = ("The subject continues the same movement from the moment before, without starting any new gesture or "
+                 "action in this part.")
+
+
+def video_latent_t(frames: int) -> int:
+    """Latent length of a 17n+5-frame clip (5n+2), as the core windows node computes it."""
+    return ((int(frames) - 5) // 17) * 5 + 2
+
+
+def latent_pixel_starts(latent_t: int):
+    starts = [0]
+    for k in range(int(latent_t)):
+        starts.append(starts[-1] + FRAME_PER_TOKEN[k % 5])
+    return starts
+
+
+def core_windows(total_frames: int, length: int, overlap: int):
+    """The core MiniMax H3 static window schedule as latent (first, last) pairs (same maths as
+    comfy.context_windows.create_windows_static_standard after MiniMaxH3ContextWindowsNode's frame -> latent)."""
+    n = video_latent_t(total_frames)
+    cl = video_latent_t(length)
+    co = min(video_latent_t(overlap), cl - 5)
+    if n <= cl:
+        return [(0, n - 1)]
+    out, delta = [], cl - co
+    for start in range(0, n, delta):
+        if start + cl >= n:
+            s0 = n - cl
+            out.append((s0, s0 + cl - 1))
+            break
+        out.append((start, start + cl - 1))
+    return out
+
+
+def window_spans(total_frames: int, length: int, overlap: int):
+    """Pixel-frame ranges [a, b) of the windows and each window's own span: from the middle of its overlap with the
+    previous window to the middle of its overlap with the next.  The spans tile the shot, and each window's centre
+    lies in its own span, so per-window prompts tagged with these spans are picked once per window."""
+    n = video_latent_t(total_frames)
+    px = latent_pixel_starts(n)
+    wins = [(px[a], px[b + 1]) for a, b in core_windows(total_frames, length, overlap)]
+    spans = []
+    for i, (a, b) in enumerate(wins):
+        lo = 0 if i == 0 else (a + wins[i - 1][1]) // 2
+        hi = int(total_frames) if i == len(wins) - 1 else (wins[i + 1][0] + b) // 2
+        spans.append((lo, hi))
+    return wins, spans
+
+
+def split_timed_prompt(prompt: str):
+    """(before, common, events, after) when detailed_description has time marks like '[12s] ...', else None.
+    before/after = the text before / after the detailed_description body; common = its text before the first mark;
+    events = [(seconds, text)] in time order."""
+    if not prompt or not TIME_MARK.search(prompt):
+        return None
+    heads = list(SECTION.finditer(prompt))
+    det = next((m for m in heads if m.group(1) == "detailed_description"), None)
+    if det is None:
+        return None
+    nxt = next((m.start() for m in heads if m.start() > det.end()), len(prompt))
+    body = prompt[det.end():nxt]
+    marks = list(TIME_MARK.finditer(body))
+    if not marks:
+        return None
+    common = body[:marks[0].start()].strip()
+    events = []
+    for i, m in enumerate(marks):
+        end = marks[i + 1].start() if i + 1 < len(marks) else len(body)
+        txt = body[m.end():end].strip()
+        if txt:
+            events.append((float(m.group(1)), txt))
+    events.sort(key=lambda e: e[0])
+    return prompt[:det.end()], common, events, prompt[nxt:]
+
+
+def auto_window_prompts(prompt: str, total_frames: int, length: int, overlap: int, fps: int = FPS):
+    """3a: one timed prompt -> per-window prompts [{"start", "end", "prompt", "events"}] (pixel frames), each action
+    given to exactly ONE window (the one whose own span holds its time).  None when the prompt has no time marks or
+    the shot fits one window."""
+    parts = split_timed_prompt(prompt)
+    if parts is None:
+        return None
+    before, common, events, after = parts
+    wins, spans = window_spans(total_frames, length, overlap)
+    if len(wins) < 2:
+        return None
+    out = []
+    for (lo, hi) in spans:
+        mine = [t for (sec, t) in events if lo <= sec * fps < hi]
+        action = " Then ".join(x.rstrip(".") + "." for x in mine) if mine else NO_NEW_ACTION
+        body = (common + " " if common else "") + action
+        out.append({"start": lo, "end": hi, "prompt": f"{before}\n{body}\n\n{after.lstrip()}" if after else
+                    f"{before}\n{body}", "events": len(mine)})
+    return out
 
 
 # ------------------------------------------------------------------------------------------- per-window payload

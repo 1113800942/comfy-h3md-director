@@ -64,3 +64,18 @@ mon(h, None, [torch.ones(1, 2, 10, 2, 2)], None, wa, 0, 2, t)
 mon(h, None, [-torch.ones(1, 2, 14, 2, 2)], None, wb, 1, 2, t)
 assert h._h3md_overlap[-1][1][0][1] > 1.5, h._h3md_overlap[-1]
 print("overlap monitor OK", h._h3md_overlap[-2:])
+
+# 3a: our pure-python window schedule == core (frames -> latents -> static_standard -> pixel span)
+from types import SimpleNamespace  # noqa: E402
+for total_f, ln, ov in ((1445, 243, 56), (721, 243, 56), (685, 124, 56), (1445, 175, 22)):
+    T = WIN.video_latent_t(total_f)
+    cl = WIN.video_latent_t(ln)
+    h = SimpleNamespace(context_length=cl, context_overlap=min(WIN.video_latent_t(ov), cl - 5))
+    core = [(w[0], w[-1]) for w in cw.create_windows_static_standard(T, h, {})]
+    assert core == WIN.core_windows(total_f, ln, ov), (total_f, ln, ov)
+    assert WIN.latent_pixel_starts(T) == list(MiniMaxH3._latent_pixel_starts(T))
+    wins, spans = WIN.window_spans(total_f, ln, ov)
+    for (a, b), (lo, hi) in zip(wins, spans):
+        c = (a + b) // 2
+        assert lo <= c < hi or c == hi == total_f
+print("3a window schedule matches core")
