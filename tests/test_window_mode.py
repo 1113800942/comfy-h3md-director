@@ -810,6 +810,37 @@ class SongPerWindow(unittest.TestCase):
         self.assertEqual(int(out["ref_audio_1"]["waveform"].shape[-1]), 1000)
 
 
+class LowPassKept(unittest.TestCase):
+    """11-08: changing only high-res settings keeps the low-res pass (pass1.pt)."""
+
+    def test_store(self):
+        import tempfile, os, torch
+        import h3md_progress as PROG
+        with tempfile.TemporaryDirectory() as d:
+            s = PROG.ProgressStore(d, "A", low_key="L")
+            s.save_pass1(torch.ones(2), torch.zeros(2))
+            s.save_step("high_res", 1, torch.ones(2), 4)
+            s = PROG.ProgressStore(d, "B", low_key="L")          # high-res settings changed
+            self.assertIsNotNone(s.load_pass1())
+            self.assertEqual(s._steps("high_res"), [])
+            s = PROG.ProgressStore(d, "C", low_key="M")          # low-res settings changed
+            self.assertIsNone(s.load_pass1())
+            s = PROG.ProgressStore(d, "D")                        # old callers: no low key -> wipe as before
+            self.assertIsNone(s.load_pass1())
+
+    def test_low_key_ignores_high_res_only(self):
+        import h3md_loop as L
+        base = {"length": 243, "overlap": 56, "highLength": 175, "highOverlap": 22}
+        p1 = D.parse_plan(plan(dict(base), length=719))
+        p2 = D.parse_plan(plan(dict(base, highLength=124, highOverlap=39), length=719))
+        p3 = D.parse_plan(plan(dict(base, overlap=39), length=719))
+        k = lambda p, lo: L.low_pass_key("h", p, 0, 1, 1, False, None, None, lo)
+        self.assertEqual(k(p1, {"low": ["a"], "high": ["x"]}), k(p2, {"low": ["a"], "high": ["y"]}))
+        self.assertNotEqual(k(p1, {"low": ["a"]}), k(p3, {"low": ["a"]}))
+        self.assertNotEqual(k(p1, {"low": ["a"]}), k(p1, {"low": ["b"]}))
+        self.assertIsNone(L.low_pass_key("h", D.parse_plan(plan(length=345)), 0, 1, 1, False, None, None, {}))
+
+
 class DepthOff(unittest.TestCase):
     def _raw(self, window, prompt="shot"):
         raw = json.loads(plan(window, length=345))

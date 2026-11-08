@@ -600,13 +600,30 @@ def redraw_latent(cache, k, latent: dict, ranges, where=""):
     return {"samples": D._nested((video, audio)), "noise_mask": D._nested((video_mask, audio_mask))}, active, seed
 
 
-def progress_store(cache, k, key, plan, where=""):
+def low_pass_key(settings_hash, plan, k, key_seed, seg_seed, continued, prev_key, dkey, lora_sig):
+    """11-08: key of what the LOW-RES pass depends on: the segment key without the high-res windows and without the
+    high-res LoRAs (so changing only those keeps the low-res result, pass1.pt).  Window-mode plans only."""
+    wm = plan.get("windowMode") if isinstance(plan, dict) else None
+    if not wm:
+        return None
+    plan_low = dict(plan, windowMode={x: v for x, v in wm.items() if x not in ("highLength", "highOverlap")})
+    low = C.segment_key(settings_hash, plan_low, k, key_seed, continued, prev_key)
+    if dkey is not None:
+        low = C._sha({"key": low, "depth_control": dkey})
+    if (lora_sig or {}).get("low"):
+        low = C._sha({"key": low, "loras": {"low": lora_sig["low"]}})
+    if seg_seed != key_seed:
+        low = C._sha({"key": low, "seed": seg_seed})
+    return low
+
+
+def progress_store(cache, k, key, plan, where="", low_key=None):
     """window-exp: the segment's progress cache (low-res result + per-step state) in the segment cache folder, or None
     (no disk cache, no key, or not a window-mode plan)."""
     if cache is None or not key or not isinstance(plan, dict) or not plan.get("windowMode"):
         return None
     try:
-        return PROG.ProgressStore(os.path.join(cache.dir, f"seg_{int(k):03d}_progress"), key)
+        return PROG.ProgressStore(os.path.join(cache.dir, f"seg_{int(k):03d}_progress"), key, low_key=low_key)
     except Exception as exc:
         LOG.warning("%s %s: progress cache unavailable (%s)", _TAG, where, exc)
         return None
@@ -951,6 +968,8 @@ class H3MDLoopSampler:
             if key is not None and seg_seed != key_seed:
                 # 11-08 review: a rerun with a new seed must not reuse the old take's low-res pass (pass1.pt)
                 pkey = C._sha({"key": key, "seed": seg_seed})
+            low_key = low_pass_key(settings_hash["full" if uses_cont else "base"], plan, k, key_seed, seg_seed,
+                                   will_continue, prev_key, dkey, lora_sig) if key is not None else None
             if key is not None and preview:
                 key = C._sha({"key": key, "preview": True})
             # window-exp local redraw: windowMode.redraw [[start_s, end_s], ...] re-renders only those seconds of the
@@ -1088,7 +1107,7 @@ class H3MDLoopSampler:
                     LOG.warning("%s %s: lowres_anchor has no reference (the shot's first segment has no low-res "
                                 "result in the cache); not applied", _TAG, where)
             low_model, high_model, dctl = model, high_res_model, None
-            progress = None if redraw else progress_store(cache, k, pkey, plan, where)
+            progress = None if redraw else progress_store(cache, k, pkey, plan, where, low_key)
             if progress is not None:
                 extra["h3md_progress"] = progress
             if redraw:   # local redraw: the cached segment is the starting point, only the ranges are re-rendered

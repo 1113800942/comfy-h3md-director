@@ -27,22 +27,31 @@ _TAG = "[H3MD Progress]"
 
 
 class ProgressStore:
-    def __init__(self, folder: str, key: str, keep: int = 2):
+    def __init__(self, folder: str, key: str, keep: int = 2, low_key: str = None):
+        """low_key (11-08): the key of everything the LOW-RES pass depends on.  When only high-res settings changed
+        (high-res LoRAs, high-res windows), the key differs but low_key matches: pass1.pt is kept, the step files go."""
         self.dir, self.key, self.keep = folder, str(key), int(keep)
         os.makedirs(self.dir, exist_ok=True)
         meta = os.path.join(self.dir, "meta.json")
-        old = None
+        old = old_low = None
         try:
             with open(meta, encoding="utf-8") as f:
-                old = json.load(f).get("key")
+                m = json.load(f)
+                old, old_low = m.get("key"), m.get("low_key")
         except Exception:
             pass
         if old != self.key:
-            if old is not None:
+            keep_low = low_key is not None and old_low == str(low_key) and os.path.exists(self._p1())
+            if keep_low:
+                LOG.info("%s only high-res settings changed - the low-res pass in %s is kept", _TAG, self.dir)
+            elif old is not None:
                 LOG.info("%s settings changed - old progress in %s discarded", _TAG, self.dir)
             for p in glob.glob(os.path.join(self.dir, "*.pt")):
-                _remove(p)
-            _write_json(meta, {"key": self.key})
+                if not (keep_low and os.path.basename(p) == "pass1.pt"):
+                    _remove(p)
+            _write_json(meta, {"key": self.key, "low_key": None if low_key is None else str(low_key)})
+        elif low_key is not None and old_low != str(low_key):
+            _write_json(meta, {"key": self.key, "low_key": str(low_key)})
         self._resumed = set()
 
     # ---------------------------------------------------------------- low-res pass result
