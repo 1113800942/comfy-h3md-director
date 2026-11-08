@@ -542,6 +542,35 @@ def _to_cpu(latent: dict) -> dict:
 # node
 # ---------------------------------------------------------------------------
 
+def redraw_latent(cache, k, latent: dict, ranges, where=""):
+    """window-exp local redraw: the segment's cached final latent with a soft noise mask over `ranges` (frames inside
+    the segment; 1 = redraw, 0 = keep).  A locked song (audio mask already 0 in `latent`) stays locked.  Returns
+    (latent, active latent range, fresh seed)."""
+    import random
+    old_v, old_a = D._streams(cache.load_latent(k), "cached latent")
+    cur_v, cur_a = D._streams({"samples": latent["samples"]}, "latent")
+    if tuple(old_v.shape[2:]) != tuple(cur_v.shape[2:]) or old_a.shape[-1] != cur_a.shape[-1]:
+        raise ValueError(f"{_TAG} {where}: the cached segment {tuple(old_v.shape)} does not match the plan "
+                         f"{tuple(cur_v.shape)} - local redraw needs the same length and size")
+    vm, am, active = WIN.redraw_masks(int(old_v.shape[2]), int(old_a.shape[-1]), ranges)
+    nm = latent.get("noise_mask")
+    a_keep = None
+    if nm is not None:   # e.g. locked audio from the Continue step
+        _vm0, am0 = nm.unbind() if hasattr(nm, "unbind") else nm
+        a_keep = am0
+    video = old_v.to(cur_v)
+    audio = old_a.to(cur_a)
+    video_mask = vm.view(1, 1, -1, 1, 1).to(device=cur_v.device, dtype=torch.float32)
+    audio_mask = am.view(1, 1, 1, -1).to(device=cur_a.device, dtype=torch.float32)
+    if a_keep is not None:
+        audio = torch.where(a_keep.to(audio.device) == 0, cur_a, audio)
+        audio_mask = torch.minimum(audio_mask, a_keep.to(audio_mask))
+    seed = random.SystemRandom().randrange(1, 2 ** 50)
+    LOG.info("%s %s: LOCAL REDRAW of frames %s (latents %d-%d, ramp %d), new seed %d; the rest of the cached segment "
+             "is kept", _TAG, where, ranges, active[0], active[1] - 1, WIN.REDRAW_RAMP, seed)
+    return {"samples": D._nested((video, audio)), "noise_mask": D._nested((video_mask, audio_mask))}, active, seed
+
+
 def progress_store(cache, k, key, plan, where=""):
     """window-exp: the segment's progress cache (low-res result + per-step state) in the segment cache folder, or None
     (no disk cache, no key, or not a window-mode plan)."""
@@ -892,12 +921,32 @@ class H3MDLoopSampler:
             pkey = key
             if key is not None and preview:
                 key = C._sha({"key": key, "preview": True})
+            # window-exp local redraw: windowMode.redraw [[start_s, end_s], ...] re-renders only those seconds of the
+            # cached segment (needs the finished segment of the same settings in the cache)
+            redraw = WIN.redraw_ranges(plan.get("windowMode") if isinstance(plan, dict) else None,
+                                       int(seg["startFrame"]), int(seg["length"]))
+            base_key = key
+            if redraw and cache is not None and key is not None:
+                man = cache.manifest(k) or {}
+                if base_key not in (man.get("key"), man.get("base_key")):
+                    raise ValueError(f"{_TAG} {where}: local redraw needs this segment finished in the cache with the "
+                                     f"same settings (run it once without 'redraw'); cache {cache.dir}. 局部重绘需要先"
+                                     f"用同样设置把这一段完整跑过一次（缓存里没有）。")
+                key = C._sha({"key": base_key, "redraw": redraw})
+            elif redraw:
+                raise ValueError(f"{_TAG} {where}: local redraw needs the disk cache (cache_mode=disk)")
+            if not redraw and isinstance(plan, dict) and (plan.get("windowMode") or {}).get("redraw") \
+                    and cache is not None and key is not None:
+                man = cache.manifest(k) or {}
+                if man.get("base_key") == key:
+                    key = man["key"]   # untouched segment, redrawn earlier: its latest version in the cache is used
             if rerun:  # H3MD rerun: not selected = cached (validated above), selected = re-rendered
                 hit = k not in rerun
                 if hit and not cache.has(k, key):
                     cache.adopt(k, key)   # new chain key, so a later normal resume reuses it too
             else:
-                hit = cache is not None and resume and cache.has(k, key)
+                hit = cache is not None and (resume or bool((plan.get("windowMode") or {}).get("redraw"))) \
+                    and not redraw and cache.has(k, key)
             if hit and not rerun and beta and step + 1 < len(indices) and segs[indices[step + 1]]["overlapIn"] > 0 \
                     and not (cache.manifest(k) or {}).get("lowres"):
                 LOG.info("%s %s: cached segment has no BETA low-res carry (written in another mode); re-rendering",
@@ -1005,9 +1054,12 @@ class H3MDLoopSampler:
                     LOG.warning("%s %s: lowres_anchor has no reference (the shot's first segment has no low-res "
                                 "result in the cache); not applied", _TAG, where)
             low_model, high_model, dctl = model, high_res_model, None
-            progress = progress_store(cache, k, pkey, plan, where)
+            progress = None if redraw else progress_store(cache, k, pkey, plan, where)
             if progress is not None:
                 extra["h3md_progress"] = progress
+            if redraw:   # local redraw: the cached segment is the starting point, only the ranges are re-rendered
+                latent, active, seg_seed = redraw_latent(cache, k, latent, redraw, where)
+                WIN.set_active([low_res_model, high_res_model], active)
             if preview:
                 extra["h3md_low_only"] = True
             nxt_ov = segs[indices[step + 1]]["overlapIn"] if step + 1 < len(indices) else 0
@@ -1025,6 +1077,8 @@ class H3MDLoopSampler:
                                           high_res_model=high_model, highres_tiling=tiling, unique_id=unique_id,
                                           **extra, **sampler_kwargs)
             finally:
+                if redraw:
+                    WIN.set_active([low_res_model, high_res_model], None)
                 if dseg is not None:
                     depth.finish(dseg, dctl, nxt_ov)
                 else:
@@ -1088,7 +1142,10 @@ class H3MDLoopSampler:
                 imgs = self._seam.tone(imgs, trims[-1], where, report[-1])  # H3MD seam hook (no-op when off)
                 if rerun and k in rerun:  # H3MD rerun: old files -> _replaced_<time> only once the new ones exist
                     cache.archive(k, archive)
-                cache.write(k, key, final, imgs, aud, {"trim": trims[-1], "report": report[-1]},
+                elif redraw:   # local redraw: the previous version is kept in the archive folder
+                    cache.archive(k, cache.archive_dir())
+                cache.write(k, key, final, imgs, aud, dict({"trim": trims[-1], "report": report[-1]},
+                                                         **({"base_key": base_key, "redraw": redraw} if redraw else {})),
                             lowres=prev_low if beta else None)
                 del imgs, aud, v, a
                 gc.collect()

@@ -32,7 +32,8 @@ _KEY = "h3md_window"
 SPAN_KEY = "h3md_window_span"          # conditioning dict key: (start_frame, end_frame) in shot pixel frames
 DEFAULTS = {"videoPerWindow": "auto", "length": 124, "overlap": 56, "highLength": None, "highOverlap": None, "freenoise": True,
             "cropGuide": True, "preview": False,
-            "refs": True, "groups": True, "groupLength": 1445}
+            "refs": True, "groups": True, "groupLength": 1445,
+            "redraw": None}
 MAX_TRAINED = 362          # H3 was trained on ~124-362 frame clips; longer windows are outside that range
 FPS = 24
 
@@ -209,6 +210,60 @@ def window_spans(total_frames: int, length: int, overlap: int, cuts=()):
         hi = int(total_frames) if i == len(wins) - 1 else (wins[i + 1][0] + b) // 2
         spans.append((lo, hi))
     return wins, spans
+
+
+# ------------------------------------------------------------------------------------------- local redraw
+REDRAW_RAMP = 3   # latents of soft mask on each side of a redrawn range (blends into the kept picture)
+
+
+def redraw_ranges(window_mode, seg_start: int, seg_len: int, fps: int = FPS):
+    """windowMode.redraw = [[start_s, end_s], ...] on the OUTPUT timeline -> [(f0, f1)] frames inside this segment
+    (clipped), or [] when none touches it."""
+    out = []
+    for r in (window_mode or {}).get("redraw") or []:
+        try:
+            a, b = float(r[0]), float(r[1])
+        except Exception:
+            continue
+        f0, f1 = max(0, int(round(a * fps)) - seg_start), min(seg_len, int(round(b * fps)) - seg_start)
+        if f1 > f0:
+            out.append((f0, f1))
+    return out
+
+
+def redraw_masks(latent_t: int, audio_t: int, ranges, ramp: int = REDRAW_RAMP):
+    """(video mask [T] float, audio mask [A] float, (first, end) latents to compute) for redrawing frame `ranges`:
+    1 inside, 0 kept, a linear ramp of `ramp` latents on each side."""
+    import torch
+    px = latent_pixel_starts(latent_t)
+    total = px[-1]
+    vm = torch.zeros(latent_t)
+    for f0, f1 in ranges:
+        l0 = max(k for k in range(latent_t) if px[k] <= f0)
+        l1 = min([k for k in range(latent_t + 1) if px[k] >= f1] or [latent_t])
+        vm[l0:l1] = 1.0
+        for j in range(1, ramp + 1):
+            w = 1.0 - j / (ramp + 1)
+            if l0 - j >= 0:
+                vm[l0 - j] = max(float(vm[l0 - j]), w)
+            if l1 - 1 + j < latent_t:
+                vm[l1 - 1 + j] = max(float(vm[l1 - 1 + j]), w)
+    am = torch.zeros(audio_t)
+    for k in range(latent_t):
+        if vm[k] > 0:
+            a0, a1 = round(px[k] * audio_t / total), round(px[k + 1] * audio_t / total)
+            am[a0:a1] = torch.maximum(am[a0:a1], torch.full((max(0, a1 - a0),), float(vm[k])))
+    nz = torch.nonzero(vm > 0).flatten()
+    active = (int(nz[0]), int(nz[-1]) + 1) if nz.numel() else None
+    return vm, am, active
+
+
+def set_active(models, active):
+    """Tell the window handlers of `models` which latents a local redraw computes (None = all)."""
+    for m in models:
+        h = (getattr(m, "model_options", None) or {}).get("context_handler")
+        if h is not None:
+            h._h3md_active = active
 
 
 def all_window_ranges(total_frames: int, window_mode: dict, cuts=()):
@@ -577,20 +632,30 @@ def install(handler, crop_guide: bool):
                 for c in clist or ():
                     cuts.update((c or {}).get(CUT_KEY) or ())
             self._h3md_cuts = sorted(cuts)
-            return super().execute(calc_cond_batch, model, conds, x_in, timestep, model_options)
+            out = super().execute(calc_cond_batch, model, conds, x_in, timestep, model_options)
+            if getattr(self, "_h3md_active", None) is not None:
+                # local redraw: latents no window covered come back 0/0 = NaN; they are masked (kept) anyway
+                import torch
+                out = [torch.nan_to_num(o, nan=0.0) if isinstance(o, torch.Tensor) else o for o in out]
+            return out
 
         def get_context_windows(self, model, x_in, model_options):
             cuts = getattr(self, "_h3md_cuts", None)
-            if not cuts:
+            active = getattr(self, "_h3md_active", None)
+            if not cuts and active is None:
                 return super().get_context_windows(model, x_in, model_options)
             n = x_in.size(self.dim)
-            lats = sorted({5 * int(round(f / 17.0)) for f in cuts if 0 < 5 * int(round(f / 17.0)) < n})
+            lats = sorted({5 * int(round(f / 17.0)) for f in cuts or () if 0 < 5 * int(round(f / 17.0)) < n})
             wins = latent_schedule(n, self.context_length, self.context_overlap, lats)
-            key = (n, tuple(lats), self.context_length)
+            if active is not None:   # local redraw: only the windows that touch the redrawn latents
+                a0, a1 = active
+                wins = [w for w in wins if w[0] < a1 and w[1] >= a0] or wins
+            key = (n, tuple(lats), self.context_length, active)
             if key not in self._h3md_seen:
                 self._h3md_seen.add(key)
-                LOG.info("%s hard cuts at latents %s: %d windows %s (no fusion across a cut)", _TAG, lats, len(wins),
-                         wins)
+                LOG.info("%s %swindows %s%s", _TAG, f"hard cuts at latents {lats}: " if lats else "", wins,
+                         f" (local redraw of latents {active[0]}-{active[1] - 1}: other windows skipped)"
+                         if active is not None else " (no fusion across a cut)")
             return [cw.IndexListContextWindow(list(range(a, b + 1)), dim=self.dim, total_frames=n,
                                               context_overlap=self.context_overlap) for a, b in wins]
 

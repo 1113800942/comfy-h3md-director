@@ -520,3 +520,41 @@ class RefModOff(unittest.TestCase):
         self.assertTrue(any("RefMods off" in n for n in notes))
         self.assertFalse(p["segments"][0].get("refmods"))
         self.assertEqual(p["media"]["refmods"], {})
+
+
+class LocalRedraw(unittest.TestCase):
+    def test_masks(self):
+        vm, am, active = WIN.redraw_masks(102, 600, [(170, 255)])
+        self.assertEqual(float(vm[60]), 1.0)
+        self.assertEqual(float(vm[0]), 0.0)
+        self.assertEqual(float(vm[101]), 0.0)
+        self.assertTrue(0 < float(vm[active[0]]) < 1)        # soft ramp at the edge
+        self.assertGreater(float(am.sum()), 0)
+        self.assertEqual(WIN.redraw_ranges({"redraw": [[7, 10.5]]}, 0, 345), [(168, 252)])
+        self.assertEqual(WIN.redraw_ranges({"redraw": [[7, 10.5]]}, 300, 345), [])
+        self.assertEqual(WIN.redraw_ranges(None, 0, 345), [])
+
+    def test_redraw_latent(self):
+        import torch
+        import tempfile
+        import comfy.nested_tensor as NT
+        import h3md_loop as L
+        v = torch.randn(1, 24, 102, 4, 4)
+        a = torch.randn(1, 8, 1, 600)
+        with tempfile.TemporaryDirectory() as d:
+            cache = C.SegmentCache(d, "abc" * 6, True)
+            torch.save({"video": v, "audio": a}, cache._p(0, "_latent.pt"))
+            cur = {"samples": NT.NestedTensor((torch.zeros_like(v), torch.zeros_like(a)))}
+            lat, active, seed = L.redraw_latent(cache, 0, cur, [(170, 255)])
+            vv, aa = lat["samples"].unbind()
+            self.assertTrue(torch.equal(vv, v))
+            vm, am = lat["noise_mask"].unbind()
+            self.assertEqual(tuple(vm.shape), (1, 1, 102, 1, 1))
+            self.assertEqual(float(vm[0, 0, 0, 0, 0]), 0.0)
+            self.assertEqual(float(vm[0, 0, 60, 0, 0]), 1.0)
+            self.assertIsNotNone(active)
+
+    def test_signature_ignores_redraw(self):
+        a = D.parse_plan(plan({"length": 243}, length=719))
+        b = D.parse_plan(plan({"length": 243, "redraw": [[3, 6]]}, length=719))
+        self.assertEqual(C.segment_signature(a, 0), C.segment_signature(b, 0))
