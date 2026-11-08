@@ -696,6 +696,11 @@ def _run(executor, state, req, stats, noise, latent_image, sampler, sigmas, deno
         try:
             vshape, audio_t = window_shape(patcher, [tuple(x) for x in latent_shapes][0], tuple(latent_shapes[1])[-1])
             plan = plan_tiles(patcher, vshape, audio_t, guider.conds, req, min_tiles=min_tiles, device=device)
+            if vshape[2] != latent_shapes[0][2] and 1 < plan["tiles"] < plan["max_tiles"] and attempt == 1:
+                # window mode (YJ 11-07): one strip more than the estimate needs - headroom for smaller cards
+                plan = plan_tiles(patcher, vshape, audio_t, guider.conds, req, min_tiles=plan["tiles"] + 1,
+                                  device=device)
+                LOG.info("%s window mode: one extra strip for headroom -> %d strips", _TAG, plan["tiles"])
             stats["plan"] = plan
             with FF.chunked_mlp(ff_rows):
                 out = _run_plan(executor, state, plan, stats, noise, latent_image, sampler, sigmas, denoise_mask,
