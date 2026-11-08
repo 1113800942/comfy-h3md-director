@@ -115,11 +115,16 @@ def resolve_refmod_file(file: str) -> str:
         raise ValueError(f"{_TAG} empty RefMod file")
     if f.lower().endswith(".safetensors"):
         if os.path.isabs(f):
+            if not (D.PATHS.may_read(f) or D.PATHS.inside(f, _refmod_roots())):   # v0.3.7: allowed folders only
+                raise PermissionError(f"{_TAG} RefMod file '{f}' is outside models/refmods and ComfyUI's input / "
+                                      "output / temp folders")
             if os.path.isfile(f):
                 return f[: -len(".safetensors")]
             raise FileNotFoundError(f"{_TAG} RefMod file not found: {f}")
         return D.resolve_media_path(f)[: -len(".safetensors")]   # relative: ComfyUI input folder
     name = f.replace("\\", "/")
+    if os.path.isabs(name) or ".." in name.split("/"):             # v0.3.7: a name stays inside models/refmods
+        raise PermissionError(f"{_TAG} RefMod name '{name}' must be a name inside models/refmods")
     pn = plugin_nodes()
     find = getattr(pn, "_find_mod_path", None) if pn is not None else None
     if callable(find):
@@ -128,8 +133,8 @@ def resolve_refmod_file(file: str) -> str:
         except Exception as exc:                                   # plugin renamed / changed its private helper
             LOG.warning("%s RefMod plugin lookup failed for '%s' (%s); scanning models/refmods instead", _TAG, name, exc)
     for root in _refmod_roots():                                   # own lookup, first root wins
-        p = os.path.join(root, *name.split("/"))
-        if os.path.isfile(p + ".safetensors"):
+        p = D.PATHS.under(root, os.path.join(*name.split("/")))
+        if p and os.path.isfile(p + ".safetensors"):
             return os.path.abspath(p)
     raise FileNotFoundError(f"{_TAG} RefMod '{name}' not found in models/refmods ({_refmod_roots()})")
 

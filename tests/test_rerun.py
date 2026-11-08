@@ -13,7 +13,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 sys.path.insert(0, str(HERE.parent))
 
-from h3_harness import FakeVAE, av_latent, empty_cond, sampler, tiny_h3_model  # noqa: E402  (CPU first)
+from h3_harness import FakeVAE, av_latent, cache_tmpdir, empty_cond, sampler, tiny_h3_model  # noqa: E402  (CPU first)
 
 import torch  # noqa: E402
 
@@ -224,7 +224,7 @@ def make_plan(n=4):
 class LoopRerunTests(unittest.TestCase):
     def setUp(self):
         self.model = tiny_h3_model()
-        self.tmp = tempfile.TemporaryDirectory()
+        self.tmp = cache_tmpdir()
         FakeSampler.calls = []
         self.patches = [patch.object(L.D, "H3MDSegmentEncode", FakeEncoder),
                         patch.object(L.S, "H3MDSampler", FakeSampler),

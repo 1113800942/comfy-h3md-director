@@ -154,3 +154,13 @@ def sigmas(n: int, start: float = 1.0) -> torch.Tensor:
 def empty_cond() -> list:
     """One zero text token; call separately for positive and negative conditioning."""
     return [[torch.zeros((1, 1, 8), dtype=torch.float32, device="cpu"), {}]]
+
+
+def cache_tmpdir():
+    """A TemporaryDirectory that H3MD may use as cache_dir (v0.3.7: caches only inside allowed folders, here
+    ComfyUI's temp folder)."""
+    import tempfile
+    import folder_paths
+    base = folder_paths.get_temp_directory()
+    os.makedirs(base, exist_ok=True)
+    return tempfile.TemporaryDirectory(dir=base)

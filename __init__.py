@@ -1,7 +1,7 @@
 """H3 MultiSeg DualRes (H3MD) - ComfyUI custom node package.
 
 Each module is imported in its own guard: a failure only drops that module's nodes and logs a warning.
-Plain relative imports only (no importlib), so security scanners see exactly which files are loaded.
+Plain relative imports only (no dynamic imports), so security scanners see exactly which files are loaded.
 """
 
 import logging

@@ -207,7 +207,8 @@ class ContinueTests(unittest.TestCase):
 
 class CacheSeedTests(unittest.TestCase):
     def test_run_seed_roundtrip(self):
-        with tempfile.TemporaryDirectory() as d:
+        from h3_harness import cache_tmpdir
+        with cache_tmpdir() as d:
             c = C.SegmentCache(d, "abc" * 10, True)
             self.assertIsNone(c.run_seed())
             c.save_run_seed(123456789012)

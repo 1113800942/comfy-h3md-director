@@ -2,7 +2,7 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
-## [0.3.7-beta] — 2026-11-07
+## [0.3.8-beta] — 2026-11-08 (window mode, includes 0.3.7)
 **In short / 简要：**
 * **Seamless long video (window mode, beta)**: one switch on the Director. Continued shots are rendered together on
   one timeline (no continuation seams); hard cuts stay cuts; long plans are grouped only at hard cuts. 导演台一个开关：
@@ -51,6 +51,36 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   已知限制：同一条连续镜头里的大变化（转身、背影变正面）在两个窗口重叠处可能叠化，这类变化放在硬切处。
 * Off = the old behaviour (same cache keys), except that motion copy no longer uses depth / pose control. 关闭时和原来
   一样（缓存键不变），唯一的变化：动作复刻不再用深度图 / 骨骼图控制。
+## [0.3.7] — 2026-11-08
+**In short / 简要：**
+* Passes the Comfy Registry checks again (every version since 0.2.0 was "Flagged", so ComfyUI-Manager only offered
+  0.1.2). 重新符合 Comfy 注册表的检查（0.2.0 起每个版本都被 Flagged，ComfyUI-Manager 只能装到 0.1.2）。
+* H3MD reads and writes files only in allowed folders, on every ComfyUI: media from ComfyUI's input / output / temp
+  folders, videos into the output folder, the cache into a `<drive>/H3MD_cache` folder or ComfyUI's temp folder.
+  Other folders: list them in `<ComfyUI user folder>/h3md/config.json` (`{"folders": ["D:/media"]}`).
+  本机和服务器一样，H3MD 只在允许的文件夹里读写：素材从 input / output / temp 读，视频存进 output，缓存放在
+  `<盘>/H3MD_cache` 或 temp。别的文件夹写进 `<ComfyUI 用户文件夹>/h3md/config.json`。
+* Settings that were environment variables (`H3MD_PATHS`, `H3MD_MEDIA_DIRS`, `H3MD_SHARED_RESUME`) are now keys of
+  that file: `"mode"`, `"folders"`, `"shared_resume"`. 原来的环境变量改成这个文件里的 `"mode"`、`"folders"`、
+  `"shared_resume"`。
+
+**Details / 详细：**
+* What the registry flagged (seen with `include_status_reason=true`): reading environment variables
+  (`h3md_paths.py`, `h3md_cache.py`), `.bind(` in `web/js/h3md_control_panel.js` (matched by a network rule), and in
+  0.2.x `__import__`; the policy review of 0.3.0 / 0.3.5 found "arbitrary-file-read, path-traversal". 注册表标的是：
+  读环境变量、控制台 JS 里的 `.bind(`（被网络规则误判）、0.2.x 的 `__import__`；0.3.0 / 0.3.5 的策略复审结论是
+  "任意读文件、路径穿越"。
+* Fixed: a relative media path with `..` could leave the input folder (Director, probe, plan export); the probe
+  route and plan export could read any media file on a local ComfyUI. Now both are limited as above. 修复：带 `..` 的
+  相对路径能跳出 input 文件夹；本机时探测接口和计划导出能读硬盘上任何媒体文件。现在都按上面的规则限制。
+* `output_folder`: a relative name is a subfolder of the output folder; an absolute folder must be inside it or listed
+  in the config file, otherwise the video is saved into the output folder (a warning says so). `cache_dir`: a folder
+  outside the allowed places falls back to the automatic cache folder (warning). `output_folder` 填相对名字 = output
+  的子文件夹；绝对路径必须在 output 里或配置文件里列出，否则存到 output（有提示）。`cache_dir` 不在允许的位置时改用
+  自动缓存文件夹（有提示）。
+* Control Panel: the run check wraps `app.queuePrompt` with an arrow function instead of `.bind`. 控制台的运行前检查
+  不再用 `.bind`。
+* New test `tests/test_registry_scan.py` checks the shipped files for the flagged patterns. 新增注册表模式自查测试。
 
 ## [0.3.6] — 2026-11-07
 **In short / 简要：**

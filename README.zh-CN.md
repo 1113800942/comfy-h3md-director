@@ -59,9 +59,12 @@
    [`H3MD_demo_bluedress_seg1.zip`](https://github.com/1113800942/comfy-h3md-director/releases/download/0.2.0/H3MD_demo_bluedress_seg1.zip)
    （1 个 12 秒镜头，图、音乐、全部设置都在里面）。在 H3MD 导演台点 **Import plan…** → 选这个 zip →
    **Plan + all settings** → 运行。两段式采样（低清 + latent 放大）在 Loop 节点内部自动完成，其他都不用调。
-7. **共享 / 服务器上的 ComfyUI**（用 `--listen`、局域网地址或云平台启动）：H3MD 只读取 ComfyUI 的 input / output / temp
-   文件夹里的素材，视频只保存到 output 文件夹里，缓存放在 ComfyUI 的 temp 文件夹（每次运行单独一份，计划导入上限 1 GB）。本机使用（默认 `127.0.0.1`）不变。
-   可以用环境变量 `H3MD_PATHS=local` / `H3MD_PATHS=shared` 强制指定；`H3MD_MEDIA_DIRS` 可以额外允许素材文件夹。
+7. **H3MD 在哪里读写文件**（v0.3.7 起，本机和服务器一样）：素材只从 ComfyUI 的 input / output / temp 文件夹读（计划里的路径
+   相对 input 文件夹），视频只存进 output 文件夹（`output_folder` 填的是它的子文件夹），缓存放在各盘根目录的
+   `H3MD_cache`（自动选）或 ComfyUI 的 temp 文件夹。要用别的文件夹，写进 `<ComfyUI 用户文件夹>/h3md/config.json`，例如
+   `{"folders": ["D:/media", "E:/songs"]}`。**共享 / 服务器上的 ComfyUI**（用 `--listen`、局域网地址或云平台启动）：缓存
+   一律放在 ComfyUI 的 temp 文件夹（每次运行单独一份，计划导入上限 1 GB）；同一个文件里可以用 `"mode": "local"` /
+   `"shared"` 强制指定模式，`"shared_resume": true` 允许复用缓存。
 
 ## 快速开始
 1. 在导演台里放好照片、参考视频和音乐，每个镜头写好提示词（用 [H3MD 提示词 skill](skills/h3md-prompt/SKILL.zh-CN.md)）。
@@ -290,7 +293,8 @@ latent 重叠接续，704×1280，`lowres_anchor = 1`。每段都和第 1 段比
 
 **硬盘缓存**
 * 缓存文件夹：`resume_<hash>`（打开 `resume_from_cache` 时固定，能断点续跑）或 `run_<时间>_<pid>`。
-* 位置：`cache_dir` 为空时自动选（已有的 `H3MD_cache` → 剩余空间最大的本地盘）。
+* 位置：`cache_dir` 为空时自动选（已有的 `H3MD_cache` → 剩余空间最大的本地盘）。自己填的 `cache_dir` 必须在
+  `<盘>/H3MD_cache` 里、ComfyUI 的 output / temp 文件夹里，或 `h3md/config.json` 列出的文件夹里（v0.3.7）。
 * Loop 自己不会在出片前删缓存。要删就在 `H3MD Save Video Interp` 打开 `delete_cache_after_save`（视频完整写好后才删）。
   1088x1920、243 帧一段大约 3 GB（fp16）。
 

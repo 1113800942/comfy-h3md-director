@@ -47,23 +47,22 @@ def list_input_files(kind: str, base: str | None = None) -> list:
 
 
 def _resolve(file: str, base: str) -> str | None:
-    """Same lookup as h3md_director.resolve_media_path, but relative paths must stay inside input/."""
+    """Same lookup as h3md_director.resolve_media_path: relative paths stay inside input/, absolute ones only inside
+    ComfyUI's input / output / temp folders or the H3MD config folders (v0.3.7)."""
     if not file:
         return None
+    try:
+        from . import h3md_paths as PATHS
+    except ImportError:
+        import h3md_paths as PATHS
     if os.path.isabs(file):
         if not file.lower().endswith(EXTS["image"] + EXTS["video"] + EXTS["audio"]):
             return None                          # v0.2.1: probe media files only
-        try:
-            from . import h3md_paths as PATHS
-        except ImportError:
-            import h3md_paths as PATHS
-        if not PATHS.may_read(file):             # shared ComfyUI: nothing outside input/output/temp
+        if not PATHS.may_read(file):             # v0.3.7: only input / output / temp + config folders
             return None
         return file if os.path.isfile(file) else None
-    cand = os.path.abspath(os.path.join(base, file))
-    if os.path.commonpath((base, cand)) != base:
-        return None
-    return cand if os.path.isfile(cand) else None
+    cand = PATHS.under(base, file)               # may not leave the input folder ("..", links)
+    return cand if cand and os.path.isfile(cand) else None
 
 
 def probe_file(file: str, base: str | None = None) -> dict:

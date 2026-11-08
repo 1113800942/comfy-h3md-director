@@ -200,7 +200,9 @@ the resume folder (`run.json`) is reused. Interrupt is checked between segments 
 #### Per-segment disk cache (`h3md_cache.py`, default `cache_mode = disk`)
 
 With `decode_output` on, each segment is decoded **right after it is sampled** and written to
-`<cache root>/run_<time>_<pid>_<n>/`. The cache root is `cache_dir` when set; when empty it is picked automatically
+`<cache root>/run_<time>_<pid>_<n>/`. The cache root is `cache_dir` when set (v0.3.7: only inside a
+`<drive>/H3MD_cache` folder, ComfyUI's output / temp folder or a folder listed in `<user>/h3md/config.json`; see
+`h3md_paths.py`); when empty it is picked automatically
 (no hard-coded drive): (1) an existing `<drive>/H3MD_cache`
 that already holds `resume_*` folders (newest wins), so `resume_from_cache` finds its folder after a ComfyUI restart;
 (2) otherwise `<drive>/H3MD_cache` on the local drive with the most free space (Windows: fixed drives only, removable /

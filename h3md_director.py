@@ -956,10 +956,14 @@ def _input_dir() -> str:
 
 
 def resolve_media_path(file: str) -> str:
+    """Media of a plan: relative to the input folder (may not leave it), or an absolute path inside ComfyUI's
+    input / output / temp folders or a folder listed in the H3MD config file (h3md_paths, v0.3.7)."""
     if os.path.isabs(file) and os.path.isfile(file):
-        return PATHS.check_read(file)   # shared ComfyUI: only inside input/output/temp (h3md_paths)
+        return PATHS.check_read(file)
     base = os.path.abspath(_input_dir())
     candidate = os.path.abspath(os.path.join(base, file))
+    if not os.path.isabs(file) and PATHS.under(base, file) is None:
+        raise PermissionError(f"H3MD: media path '{file}' leaves the input folder")
     if os.path.isfile(candidate):
         return candidate
     raise FileNotFoundError(f"H3MD: media file not found: '{file}' (looked in {base})")

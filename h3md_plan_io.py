@@ -115,19 +115,16 @@ def refmod_files(plan: dict):
 
 
 def resolve_in(base: str, file: str):
-    """Relative paths must stay inside base (the input folder); absolute paths only for media files, and on a
-    shared ComfyUI only inside ComfyUI's folders (v0.2.1: an export must not pack arbitrary files)."""
+    """Relative paths must stay inside base (the input folder); absolute paths only for media files inside
+    ComfyUI's input / output / temp folders or the H3MD config folders (v0.3.7: an export never packs other files)."""
     if not file:
         return None
     if os.path.isabs(file):
         if not file.lower().endswith(MEDIA_EXTS) or not _paths().may_read(file):
             return None
         return file if os.path.isfile(file) else None
-    base = os.path.abspath(base)
-    cand = os.path.abspath(os.path.join(base, file))
-    if os.path.commonpath((base, cand)) != base:
-        return None
-    return cand if os.path.isfile(cand) else None
+    cand = _paths().under(base, file)
+    return cand if cand and os.path.isfile(cand) else None
 
 
 def _graph_nodes(workflow):
