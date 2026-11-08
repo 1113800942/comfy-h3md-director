@@ -31,7 +31,8 @@ _TAG = "[H3MD Window]"
 _KEY = "h3md_window"
 SPAN_KEY = "h3md_window_span"          # conditioning dict key: (start_frame, end_frame) in shot pixel frames
 DEFAULTS = {"length": 124, "overlap": 56, "highLength": None, "highOverlap": None, "freenoise": True,
-            "cropGuide": True, "preview": False}
+            "cropGuide": True, "preview": False,
+            "refs": True}
 MAX_TRAINED = 362          # H3 was trained on ~124-362 frame clips; longer windows are outside that range
 FPS = 24
 
@@ -61,7 +62,8 @@ def normalize_window_mode(value):
             LOG.warning("%s window %s %d frames is longer than H3's trained range (<= %d)", _TAG, k, out[k], MAX_TRAINED)
     out["freenoise"] = bool(out["freenoise"])
     out["cropGuide"] = bool(out["cropGuide"])
-    out["preview"] = bool(out["preview"])   # low-res preview: stop after the low-res pass
+    out["preview"] = bool(out["preview"])
+    out["refs"] = bool(out["refs"])          # 3c: each auto window prompt gets only the pictures it names   # low-res preview: stop after the low-res pass
     return out
 
 
@@ -248,6 +250,64 @@ def auto_window_prompts(prompt: str, total_frames: int, length: int, overlap: in
         out.append({"start": lo, "end": hi, "prompt": f"{before}\n{body}\n\n{after.lstrip()}" if after else
                     f"{before}\n{body}", "events": len(mine)})
     return out
+
+
+# ------------------------------------------------------------------------------------------- 3c: refs per window
+PIC_TAG = re.compile(r"<Picture (\d+)>")
+SUBJ_TAG = re.compile(r"<Subject (\d+)>")
+_SENT = re.compile(r"(?<=[.!?])\s+")
+
+
+def _sections(prompt: str):
+    """[(name or None, text)] in order; None = text before the first section header."""
+    heads = list(SECTION.finditer(prompt))
+    out = [(None, prompt[:heads[0].start()] if heads else prompt)]
+    for i, m in enumerate(heads):
+        end = heads[i + 1].start() if i + 1 < len(heads) else len(prompt)
+        out.append((m.group(1), prompt[m.start():end]))
+    return out
+
+
+def window_refs(prompt: str, n_images: int):
+    """3c: the reference pictures one window prompt really uses, and the prompt rewritten for them.
+    Used = pictures named in detailed_description / dialogue / sound sections, plus the pictures that define a subject
+    named there (subject_definitions line '<Subject k> ... <Picture j> ...').  Returns (kept, prompt): kept = 0-based
+    image indices in order (pictures renumbered 1..len(kept)); definition / retention lines and summary sentences that
+    name only dropped subjects / pictures are removed.  (list(range(n)), prompt) when nothing would change."""
+    secs = _sections(prompt)
+    body = " ".join(t for n, t in secs if n not in (None, "subject_definitions", "summary", "retention_analysis"))
+    subj_pics = {}
+    for n, t in secs:
+        if n == "subject_definitions":
+            for line in t.splitlines():
+                m = re.match(r"\s*<Subject (\d+)>", line)
+                if m:
+                    subj_pics.setdefault(int(m.group(1)), set()).update(int(x) for x in PIC_TAG.findall(line))
+    subjects = {int(x) for x in SUBJ_TAG.findall(body)}
+    pics = {int(x) for x in PIC_TAG.findall(body)}
+    for k in subjects:
+        pics |= subj_pics.get(k, set())
+    kept = [i for i in range(n_images) if i + 1 in pics]
+    if len(kept) == n_images:
+        return list(range(n_images)), prompt
+    renum = {old + 1: new + 1 for new, old in enumerate(kept)}
+
+    def unused(text):
+        return any(int(x) not in renum for x in PIC_TAG.findall(text)) or \
+            any(int(x) not in subjects for x in SUBJ_TAG.findall(text))
+
+    out = []
+    for n, t in secs:
+        if n in ("subject_definitions", "retention_analysis"):
+            lines = t.splitlines(keepends=True)
+            t = lines[0] + "".join(l for l in lines[1:] if not (PIC_TAG.search(l) or SUBJ_TAG.search(l)) or not unused(l))
+        elif n == "summary":
+            head, _, rest = t.partition(":")
+            sents = [x for x in _SENT.split(rest.strip()) if x and not unused(x)]
+            t = head + ":\n" + " ".join(sents) + "\n\n"
+        out.append(t)
+    text = PIC_TAG.sub(lambda m: f"<Picture {renum.get(int(m.group(1)), int(m.group(1)))}>", "".join(out))
+    return kept, text
 
 
 # ------------------------------------------------------------------------------------------- per-window payload

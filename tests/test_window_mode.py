@@ -211,6 +211,37 @@ class HardCuts(unittest.TestCase):
         sig = C.segment_signature(p, 0)
         self.assertEqual(sig["windowCuts"], [170])
 
+
+REFP = ("subject_definitions:\n<Subject 1> is the woman shown in <Picture 1> and <Picture 2>.\n<Picture 3> is the mountain.\n\n"
+        "summary:\nreference generation. <Subject 1> performs to the music. Her look comes from <Picture 1>.\n\n"
+        "retention_analysis:\n<Subject 1> (appears in [Shot 1]): fully_preserved.\n<Picture 3> (appears in [Shot 2]): kept.\n\n"
+        "detailed_description:\nPhotoreal footage. [0s cut] <Subject 1> stands in a meadow. [7s cut] An empty valley like "
+        "<Picture 3>, no people.\n\noverall_soundscape:\nwind.")
+
+
+class RefsPerWindow(unittest.TestCase):
+    def test_window_refs(self):
+        kept, t = WIN.window_refs(REFP.replace("[0s cut] <Subject 1> stands in a meadow. [7s cut] ", ""), 3)
+        self.assertEqual(kept, [2])
+        self.assertIn("<Picture 1> is the mountain", t)
+        self.assertNotIn("<Subject 1>", t)
+        self.assertIn("like <Picture 1>", t)
+        kept, t = WIN.window_refs(REFP, 3)
+        self.assertEqual(kept, [0, 1, 2])
+        self.assertEqual(t, REFP)
+
+    def test_plan(self):
+        raw = json.loads(timed_plan(True, REFP, 345))
+        raw["media"]["images"] = [{"id": "a", "file": "a.png"}, {"id": "b", "file": "b.png"}, {"id": "c", "file": "c.png"}]
+        raw["segments"][0]["images"] = ["a", "b", "c"]
+        seg = D.parse_plan(json.dumps(raw))["segments"][0]
+        imgs = [w.get("images") for w in seg["windowPrompts"]]
+        self.assertEqual(imgs[0], [0, 1])
+        self.assertEqual(imgs[-1], [2])
+        raw["windowMode"] = {"refs": False}
+        seg = D.parse_plan(json.dumps(raw))["segments"][0]
+        self.assertTrue(all("images" not in w for w in seg["windowPrompts"]))
+
 if __name__ == "__main__":
     unittest.main()
 

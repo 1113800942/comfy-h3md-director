@@ -635,6 +635,14 @@ def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = Fa
             if auto:
                 seg["windowPrompts"] = [{k: a[k] for k in ("start", "end", "prompt")} for a in auto]
                 seg["windowPromptsAuto"] = True
+                if window_mode.get("refs", True) and seg["images"]:   # 3c: pictures follow the windows
+                    for wp in seg["windowPrompts"]:
+                        kept, wp["prompt"] = WIN.window_refs(wp["prompt"], len(seg["images"]))
+                        if len(kept) < len(seg["images"]):
+                            wp["images"] = kept
+                    used = [len(wp.get("images", seg["images"])) for wp in seg["windowPrompts"]]
+                    if any(u < len(seg["images"]) for u in used):
+                        notes.append(f"segment {n}: pictures per window {used} (of {len(seg['images'])})")
                 cuts = WIN.prompt_cuts(seg["prompt"])
                 if cuts:   # 3b: '[Ns cut]' marks -> window boundaries without fusion (snapped to 17 frames)
                     seg["windowCuts"] = [17 * round(c / 17) for c in cuts]
@@ -1715,9 +1723,13 @@ class H3MDSegmentEncode:
             # window-exp: one conditioning per window prompt, tagged with its frame span (h3md_window picks per window)
             positive, latent = [], None
             for wp in wps:
+                kw = kwargs
+                if wp.get("images") is not None:   # 3c: only the pictures this window names
+                    imgs = {f"ref_image_{j}": picked["images"][i] for j, i in enumerate(wp["images"])}
+                    kw = dict(kwargs, ref_images=imgs or None)
                 out = core.MiniMaxH3ReferenceToVideo.execute(
                     clip=clip, prompt=wp["prompt"], width=plan["width"], height=plan["height"], length=seg["length"],
-                    ref_image_size=ref_image_size, vae=vae, audio_vae=audio_vae, **kwargs)
+                    ref_image_size=ref_image_size, vae=vae, audio_vae=audio_vae, **kw)
                 pos, lat = _unwrap_node_output(out)[:2]
                 latent = latent or lat
                 tag = {WIN.SPAN_KEY: (wp["start"], wp["end"])}
