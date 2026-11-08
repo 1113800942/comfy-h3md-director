@@ -1838,6 +1838,7 @@ class DirectorEditor {
     if (pill) {
       if (!a) { pill.textContent = ""; pill.title = ""; }
       else if (!a.ok) { pill.textContent = "budget ?"; pill.title = `autosplit preview unavailable: ${a.error || "?"}`; }
+      else if (!a.budget && this.plan.windowMode) { pill.textContent = "无接缝长视频 · 不拆段"; pill.title = "window mode: continued shots render together on one timeline; groups only at hard cuts"; }
       else if (!a.budget) { pill.textContent = "autoSplit off"; pill.title = "plan_json has \"autoSplit\": false"; }
       else {
         const b = a.budgetInfo || {};
