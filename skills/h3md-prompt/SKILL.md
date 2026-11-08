@@ -116,6 +116,10 @@ non_diegetic_music:
   write the summary as what stays the same.
 - Reference pictures follow the windows automatically: a window carries only the pictures its own text names.
 - Dialogue and lyrics always in `<d>[English] ...</d>` (tested: plain text gave unintelligible speech).
+- Outfit not shown in any reference picture: write it in full (cut, neckline, sleeves, length, fabric, colour, and
+  "opaque, not see-through") in the same words in every shot's subject definition. Across a hard cut nothing but the
+  text and pictures carries over (tested 11-08: "a flowing light-blue summer dress" became a strappy dress with a sheer
+  lace waist before the cut and a puff-sleeve dress after it). For a strict outfit, add a picture of it.
 - The `Duration:` line is rewritten by H3MD (each window gets its own length).
 - `"preview": true` renders the low-res pass only (motion and framing; a later full run reuses it).
   `"redraw": [[4, 8]]` re-renders only seconds 4–8 of a finished run with a new seed; everything else stays identical.
@@ -309,6 +313,7 @@ After the prompts, also give the whole plan as ONE JSON code block that the user
 - [ ] Times start at 0; the last shot time is inside the length; in continued shots new action starts after the overlap.
 - [ ] Lengths are 5+17n; total counted as length − overlap; motion copy total within the reference video.
 - [ ] Long shots that will autosplit describe a steady state, no ordered events or sub-shots.
+- [ ] An outfit that no picture shows is written in full, word for word the same in every shot (fabric opaque).
 - [ ] Window mode: lines and actions inside long shots timed from the shot's start (`At 00:07.9 ...` or `[8s] ...`), about 8 s apart; dialogue / lyrics in `<d>[English] ...</d>`; the summary says what stays the same.
 - [ ] Tag numbers match the shot's media order; depth videos have no `<Video N>`; RefMods written `<RefMod j>`; no
       undefined tags.
