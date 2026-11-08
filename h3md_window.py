@@ -428,6 +428,7 @@ def window_span_map(total_frames: int, window_mode: dict, cuts=()):
 
 # ------------------------------------------------------------------------------------------- 3c: refs per window
 PIC_TAG = re.compile(r"<Picture (\d+)>")
+PERSON_WORDS = re.compile(r"\b(she|he|they|her|his|their|him|them)\b", re.I)   # not "people": "no people"
 SUBJ_TAG = re.compile(r"<Subject (\d+)>")
 _SENT = re.compile(r"(?<=[.!?])\s+")
 
@@ -464,6 +465,10 @@ def window_refs(prompt: str, n_images: int, own: str = None):
     for k in subjects:
         pics |= subj_pics.get(k, set())
     kept = [i for i in range(n_images) if i + 1 in pics]
+    if not kept and PERSON_WORDS.search(body):
+        # 11-08: the window's text talks about people ("they keep dancing") without naming <Subject N>: keep every
+        # picture rather than lose the identities (only a text with no person at all drops them)
+        kept = list(range(n_images))
     if len(kept) == n_images:
         return list(range(n_images)), prompt
     renum = {old + 1: new + 1 for new, old in enumerate(kept)}

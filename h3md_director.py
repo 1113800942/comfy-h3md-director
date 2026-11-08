@@ -2075,7 +2075,11 @@ def encode_group_windows(core, plan, seg, picked, clip, vae, audio_vae, ref_imag
         kw["ref_videos"] = vids or None
         kw["ref_video_audios"] = auds or None
         if _locked_ref_index(gp["seg"]) is not None:
-            kw["ref_audios"] = window_ref_audios(gp["seg"], pm, a, b, gp["origin"])
+            # the group's own sound-track clock (its lock follows the timeline, including the <= 8-frame drift of
+            # later groups); the grouping already made sure every shot of the group is on that clock
+            lk_seg = dict(gp["seg"], locked=seg["locked"]) if seg.get("audioMode") == "locked" and seg.get("locked") \
+                else gp["seg"]
+            kw["ref_audios"] = window_ref_audios(lk_seg, pm, a, b, 0 if lk_seg is not gp["seg"] else gp["origin"])
         text = fix_duration_line(combined or own[k], b - a, 0)
         out = core.MiniMaxH3ReferenceToVideo.execute(
             clip=clip, prompt=text, width=plan["width"], height=plan["height"], length=seg["length"],

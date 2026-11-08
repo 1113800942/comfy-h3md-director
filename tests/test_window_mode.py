@@ -868,6 +868,52 @@ class AutosplitMotion(unittest.TestCase):
         self.assertEqual(calls, [])
 
 
+class RefsPronouns(unittest.TestCase):
+    def test_people_without_tags_keep_pictures(self):
+        pr = ("subject_definitions:\n<Subject 1> is the woman in <Picture 1>.\n<Subject 2> is the man in <Picture 2>."
+              "\n\nsummary:\nthey dance.\n\ndetailed_description:\nThe same rooftop: they keep swaying slowly.\n")
+        kept, _ = WIN.window_refs(pr, 2)
+        self.assertEqual(kept, [0, 1])
+        empty = pr.replace("they keep swaying slowly.", "Empty snow mountains, no people, the wind blows.")
+        kept, _ = WIN.window_refs(empty, 2)
+        self.assertEqual(kept, [])
+
+    def test_group_song_follows_the_group_clock(self):
+        import torch
+        raw = json.loads(multi_plan({"length": 243, "overlap": 56, "highLength": 175, "highOverlap": 22,
+                                     "groupLength": 700}, segs=((294, 0), (294, 0), (345, 0), (294, 0))))
+        raw["media"]["audios"] = [{"id": "s", "file": "s.mp3", "duration": 100.0}]
+        st = 0
+        for s in raw["segments"]:
+            s["audios"] = [{"id": "s", "mode": "locked", "offset": st / 24}]
+            s["audioMode"] = "locked"
+            st += s["length"]
+        p = D.parse_plan(json.dumps(raw))
+        g = p["segments"][-1]
+        self.assertIn("groupParts", g)
+        self.assertNotAlmostEqual(g["locked"]["offset"], g["groupParts"][0]["seg"]["locked"]["offset"])   # drifted
+        calls = []
+
+        class FakeCore:
+            class MiniMaxH3ReferenceToVideo:
+                @staticmethod
+                def execute(**kw):
+                    calls.append(kw)
+                    return ([[torch.zeros(1), {}]], {"samples": torch.zeros(1)})
+        song = {"waveform": torch.arange(100 * 100).float().view(1, 1, -1), "sample_rate": 100}
+        orig = D.pick_media_for
+        try:
+            D.pick_media_for = lambda plan, s, size="match", extra=0: {"images": [], "videos": [], "video_audios": [],
+                                                                         "audios": [song], "locked_audio": None}
+            pos, lat, text = D.encode_group_windows(FakeCore, p, g, None, None, None, None, "match")
+        finally:
+            D.pick_media_for = orig
+        for c, kw in zip(pos, calls):
+            a, b = c[1][WIN.RANGE_KEY]
+            first = float(kw["ref_audios"]["ref_audio_0"]["waveform"][0, 0, 0])
+            self.assertEqual(first, float(round((g["locked"]["offset"] + a / 24) * 100)), (a, b))
+
+
 class DepthOff(unittest.TestCase):
     def _raw(self, window, prompt="shot"):
         raw = json.loads(plan(window, length=345))
