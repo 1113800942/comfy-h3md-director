@@ -31,6 +31,14 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   窗口模式下自动关闭 RefMod。
 * Memory: chunked decode (~10 s chunks written straight to the cache) and per-window high-res strip planning; 2K
   (2560×1408) runs on 64 GB RAM. 内存：分块解码（约 10 秒一块直接写进缓存）、高清条带按窗口估算；2K 在 64 GB 内存上可跑。
+* Speed: a locked song that is also `<Audio N>` gives each window only its own stretch (a 160 s song made the low-res
+  steps ~38% slower); changing only high-res settings reuses the low-res pass. 提速：锁定的歌每个窗口只带自己那一段
+  （160 秒的歌曾让低清每步慢约 38%）；只改高清设置时复用低清结果。
+* Fixes from an independent review: short groups are still windowed (prompts no longer averaged, cuts kept); a rerun with
+  a new seed redoes the low-res pass; a group keeps one sound track (a new group starts where the lock changes); a failed
+  redraw / rerun restores the previous version; a guide video split into continued shots stays on the timeline clock.
+  独立审查修复：短组照样按窗口生成（提示词不再被平均、硬切保留）；换种子重跑会重跑低清；一组只有一条音轨（锁定变了就另起一组）；
+  重画 / 重跑失败时旧版本放回；拆成续接镜头的引导视频按时间线对齐。
 * Off = exactly the old behaviour (same cache keys). 关闭时和原来完全一样（缓存键不变）。
 
 ## [0.3.6] — 2026-11-07

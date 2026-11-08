@@ -99,6 +99,8 @@ changes:
   frame-identical, the previous version is kept in the cache folder.
 * Memory: the result is decoded and written in ~10 s chunks, and the high-res pass plans its strips per window, so
   2K works on 64 GB RAM (measured: 21 s at 2560×1408 in 41 min on an RTX 5090).
+* A locked song that is also `<Audio N>` gives each window only its own stretch of the song (not the whole file), and
+  changing only high-res settings (high-res LoRAs, high-res windows) reuses the finished low-res pass.
 * Segment numbers (`segments_to_run`, `rerun_segments`, `stop_after`) count **groups** in window mode, as the
   Director's notes list them (one group = the shots rendered together).
 * About 25% slower than the old chain. Turn it off to get the old behaviour back exactly.
