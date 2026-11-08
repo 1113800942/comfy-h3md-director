@@ -914,6 +914,149 @@ class RefsPronouns(unittest.TestCase):
             self.assertEqual(first, float(round((g["locked"]["offset"] + a / 24) * 100)), (a, b))
 
 
+class ChainWindows(unittest.TestCase):
+    """11-08 接续窗口: windows run in time order; a window's overlap with the earlier windows is pinned to their
+    result of the same step (input and output), never averaged; the old fusion stays when chain is off."""
+
+    class FakeModel:
+        class latent_format:
+            temporal_downscale_ratio = 4
+
+        def resize_cond_for_context_window(self, *a, **k):
+            return None
+
+    def handler(self, chain=True, pin=0.0, length=12, overlap=4):
+        import comfy.context_windows as cw
+        h = cw.IndexListContextHandler(cw.get_matching_context_schedule(cw.ContextSchedules.STATIC_STANDARD),
+                                       cw.get_matching_fuse_method(cw.ContextFuseMethods.PYRAMID), length, overlap,
+                                       dim=2, causal_window_fix=False)
+        WIN.install(h, False)
+        h._h3md_chain, h._h3md_pin = chain, pin
+        return h
+
+    def run_step(self, h, x, sigma=1.0, conds=None):
+        import torch
+        calls = []
+
+        def calc(model, sub_conds, sub_x, sub_t, model_options):
+            w = model_options["transformer_options"]["context_window"]
+            dm = ((sub_conds[0] or [{}])[0]).get("model_conds", {}).get("denoise_mask")
+            calls.append((w.index_list[0], w.index_list[-1], sub_x.clone(), None if dm is None else dm.cond.clone()))
+            return [torch.full_like(sub_x, float(w.index_list[0] + 1)) for _ in sub_conds]
+
+        mo = {"transformer_options": {"sample_sigmas": torch.tensor([1.0, 0.5, 0.0])}}
+        out = h.execute(calc, self.FakeModel(), conds or [[{"model_conds": {}}]], x, torch.tensor([sigma]), mo)
+        return out[0], calls
+
+    def test_order_and_no_averaging(self):
+        import torch
+        x = torch.randn(1, 2, 30, 4, 4)
+        out, calls = self.run_step(self.handler(), x)
+        starts = [c[0] for c in calls]
+        self.assertEqual(starts, sorted(starts))
+        self.assertGreater(len(calls), 2)
+        first = {}
+        for a, b, _, _ in calls:
+            for i in range(a, b + 1):
+                first.setdefault(i, a + 1)
+        for i in range(30):                                   # every latent = the FIRST window that holds it
+            self.assertTrue(torch.all(out[:, :, i] == first[i]), i)
+        for k, (a, b, sub_x, dm) in enumerate(calls):
+            pinned = [i for i in range(a, b + 1) if first[i] != a + 1]
+            if k == 0:
+                self.assertIsNone(dm)
+                continue
+            self.assertTrue(pinned)
+            for i in pinned:                                 # input of a pinned row = the earlier result (pin 0)
+                self.assertTrue(torch.all(sub_x[:, :, i - a] == first[i]))
+                self.assertTrue(torch.all(dm[:, :, i - a] == 0.0))
+            for i in range(a, b + 1):
+                if i not in pinned:
+                    self.assertTrue(torch.all(dm[:, :, i - a] == 1.0))
+                    self.assertTrue(torch.equal(sub_x[:, :, i - a], x[:, :, i]))
+
+    def test_old_fusion_averages(self):
+        import torch
+        x = torch.randn(1, 2, 30, 4, 4)
+        out, calls = self.run_step(self.handler(chain=False), x)
+        a1, b1 = calls[1][0], calls[0][1]                     # overlap of window 1 and 2
+        mid = (a1 + b1) // 2
+        self.assertFalse(torch.all(out[:, :, mid] == 1.0))   # fused, not window 1's value
+
+    def test_pin_level(self):
+        import torch
+        x = torch.randn(1, 2, 30, 4, 4)
+        s, m = 0.5, 0.5
+        out, calls = self.run_step(self.handler(pin=m), x, sigma=s)
+        a, b, sub_x, dm = calls[1]
+        i = a                                                 # first pinned row, earlier result = 1.0
+        eps = (x[:, :, i] - (1 - s) * 1.0) / s
+        self.assertTrue(torch.allclose(sub_x[:, :, 0], (1 - m * s) * 1.0 + m * s * eps, atol=1e-6))
+        self.assertTrue(torch.all(dm[:, :, 0] == m))
+
+    def test_single_window_unchanged(self):
+        import torch
+        x = torch.randn(1, 2, 10, 4, 4)
+        out, calls = self.run_step(self.handler(), x)
+        self.assertEqual(len(calls), 1)
+        self.assertIsNone(calls[0][3])
+        self.assertTrue(torch.all(out == 1.0))
+
+    def test_hard_cut_not_pinned(self):
+        import torch
+        x = torch.randn(1, 2, 30, 4, 4)
+        conds = [[{"model_conds": {}, WIN.CUT_KEY: [51]}]]   # pixel frame 51 -> latent 15
+        out, calls = self.run_step(self.handler(), x, conds=conds)
+        after = [c for c in calls if c[0] >= 15]
+        self.assertIsNone(after[0][3])                        # the first window after the cut: nothing pinned
+        self.assertTrue(all(c[3] is None or not torch.any(c[3] == 0) or c[0] >= 15 or c[1] < 15 for c in calls))
+        self.assertTrue(torch.all(out[:, :, 15] == 16.0))
+        self.assertTrue(all(c[1] < 15 or c[0] >= 15 for c in calls))
+
+    def test_option(self):
+        wm = WIN.normalize_window_mode({"chain": True, "chainPin": 3, "overlap": 22})
+        self.assertTrue(wm["chain"])
+        self.assertEqual(wm["chainPin"], 1.0)
+        self.assertEqual(wm["overlap"], 22)
+        self.assertFalse(WIN.normalize_window_mode({})["chain"])
+
+
+class ChainRealModel(unittest.TestCase):
+    """接续窗口 on the tiny real H3 model (audio + video packed, locked audio mask): runs every step, finite output."""
+
+    def test_two_pass_sampler(self):
+        import os
+        import tempfile
+        import torch
+        from h3_harness import FakeVAE, av_latent, empty_cond, sampler, tiny_h3_model
+        import h3md_sampler as S
+        import h3md_tiled_hires as TILED
+        TILED.LOCAL_PATH = os.path.join(tempfile.mkdtemp(), "cal.json")
+        try:
+            m = WIN.apply(tiny_h3_model(), 39, 22, "pyramid", False, False, True, 0.0)
+            h = m.model_options["context_handler"]
+            calls = []
+            orig = type(h)._h3md_chain_execute
+
+            def spy(self, *a, **k):
+                calls.append(1)
+                return orig(self, *a, **k)
+
+            type(h)._h3md_chain_execute = spy
+            a_t = av_latent(t=32, h=4, w=4)["samples"].unbind()[1].shape[-1]
+            lat = av_latent(t=32, h=4, w=4, audio_mask=torch.zeros(1, 1, 2, a_t))
+            out = S.H3MDSampler().sample(m, empty_cond(), empty_cond(), FakeVAE(), lat, sampler("euler"),
+                                         torch.tensor([1.0, 0.95, 0.9, 0.8, 0.6, 0.3, 0.0]), seed=7, cfg=1.0,
+                                         transition_step=4, lowres_scale=0.5, rho=0.0, w_min=0.5, w_max=1.0,
+                                         upscaler_model="none")
+            v, a = out[0]["samples"].unbind()
+            self.assertEqual(len(calls), 6)
+            self.assertEqual(tuple(v.shape), (1, 24, 32, 4, 4))
+            self.assertTrue(bool(torch.isfinite(v).all()) and bool(torch.isfinite(a).all()))
+        finally:
+            TILED.LOCAL_PATH = None
+
+
 class ContinuationNoCut(unittest.TestCase):
     """11-08 2:20 MV: the S2 -> S3 continuation came out as a cut - the window prompt repeated S3's style preamble
     and its own '[Shot 1]'.  The later shot now adds only its new sentences, without a shot tag, as 'with no cut'."""

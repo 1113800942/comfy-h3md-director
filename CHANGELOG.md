@@ -4,6 +4,11 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
 ## [0.3.8-beta] — 2026-11-08 (window mode, includes 0.3.7)
 **In short / 简要：**
+* **接续窗口 (experimental, `"chain": true` in windowMode)**: in the low-res pass the windows run in time order and a
+  window's overlap with the windows before it takes their result of the same step (input and output) instead of being
+  averaged - averaging two different pictures was the ghosting / double layers of the 2:20 test video. Same amount of
+  computation; off by default until the test decides. 低清阶段按时间顺序跑窗口，重叠区直接用前一个窗口这一步的结果，
+  不再两边平均（平均两份不同的画面就是 2 分 20 秒测试片里的重影）；计算量不变；测试后再定是否默认打开。
 * **Seamless long video (window mode, beta)**: one switch on the Director. Continued shots are rendered together on
   one timeline (no continuation seams); hard cuts stay cuts; long plans are grouped only at hard cuts. 导演台一个开关：
   续接的镜头在同一条时间线上一起生成（没有续接接缝）；硬切照常；长计划只在硬切处分组。

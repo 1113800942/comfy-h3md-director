@@ -33,7 +33,13 @@ SPAN_KEY = "h3md_window_span"          # conditioning dict key: (start_frame, en
 DEFAULTS = {"videoPerWindow": "auto", "length": 124, "overlap": 56, "highLength": None, "highOverlap": None, "freenoise": True,
             "cropGuide": True, "preview": False,
             "refs": True, "groups": True, "groupLength": 1445,
-            "redraw": None}
+            "redraw": None,
+            # 11-08 接续窗口 (sequential windows, low-res pass only): each step runs the windows in time order and a
+            # window's overlap with the previous one is pinned to that window's result of the same step instead of
+            # being averaged (averaging two different pictures = the ghosting of the 2:20 test video).  chainPin is
+            # the noise level the pinned rows run at, as a fraction of the step's sigma (0 = kept like a
+            # continuation prefix).  Default off until the 20 s test decides.
+            "chain": False, "chainPin": 0.0}
 MAX_TRAINED = 362          # H3 was trained on ~124-362 frame clips; longer windows are outside that range
 FPS = 24
 
@@ -81,6 +87,8 @@ def normalize_window_mode(value):
     out["preview"] = bool(out["preview"])
     out["refs"] = bool(out["refs"])
     out["groups"] = bool(out["groups"])            # 3e: multi-shot plans -> one timeline per group
+    out["chain"] = bool(out["chain"])
+    out["chainPin"] = min(1.0, max(0.0, float(out["chainPin"] or 0.0)))
     out["groupLength"] = _round_17(out["groupLength"], 22)
     v = out["videoPerWindow"]   # 3d: "auto" = when a reference video is longer than H3's ~15 s limit
     out["videoPerWindow"] = "auto" if v in ("auto", None) else bool(v)          # 3c: each auto window prompt gets only the pictures it names   # low-res preview: stop after the low-res pass
@@ -628,6 +636,32 @@ def pick_span_cond(cond_in, window):
     return best
 
 
+def chain_pin_cond(cond, x, window, rows, m, dim=2):
+    """接续窗口: the cond of one window with the video denoise mask lowered to m on the pinned rows (positions in the
+    window).  H3 runs a row with mask m at sigma = m * sigma (m = 0: a kept row, like a continuation prefix)."""
+    import torch
+    import comfy.conds
+    mc = cond.get("model_conds") if isinstance(cond, dict) else None
+    if not isinstance(mc, dict) or not rows:
+        return cond
+    anchor = getattr(window, "causal_anchor_index", None)
+    lead = 1 if anchor is not None and anchor >= 0 else 0
+    tw = len(window.index_list) + lead
+    old = mc.get("denoise_mask")
+    if old is not None and isinstance(getattr(old, "cond", None), torch.Tensor) and old.cond.ndim > dim \
+            and old.cond.shape[dim] == tw:
+        mask = old.cond.clone().float()
+    else:
+        mask = torch.ones((1, 1, tw) + tuple(x.shape[-2:]), dtype=torch.float32, device=x.device)
+    sl = tuple([slice(None)] * dim + [[r + lead for r in rows]])
+    mask[sl] = torch.clamp(mask[sl], max=float(m))
+    mc = dict(mc)
+    mc["denoise_mask"] = comfy.conds.CONDRegular(mask)
+    cond = dict(cond)
+    cond["model_conds"] = mc
+    return cond
+
+
 def make_overlap_monitor(handler):
     """Ghost check: how much neighbouring windows disagree on their shared latent frames, per step.  A window pair
     that still disagrees late in sampling is fused as a double exposure (11-07: two faces in one frame).  Logged
@@ -695,7 +729,11 @@ def install(handler, crop_guide: bool):
                         LOG.info("%s window latents %d-%d: prompt %d of %d (frames %d-%d)", _TAG, key[0], key[1],
                                  k + 1, len(cond_in), s, e)
                     cond_in = [cond_in[k]]
-            return super().get_resized_cond(cond_in, x_in, window, device)
+            out = super().get_resized_cond(cond_in, x_in, window, device)
+            pin = getattr(self, "_h3md_pin_now", None)
+            if out and pin is not None and tuple(window.index_list) == pin[0]:
+                out = [chain_pin_cond(c, x_in, window, pin[1], pin[2], self.dim) for c in out]
+            return out
 
         def execute(self, calc_cond_batch, model, conds, x_in, timestep, model_options):
             cuts = set()
@@ -703,12 +741,100 @@ def install(handler, crop_guide: bool):
                 for c in clist or ():
                     cuts.update((c or {}).get(CUT_KEY) or ())
             self._h3md_cuts = sorted(cuts)
-            out = super().execute(calc_cond_batch, model, conds, x_in, timestep, model_options)
+            if getattr(self, "_h3md_chain", False):
+                out = self._h3md_chain_execute(calc_cond_batch, model, conds, x_in, timestep, model_options)
+            else:
+                out = super().execute(calc_cond_batch, model, conds, x_in, timestep, model_options)
             if getattr(self, "_h3md_active", None) is not None:
                 # local redraw: latents no window covered come back 0/0 = NaN; they are masked (kept) anyway
                 import torch
                 out = [torch.nan_to_num(o, nan=0.0) if isinstance(o, torch.Tensor) else o for o in out]
             return out
+
+        def _h3md_chain_execute(self, calc_cond_batch, model, conds, x_in, timestep, model_options):
+            """接续窗口 (11-08): the core execute, but windows run in time order and the video rows a window shares
+            with the windows before it are pinned to their result of THIS step (input: moved along that result's
+            path to m * sigma; output: that result) - each video latent gets exactly one version per step, nothing
+            is averaged.  Other modalities (audio) are fused as before."""
+            import torch
+            import comfy.utils
+            self._model = model
+            self.set_step(timestep, model_options)
+            ws = self._build_window_state(x_in, conds, model)
+            nmod = len(ws.latents)
+            x0 = ws.latents[0]
+            work = x0.clone()                                  # this step's input with the pinned rows written in
+            ws.latents = [work] + list(ws.latents[1:])
+            d = self.dim
+            windows = sorted(self.get_context_windows(model, x0, model_options), key=lambda w: w.index_list[0])
+            total = len(windows)
+            video = [torch.zeros_like(x0) for _ in conds]
+            done = [False] * x0.size(d)
+            accum = [[torch.zeros_like(lat) for _ in conds] for lat in ws.latents]
+            counts = [[torch.zeros(cw.get_shape_for_dim(lat, md), device=lat.device) for _ in conds]
+                      for lat, md in zip(ws.latents, ws.modality_dims)]
+            biases = [[[0.0] * lat.shape[md] for _ in conds] for lat, md in zip(ws.latents, ws.modality_dims)]
+            for cb in pe.get_all_callbacks(cw.IndexListCallbacks.EXECUTE_START, self.callbacks):
+                cb(self, model, x_in, conds, timestep, model_options)
+            s = float(timestep.flatten()[0])
+            m = float(getattr(self, "_h3md_pin", 0.0))
+            plan = []
+            try:
+                for wi, window in enumerate(windows):
+                    rows = [p for p, i in enumerate(window.index_list) if done[i]]
+                    idx = [window.index_list[p] for p in rows]
+                    if idx:
+                        sl = tuple([slice(None)] * d + [idx])
+                        prev = video[0][sl]
+                        eps = (x0[sl] - (1.0 - s) * prev) / max(s, 1e-6)
+                        work[sl] = ((1.0 - m * s) * prev + (m * s) * eps).to(work.dtype)
+                        self._h3md_pin_now = (tuple(window.index_list), rows, m)
+                        plan.append((wi, idx[0], idx[-1]))
+                    else:
+                        self._h3md_pin_now = None
+                    results = self.evaluate_context_windows(calc_cond_batch, model, x_in, conds, timestep,
+                                                            [(wi, window)], model_options, window_state=ws,
+                                                            total_windows=total)
+                    new = [p for p, i in enumerate(window.index_list) if not done[i]]
+                    for res in results:
+                        for ci in range(len(conds)):
+                            out = res.sub_conds_out[ci][0]
+                            if new:
+                                dst = tuple([slice(None)] * d + [[window.index_list[p] for p in new]])
+                                src = tuple([slice(None)] * d + [new])
+                                video[ci][dst] = out[src].to(video[ci].dtype)
+                        for mi in range(1, nmod):
+                            mod_out = [res.sub_conds_out[ci][mi] for ci in range(len(conds))]
+                            self.combine_context_window_results(
+                                ws.latents[mi], mod_out, res.sub_conds, res.window.get_window_for_modality(mi),
+                                res.window_idx, total, timestep, accum[mi], counts[mi], biases[mi])
+                    for i in window.index_list:
+                        done[i] = True
+                key = ("chain", tuple(tuple(w.index_list[::max(1, len(w.index_list) - 1)]) for w in windows), m)
+                if plan and key not in self._h3md_seen:
+                    self._h3md_seen.add(key)
+                    LOG.info("%s 接续窗口 (chain): %s keep the previous window's result (pin %.2f), no averaging", _TAG,
+                             ", ".join(f"w{wi + 1} latents {a}-{b}" for wi, a, b in plan), m)
+                result_out = []
+                for ci in range(len(conds)):
+                    fin = [video[ci]]
+                    for mi in range(1, nmod):
+                        a = accum[mi][ci]
+                        if self.fuse_method.name != cw.ContextFuseMethods.RELATIVE:
+                            a = a / counts[mi][ci]
+                        fin.append(a)
+                    for mi in range(nmod):
+                        if ws.guide_latents[mi] is not None:
+                            fin[mi] = torch.cat([fin[mi], ws.guide_latents[mi]], dim=ws.modality_dims[mi])
+                    if ws.is_multimodal and len(fin) > 1:
+                        result_out.append(comfy.utils.pack_latents(fin)[0])
+                    else:
+                        result_out.append(fin[0])
+                return result_out
+            finally:
+                self._h3md_pin_now = None
+                for cb in pe.get_all_callbacks(cw.IndexListCallbacks.EXECUTE_CLEANUP, self.callbacks):
+                    cb(self, model, x_in, conds, timestep, model_options)
 
         def get_context_windows(self, model, x_in, model_options):
             cuts = getattr(self, "_h3md_cuts", None)
@@ -742,12 +868,15 @@ def install(handler, crop_guide: bool):
     return handler
 
 
-def apply(model, length=124, overlap=56, fuse_method="pyramid", freenoise=True, crop_guide=True):
-    """Core MiniMax H3 context windows + H3MD additions on a clone of `model`."""
+def apply(model, length=124, overlap=56, fuse_method="pyramid", freenoise=True, crop_guide=True, chain=False,
+          chain_pin=0.0):
+    """Core MiniMax H3 context windows + H3MD additions on a clone of `model` (chain: 接续窗口, 11-08)."""
     from comfy_extras.nodes_context_windows import MiniMaxH3ContextWindowsNode
     res = MiniMaxH3ContextWindowsNode.execute(model, int(length), int(overlap), fuse_method, bool(freenoise), False)
     patched = res.result[0] if hasattr(res, "result") else res[0]
-    install(patched.model_options["context_handler"], bool(crop_guide))
+    handler = install(patched.model_options["context_handler"], bool(crop_guide))
+    handler._h3md_chain = bool(chain)
+    handler._h3md_pin = float(chain_pin)
     return patched
 
 
@@ -755,10 +884,12 @@ def wrap_models(window_mode: dict, low, high):
     wm = normalize_window_mode(window_mode)
     if wm is None:
         return low, high
-    LOG.info("%s window mode: low-res windows %d / overlap %d, high-res windows %d / overlap %d frames, freenoise %s, "
-             "crop guide %s", _TAG, wm["length"], wm["overlap"], wm["highLength"], wm["highOverlap"], wm["freenoise"],
-             wm["cropGuide"])
-    low = apply(low, wm["length"], wm["overlap"], "pyramid", wm["freenoise"], wm["cropGuide"])
+    LOG.info("%s window mode: low-res windows %d / overlap %d%s, high-res windows %d / overlap %d frames, freenoise %s, "
+             "crop guide %s", _TAG, wm["length"], wm["overlap"],
+             f" (接续窗口 chain, pin {wm['chainPin']:.2f})" if wm["chain"] else "", wm["highLength"], wm["highOverlap"],
+             wm["freenoise"], wm["cropGuide"])
+    low = apply(low, wm["length"], wm["overlap"], "pyramid", wm["freenoise"], wm["cropGuide"], wm["chain"],
+                wm["chainPin"])
     if high is not None:
         high = apply(high, wm["highLength"], wm["highOverlap"], "pyramid", wm["freenoise"], wm["cropGuide"])
     return low, high
