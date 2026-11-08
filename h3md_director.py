@@ -1863,6 +1863,13 @@ def encode_group_windows(core, plan, seg, picked, clip, vae, audio_vae, ref_imag
     cuts = tuple(seg.get("windowCuts") or ())
     ranges = WIN.all_window_ranges(int(seg["length"]), wm, cuts)
     parts = seg["groupParts"]
+    # shot ranges with the hard cuts where the windows really break (snapped to 17 frames)
+    eff = []
+    for i, gp in enumerate(parts):
+        st = 17 * round(gp["origin"] / 17) if gp.get("cut") else gp["start"]
+        eff.append([st, gp["end"]])
+        if i and gp.get("cut"):
+            eff[i - 1][1] = st
     media = {}
     positive, latent, texts = [], None, []
     for a, b in ranges:
@@ -1874,7 +1881,7 @@ def encode_group_windows(core, plan, seg, picked, clip, vae, audio_vae, ref_imag
         pm = media[k]
         kw = build_core_kwargs(pm)
         # the shots this window covers (a window never crosses a hard cut, so these are continued shots)
-        cover = [i for i, p in enumerate(parts) if p["start"] < b and p["end"] > a]
+        cover = [i for i, p in enumerate(parts) if eff[i][0] < b and eff[i][1] > a]
         same_pics = all(list(parts[i]["seg"]["images"]) == list(gp["seg"]["images"]) for i in cover)
         combined = None
         if len(cover) > 1 and same_pics:
