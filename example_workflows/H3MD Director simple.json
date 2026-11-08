@@ -1,8 +1,8 @@
 {
  "id": "ae199950-ee64-4d60-918b-94513d88482f",
  "revision": 0,
- "last_node_id": 346,
- "last_link_id": 230,
+ "last_node_id": 345,
+ "last_link_id": 229,
  "nodes": [
   {
    "id": 226,
@@ -264,7 +264,7 @@
    "title": "Note: Model links 模型下载",
    "properties": {},
    "widgets_values": [
-    "Guide: H3MD Director README（ComfyUI-H3MD-Director）\n\n## 模型下载 Model Links\n\n**官方 ComfyUI 版（Comfy-Org）**\n- [Hugging Face: Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3)\n\n**diffusion_models**\n- `minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors` — [smhfacct/Minimax-H3-fl2va-ref2va-hybrid-models](https://huggingface.co/smhfacct/Minimax-H3-fl2va-ref2va-hybrid-models)（fl2va 画质 + ref2va 参考通路；推荐 b25-49）\n\n**text_encoders**（默认 4B + ClipProj）\n- 默认：`qwen3vl_4b_fp8_scaled.safetensors` — [Comfy-Org/Krea-2 › text_encoders](https://huggingface.co/Comfy-Org/Krea-2/tree/main/text_encoders)（5.3 GB，Load CLIP 的 type 选 `krea2`）＋ 投影 `mmh3-4b-ClipProj-v3.1-mlp.safetensors` — [NicoLab28/ClipProj-MiniMax-H3](https://huggingface.co/NicoLab28/ClipProj-MiniMax-H3)（放 `clip_projections/`，节点 [ComfyUI-ClipProj](https://github.com/nicolab28/ComfyUI-ClipProj)）。比 32B 省约 20 GB 内存、十几 GB 显存，画质看不出区别。\n- 可选：`qwen3vl_32b_minimax_h3_int8_convrot.safetensors` — [Comfy-Org/MiniMax-H3 › text_encoders](https://huggingface.co/Comfy-Org/MiniMax-H3/tree/main/text_encoders)（约 25 GB，对很细的提示词更听话）。换法：Load CLIP 选它、type 选 `minimax`，再把 ClipProj Apply 旁路（选中按 Ctrl+B）。\n\n**vae**\n- [minimax_h3_video_vae_fp16.safetensors](https://huggingface.co/Comfy-Org/MiniMax-H3/tree/main/vae)\n- [minimax_h3_audio_vae_fp32.safetensors](https://huggingface.co/Comfy-Org/MiniMax-H3/blob/main/vae/minimax_h3_audio_vae_fp32.safetensors)\n\n**latent_upscale_models**（H3MD Loop 的 upscaler_model）\n- `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors` — [Alissonerdx/Minimax-H3-ComfyUI › latent_upscaler](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI/tree/main/latent_upscaler)\n\n**loras**（本工作流实际开启的）\n- `minimax_h3_DMAD_4step_full_lora_avg_rank_39_bf16.safetensors` — [Kijai/MiniMax-H3-experimental › loras](https://huggingface.co/Kijai/MiniMax-H3-experimental/tree/main/loras)\n- `minimax_h3_fl2v_turbo_4step_v1.3_768p_comfyui_bf16.safetensors` — LightX2V 加速 LoRA — [lightx2v/Minimax-h3-Turbo](https://huggingface.co/lightx2v/Minimax-h3-Turbo/tree/main)\n- `minimax_h3_turbo_v4_step600_ema_DasiwaREF2VAHybridV1_0_curveproj1025_compat_v001.safetensors` — [t8star/minimax_h3_turbo_v4_step600_ema_DasiwaREF2VAHybridV1_0_curveproj1025_compat_v001](https://huggingface.co/t8star/minimax_h3_turbo_v4_step600_ema_DasiwaREF2VAHybridV1_0_curveproj1025_compat_v001/tree/main)\n- `minimax_h3_turbo_4step_10ErosMax_test4_pruned_curveproj1025_exp_v001-T8.safetensors` — [t8star/minimax_h3_turbo_4step_10ErosMax_test4_pruned_curveproj1025_T8](https://huggingface.co/t8star/minimax_h3_turbo_4step_10ErosMax_test4_pruned_curveproj1025_T8)（原文件名没有 `-T8`）\n- `minimax_h3_lms_v1.0_r64.safetensors` — [Alissonerdx/Minimax-H3-ComfyUI](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI)\n- `h3-realism-people-r34l1sm-1.0 strong 0.6-0.8 light.safetensors` — [fal/MiniMax-H3-Realism-People-LoRA](https://huggingface.co/fal/MiniMax-H3-Realism-People-LoRA)（原文件名 `h3-realism-people-t2v-i2v-r2v.safetensors`，触发词 `r34l1sm`）\n- `MiniMaxH3_Enhancer_0.5-1.0_3432130_epoch_10.safetensors` — [Civitai: MiniMaxH3 Enhancers](https://civitai.com/models/3025511/minimaxh3enhancers)\n- `H3_Combat_V2.safetensors` — [JOKER141/MiniMax-H3-Combat-Base-V2](https://huggingface.co/JOKER141/MiniMax-H3-Combat-Base-V2/tree/main)\n- `H3_speed_slider_1.1.safetensors` — **只给名称：请到 Civitai 搜索。作者的模型不是免费的，请支持原作者。**（本工作流默认关闭）\n\n**model_patches**（动作复刻 / 深度控制）\n- [minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors](https://huggingface.co/Comfy-Org/MiniMax-H3/blob/main/model_patches/minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors)\n\n**深度与抠人（H3MD Depth Control 自动调用）**\n- `depth_anything_v2_vitl.pth` — 由 comfyui_controlnet_aux 首次使用时自动下载\n- `sam3.1_multiplex_fp16.safetensors` — ComfyUI 核心 SAM3.1，放 `checkpoints/` — [Comfy-Org/sam3.1 › checkpoints](https://huggingface.co/Comfy-Org/sam3.1/tree/main/checkpoints)\n\n## 模型存放位置 Model Storage Location\n\n```\nComfyUI/\n├── models/\n│   ├── diffusion_models/\n│   │   └── minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors\n│   ├── text_encoders/\n│   │   ├── qwen3vl_4b_fp8_scaled.safetensors        (默认)\n│   │   └── qwen3vl_32b_minimax_h3_int8_convrot.safetensors  (可选)\n│   ├── clip_projections/\n│   │   └── mmh3-4b-ClipProj-v3.1-mlp.safetensors    (默认，配 4B)\n│   ├── vae/\n│   │   ├── minimax_h3_video_vae_fp16.safetensors\n│   │   └── minimax_h3_audio_vae_fp32.safetensors\n│   ├── latent_upscale_models/\n│   │   └── h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors\n│   ├── loras/\n│   │   └── (上面列出的 LoRA)\n│   ├── model_patches/\n│   │   └── minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors\n│   └── checkpoints/\n│       └── sam3.1_multiplex_fp16.safetensors\n└── custom_nodes/\n    └── ComfyUI-H3MD-Director/\n```\n\n## 问题反馈 Report Issue\n- 先把 ComfyUI 更新到最新版，并确认模型都放对了文件夹。\n- H3MD 节点问题：GitHub `1113800942/comfy-h3md-director` › Issues\n- 基于 H3MD，作者 YJ（AGPL-3.0-or-later + 署名条款）\n"
+    "Guide: H3MD Director README（ComfyUI-H3MD-Director）\n\n## 模型下载 Model Links\n\n**官方 ComfyUI 版（Comfy-Org）**\n- [Hugging Face: Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3)\n\n**diffusion_models**\n- `minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors` — [smhfacct/Minimax-H3-fl2va-ref2va-hybrid-models](https://huggingface.co/smhfacct/Minimax-H3-fl2va-ref2va-hybrid-models)（fl2va 画质 + ref2va 参考通路；推荐 b25-49）\n\n**text_encoders**（二选一）\n- `qwen3vl_32b_minimax_h3_int8_convrot.safetensors` — [Comfy-Org/MiniMax-H3 › text_encoders](https://huggingface.co/Comfy-Org/MiniMax-H3/tree/main/text_encoders)（约 25 GB，提示词理解最准）\n- 省显存方案：`qwen3vl_4b_fp8_scaled.safetensors` — [Comfy-Org/Krea-2 › text_encoders](https://huggingface.co/Comfy-Org/Krea-2/tree/main/text_encoders) ＋ 投影 `mmh3-4b-ClipProj-v3.1-mlp.safetensors` — [NicoLab28/ClipProj-MiniMax-H3](https://huggingface.co/NicoLab28/ClipProj-MiniMax-H3)（放 `clip_projections/`，节点 [ComfyUI-ClipProj](https://github.com/nicolab28/ComfyUI-ClipProj)）\n\n**vae**\n- [minimax_h3_video_vae_fp16.safetensors](https://huggingface.co/Comfy-Org/MiniMax-H3/tree/main/vae)\n- [minimax_h3_audio_vae_fp32.safetensors](https://huggingface.co/Comfy-Org/MiniMax-H3/blob/main/vae/minimax_h3_audio_vae_fp32.safetensors)\n\n**latent_upscale_models**（H3MD Loop 的 upscaler_model）\n- `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors` — [Alissonerdx/Minimax-H3-ComfyUI › latent_upscaler](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI/tree/main/latent_upscaler)\n\n**loras**（本工作流实际开启的）\n- `minimax_h3_DMAD_4step_full_lora_avg_rank_39_bf16.safetensors` — [Kijai/MiniMax-H3-experimental › loras](https://huggingface.co/Kijai/MiniMax-H3-experimental/tree/main/loras)\n- `minimax_h3_fl2v_turbo_4step_v1.3_768p_comfyui_bf16.safetensors` — LightX2V 加速 LoRA — [lightx2v/Minimax-h3-Turbo](https://huggingface.co/lightx2v/Minimax-h3-Turbo/tree/main)\n- `minimax_h3_turbo_v4_step600_ema_DasiwaREF2VAHybridV1_0_curveproj1025_compat_v001.safetensors` — [t8star/minimax_h3_turbo_v4_step600_ema_DasiwaREF2VAHybridV1_0_curveproj1025_compat_v001](https://huggingface.co/t8star/minimax_h3_turbo_v4_step600_ema_DasiwaREF2VAHybridV1_0_curveproj1025_compat_v001/tree/main)\n- `minimax_h3_turbo_4step_10ErosMax_test4_pruned_curveproj1025_exp_v001-T8.safetensors` — [t8star/minimax_h3_turbo_4step_10ErosMax_test4_pruned_curveproj1025_T8](https://huggingface.co/t8star/minimax_h3_turbo_4step_10ErosMax_test4_pruned_curveproj1025_T8)（原文件名没有 `-T8`）\n- `minimax_h3_lms_v1.0_r64.safetensors` — [Alissonerdx/Minimax-H3-ComfyUI](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI)\n- `h3-realism-people-r34l1sm-1.0 strong 0.6-0.8 light.safetensors` — [fal/MiniMax-H3-Realism-People-LoRA](https://huggingface.co/fal/MiniMax-H3-Realism-People-LoRA)（原文件名 `h3-realism-people-t2v-i2v-r2v.safetensors`，触发词 `r34l1sm`）\n- `MiniMaxH3_Enhancer_0.5-1.0_3432130_epoch_10.safetensors` — [Civitai: MiniMaxH3 Enhancers](https://civitai.com/models/3025511/minimaxh3enhancers)\n- `H3_Combat_V2.safetensors` — [JOKER141/MiniMax-H3-Combat-Base-V2](https://huggingface.co/JOKER141/MiniMax-H3-Combat-Base-V2/tree/main)\n- `H3_speed_slider_1.1.safetensors` — **只给名称：请到 Civitai 搜索。作者的模型不是免费的，请支持原作者。**（本工作流默认关闭）\n\n**model_patches**（动作复刻 / 深度控制）\n- [minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors](https://huggingface.co/Comfy-Org/MiniMax-H3/blob/main/model_patches/minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors)\n\n**深度与抠人（H3MD Depth Control 自动调用）**\n- `depth_anything_v2_vitl.pth` — 由 comfyui_controlnet_aux 首次使用时自动下载\n- `sam3.1_multiplex_fp16.safetensors` — ComfyUI 核心 SAM3.1，放 `checkpoints/` — [Comfy-Org/sam3.1 › checkpoints](https://huggingface.co/Comfy-Org/sam3.1/tree/main/checkpoints)\n\n## 模型存放位置 Model Storage Location\n\n```\nComfyUI/\n├── models/\n│   ├── diffusion_models/\n│   │   └── minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors\n│   ├── text_encoders/\n│   │   ├── qwen3vl_32b_minimax_h3_int8_convrot.safetensors\n│   │   └── qwen3vl_4b_fp8_scaled.safetensors        (省显存方案)\n│   ├── clip_projections/\n│   │   └── mmh3-4b-ClipProj-v3.1-mlp.safetensors    (省显存方案)\n│   ├── vae/\n│   │   ├── minimax_h3_video_vae_fp16.safetensors\n│   │   └── minimax_h3_audio_vae_fp32.safetensors\n│   ├── latent_upscale_models/\n│   │   └── h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors\n│   ├── loras/\n│   │   └── (上面列出的 LoRA)\n│   ├── model_patches/\n│   │   └── minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors\n│   └── checkpoints/\n│       └── sam3.1_multiplex_fp16.safetensors\n└── custom_nodes/\n    └── ComfyUI-H3MD-Director/\n```\n\n## 问题反馈 Report Issue\n- 先把 ComfyUI 更新到最新版，并确认模型都放对了文件夹。\n- H3MD 节点问题：GitHub `1113800942/comfy-h3md-director` › Issues\n- 基于 H3MD，作者 YJ（AGPL-3.0-or-later + 署名条款）\n"
    ],
    "widgets_values_named": {
     "text": "Guide: H3MD Director README（ComfyUI-H3MD-Director）\n\n## 模型下载 Model Links\n\n**官方 ComfyUI 版（Comfy-Org）**\n- [Hugging Face: Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3)\n\n**diffusion_models**\n- `minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors` — [smhfacct/Minimax-H3-fl2va-ref2va-hybrid-models](https://huggingface.co/smhfacct/Minimax-H3-fl2va-ref2va-hybrid-models)（fl2va 画质 + ref2va 参考通路；推荐 b25-49）\n\n**text_encoders**（二选一）\n- `qwen3vl_32b_minimax_h3_int8_convrot.safetensors` — [Comfy-Org/MiniMax-H3 › text_encoders](https://huggingface.co/Comfy-Org/MiniMax-H3/tree/main/text_encoders)（约 25 GB，提示词理解最准）\n- 省显存方案：`qwen3vl_4b_fp8_scaled.safetensors` — [Comfy-Org/Krea-2 › text_encoders](https://huggingface.co/Comfy-Org/Krea-2/tree/main/text_encoders) ＋ 投影 `mmh3-4b-ClipProj-v3.1-mlp.safetensors` — [NicoLab28/ClipProj-MiniMax-H3](https://huggingface.co/NicoLab28/ClipProj-MiniMax-H3)（放 `clip_projections/`，节点 [ComfyUI-ClipProj](https://github.com/nicolab28/ComfyUI-ClipProj)）\n\n**vae**\n- [minimax_h3_video_vae_fp16.safetensors](https://huggingface.co/Comfy-Org/MiniMax-H3/tree/main/vae)\n- [minimax_h3_audio_vae_fp32.safetensors](https://huggingface.co/Comfy-Org/MiniMax-H3/blob/main/vae/minimax_h3_audio_vae_fp32.safetensors)\n\n**latent_upscale_models**（H3MD Loop 的 upscaler_model）\n- `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors` — [Alissonerdx/Minimax-H3-ComfyUI › latent_upscaler](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI/tree/main/latent_upscaler)\n\n**loras**（本工作流实际开启的）\n- `minimax_h3_DMAD_4step_full_lora_avg_rank_39_bf16.safetensors` — [Kijai/MiniMax-H3-experimental › loras](https://huggingface.co/Kijai/MiniMax-H3-experimental/tree/main/loras)\n- `minimax_h3_fl2v_turbo_4step_v1.3_768p_comfyui_bf16.safetensors` — LightX2V 加速 LoRA — [lightx2v/Minimax-h3-Turbo](https://huggingface.co/lightx2v/Minimax-h3-Turbo/tree/main)\n- `minimax_h3_turbo_v4_step600_ema_DasiwaREF2VAHybridV1_0_curveproj1025_compat_v001.safetensors` — [t8star/minimax_h3_turbo_v4_step600_ema_DasiwaREF2VAHybridV1_0_curveproj1025_compat_v001](https://huggingface.co/t8star/minimax_h3_turbo_v4_step600_ema_DasiwaREF2VAHybridV1_0_curveproj1025_compat_v001/tree/main)\n- `minimax_h3_turbo_4step_10ErosMax_test4_pruned_curveproj1025_exp_v001-T8.safetensors` — [t8star/minimax_h3_turbo_4step_10ErosMax_test4_pruned_curveproj1025_T8](https://huggingface.co/t8star/minimax_h3_turbo_4step_10ErosMax_test4_pruned_curveproj1025_T8)（原文件名没有 `-T8`）\n- `minimax_h3_lms_v1.0_r64.safetensors` — [Alissonerdx/Minimax-H3-ComfyUI](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI)\n- `h3-realism-people-r34l1sm-1.0 strong 0.6-0.8 light.safetensors` — [fal/MiniMax-H3-Realism-People-LoRA](https://huggingface.co/fal/MiniMax-H3-Realism-People-LoRA)（原文件名 `h3-realism-people-t2v-i2v-r2v.safetensors`，触发词 `r34l1sm`）\n- `MiniMaxH3_Enhancer_0.5-1.0_3432130_epoch_10.safetensors` — [Civitai: MiniMaxH3 Enhancers](https://civitai.com/models/3025511/minimaxh3enhancers)\n- `H3_Combat_V2.safetensors` — [JOKER141/MiniMax-H3-Combat-Base-V2](https://huggingface.co/JOKER141/MiniMax-H3-Combat-Base-V2/tree/main)\n- `H3_speed_slider_1.1.safetensors` — **只给名称：请到 Civitai 搜索。作者的模型不是免费的，请支持原作者。**（本工作流默认关闭）\n\n**model_patches**（动作复刻 / 深度控制）\n- [minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors](https://huggingface.co/Comfy-Org/MiniMax-H3/blob/main/model_patches/minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors)\n\n**深度与抠人（H3MD Depth Control 自动调用）**\n- `depth_anything_v2_vitl.pth` — 由 comfyui_controlnet_aux 首次使用时自动下载\n- `sam3.1_multiplex_fp16.safetensors` — ComfyUI 核心 SAM3.1，放 `checkpoints/` — [Comfy-Org/sam3.1 › checkpoints](https://huggingface.co/Comfy-Org/sam3.1/tree/main/checkpoints)\n\n## 模型存放位置 Model Storage Location\n\n```\nComfyUI/\n├── models/\n│   ├── diffusion_models/\n│   │   └── minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors\n│   ├── text_encoders/\n│   │   ├── qwen3vl_32b_minimax_h3_int8_convrot.safetensors\n│   │   └── qwen3vl_4b_fp8_scaled.safetensors        (省显存方案)\n│   ├── clip_projections/\n│   │   └── mmh3-4b-ClipProj-v3.1-mlp.safetensors    (省显存方案)\n│   ├── vae/\n│   │   ├── minimax_h3_video_vae_fp16.safetensors\n│   │   └── minimax_h3_audio_vae_fp32.safetensors\n│   ├── latent_upscale_models/\n│   │   └── h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors\n│   ├── loras/\n│   │   └── (上面列出的 LoRA)\n│   ├── model_patches/\n│   │   └── minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors\n│   └── checkpoints/\n│       └── sam3.1_multiplex_fp16.safetensors\n└── custom_nodes/\n    └── ComfyUI-H3MD-Director/\n```\n\n## 问题反馈 Report Issue\n- 先把 ComfyUI 更新到最新版，并确认模型都放对了文件夹。\n- H3MD 节点问题：GitHub `1113800942/comfy-h3md-director` › Issues\n- 基于 H3MD，作者 YJ（AGPL-3.0-or-later + 署名条款）\n"
@@ -1818,8 +1818,8 @@
     "version": 1,
     "state": {
      "lastGroupId": 6,
-     "lastNodeId": 346,
-     "lastLinkId": 230,
+     "lastNodeId": 345,
+     "lastLinkId": 229,
      "lastRerouteId": 0
     },
     "revision": 0,
@@ -2349,7 +2349,7 @@
         "name": "CLIP",
         "type": "CLIP",
         "links": [
-         230
+         226
         ]
        }
       ],
@@ -2374,13 +2374,13 @@
        }
       },
       "widgets_values": [
-       "qwen3vl_4b_fp8_scaled.safetensors",
-       "krea2",
+       "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+       "minimax",
        "default"
       ],
       "widgets_values_named": {
-       "clip_name": "qwen3vl_4b_fp8_scaled.safetensors",
-       "type": "krea2",
+       "clip_name": "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+       "type": "minimax",
        "device": "default"
       },
       "color": "#2a363b",
@@ -2955,62 +2955,6 @@
       "widgets_values": [
        "动作复刻（TARA，第三方）：\n在总控台点「动作复刻」会自动打开两个 TARA 节点、旁路「Sage 低清」；点「均衡」「高动态」自动恢复（Sage 开、TARA 关）。\n用 TARA 时：导演台里原片当 <Video 1>，不要勾 depth；提示词开头写 motion_transfer:\n需要自己安装 ComfyUI-BFSNodes（Manager → 安装缺失节点）和 TARA LoRA（huggingface.co/Alissonerdx/Minimax-H3-ComfyUI）；没装时点「动作复刻」不会打开 TARA。\n\nMotion copy (TARA, third-party): the Control Panel's 'motion copy' button switches both TARA nodes on and bypasses 'Sage low-res'; 'balanced' / 'high motion' switch back. Source video as <Video 1> (depth off), prompt starts with motion_transfer:. Needs ComfyUI-BFSNodes + the TARA LoRA."
       ]
-     },
-     {
-      "id": 346,
-      "type": "ClipProjApply",
-      "pos": [
-       -380,
-       710
-      ],
-      "size": [
-       210,
-       40
-      ],
-      "flags": {
-       "collapsed": true
-      },
-      "order": 31,
-      "mode": 0,
-      "inputs": [
-       {
-        "localized_name": "clip",
-        "name": "clip",
-        "type": "CLIP",
-        "link": 230
-       },
-       {
-        "localized_name": "projection",
-        "name": "projection",
-        "type": "COMBO",
-        "widget": {
-         "name": "projection"
-        },
-        "link": null
-       }
-      ],
-      "outputs": [
-       {
-        "localized_name": "clip",
-        "name": "clip",
-        "type": "CLIP",
-        "links": [
-         226
-        ]
-       }
-      ],
-      "properties": {
-       "cnr_id": "comfyui-clipproj",
-       "ver": "c01ba8fb8f41b4f2094dbd0b185cdc238fb6134c",
-       "Node name for S&R": "ClipProjApply"
-      },
-      "widgets_values": [
-       "mmh3-4b-ClipProj-v3.1-mlp.safetensors"
-      ],
-      "widgets_values_named": {
-       "projection": "mmh3-4b-ClipProj-v3.1-mlp.safetensors"
-      },
-      "title": "ClipProj Apply (4B → H3)"
      }
     ],
     "groups": [],
@@ -3105,7 +3049,7 @@
      },
      {
       "id": 226,
-      "origin_id": 346,
+      "origin_id": 297,
       "origin_slot": 0,
       "target_id": -20,
       "target_slot": 2,
@@ -3134,14 +3078,6 @@
       "target_id": 344,
       "target_slot": 0,
       "type": "MODEL"
-     },
-     {
-      "id": 230,
-      "origin_id": 297,
-      "origin_slot": 0,
-      "target_id": 346,
-      "target_slot": 0,
-      "type": "CLIP"
      }
     ],
     "extra": {

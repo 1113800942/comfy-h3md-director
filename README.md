@@ -22,7 +22,7 @@ generate them segment by segment, keep every finished segment on disk, and repai
 - **Repair instead of re-render**: `rerun_segments` re-renders only the bad segments, locked to their neighbours at both ends.
 - **Motion copy**: a reference video drives the motion (depth + SAM3 + Fun ControlNet); the look comes from your photos.
 - **No long-video drift**: `lowres_anchor` keeps colors and faces stable over a whole single-scene take.
-- **Fits your GPU**: automatic splitting by VRAM, high-res strip tiling, disk cache and resume; the default 4B + ClipProj text encoder saves about 20 GB of RAM and 10+ GB of VRAM.
+- **Fits your GPU**: automatic splitting by VRAM, high-res strip tiling, disk cache and resume; the optional 4B + ClipProj text encoder saves 10+ GB.
 
 ## Install
 
@@ -141,8 +141,8 @@ changes:
 
 **Example workflows**
 * `H3MD Director simple.json` — **start here** (v0.3): Control Panel + Director + preview; models / sampler / save in
-  subgraphs; no rgthree, Crystools, easy-use, LayerStyle or TE-Speed nodes. Text encoder: 4B + ClipProj by default
-  (inside the models subgraph); the note says how to switch to 32B.
+  subgraphs; no rgthree, Crystools, easy-use, LayerStyle or TE-Speed nodes. Low VRAM: swap the 32B text encoder for 4B +
+  ClipProj (the full workflow has the ClipProj node bypassed; see the text encoder notes below).
 * `H3MD Director.json` — the full setup used for the samples; adds face refine, RIFE interpolation to 48 fps, one extra
   refine step and a few convenience nodes.
 
@@ -151,7 +151,7 @@ changes:
 | ComfyUI 0.43+ (core MiniMax H3 nodes) | models, sampler, VAE | **required** | — |
 | H3MD Director (this pack) | Director, Loop Sampler, Save Video Interp, depth / SAM3 motion copy | **required** | — |
 | [ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) | SageAttention and chunked feed-forward patches (less VRAM) | recommended (simple + full) | runs, but needs more VRAM; the SageAttention patch also needs the SageAttention package, otherwise bypass that node |
-| [ComfyUI-ClipProj](https://github.com/nicolab28/ComfyUI-ClipProj) | 4B text encoder projection (default), saves about 20 GB RAM and 10+ GB VRAM | **yes, by default** (the example workflows use the 4B encoder) | pick the 32B encoder in Load CLIP (type `minimax`) and bypass ClipProj Apply |
+| [ComfyUI-ClipProj](https://github.com/nicolab28/ComfyUI-ClipProj) | 4B text encoder projection, saves 10+ GB VRAM | only with the 4B encoder | use the 32B encoder |
 | [ComfyUI-VFI](https://github.com/GACLove/ComfyUI-VFI) | RIFE interpolation in `H3MD Save Video Interp` | optional | keep `interpolate` off: 24 fps output |
 | [ComfyUI-VOSR2](https://github.com/ylchen333/ComfyUI-VOSR2) (simple) / TE-Speed-VOSR2 (full) | face refine in `H3MD Save Video Interp` | optional | keep `face_refine` off (default) |
 | [ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler) | face refine with `refine_model = SeedVR2`: its DiT / VAE loaders go to `seedvr2_model` / `seedvr2_vae` (TE-Speed SeedVR2 also works) | optional | use VOSR2, or keep `face_refine` off |
@@ -177,12 +177,12 @@ hybrid b25-49 int8 model, 32B int8 text encoder, 4-step turbo LoRAs, two-pass sa
 | 1088×1920 / 1920×1088 | about 8–12 min | about 1.5–2 h (11 segments) | 2–3 | about 35 GB | about 70 GB |
 
 * The first segment of a run takes about a minute longer (model loading).
-* Model files: base model 19.5 GB; 4B text encoder 5.3 GB + ClipProj 0.5 GB (default; or the 32B encoder, 25.3 GB); video VAE
+* Model files: base model 19.5 GB; 32B text encoder 25.3 GB (or 4B encoder 5.3 GB + ClipProj 0.5 GB); video VAE
   4.9 GB; audio VAE 0.6 GB; each turbo LoRA 0.3–1.8 GB. Plan for about 55 GB of models plus the cache.
 * **4B encoder + ClipProj vs 32B** (704×1280, same seed): same picture quality and the same speed (203 s vs 199 s per
   segment); it only saves VRAM (10+ GB) and follows detailed prompts a little less closely.
 * The cache is about 3 GB per 243 frames at 1088×1920 (fp16); delete it after saving (`delete_cache_after_save`).
-* **Only tested on an RTX 5090.** Smaller cards should start with 704×1280, segments of about
+* **Only tested on an RTX 5090.** Smaller cards should start with the 4B encoder + ClipProj, 704×1280, segments of about
   10 s and few, small reference pictures (see **Low VRAM**). The tiling estimate learns your card after its first
   out-of-memory retry.
 * Please post your GPU, resolution and time per segment in
@@ -421,10 +421,12 @@ the missing-models popup only downloads into registered `models/` folders and do
   clear the cache folder.
 * This version changed the sampling engine: older caches are not resumed, and an old workflow's `H3MD Loop Options`
   node should be deleted and re-added (its options changed).
-* **Text encoder**: the example workflows use 4B (`qwen3vl_4b_fp8_scaled`, Load CLIP type `krea2`) + ClipProj by
-  default: about 20 GB less RAM and 10+ GB less VRAM than 32B, no visible loss in image quality, only slightly weaker
-  understanding of very detailed prompts. For the closest prompt following, pick 32B (`qwen3vl_32b_minimax_h3_int8_convrot`,
-  type `minimax`) and bypass ClipProj Apply. **Keep one encoder for a whole piece**; do not switch when re-rendering
+* **Text encoder**: 32B (`qwen3vl_32b_minimax_h3_int8_convrot`) follows prompts best. Short on VRAM? Use 4B
+  (`qwen3vl_4b_fp8_scaled`, Load CLIP type `krea2`) + ClipProj: it saves 10+ GB with no loss in image quality, only
+  slightly weaker prompt understanding (details can differ a little from 32B). Measured on ComfyUI 0.44 (RTX 5090,
+  64 GB): it encodes much more slowly (29 s per encode against 5 s with 32B; window mode encodes every window) and
+  peak RAM / VRAM were almost the same (51 / 29.7 GB against 50 / 30.9 GB), because ComfyUI streams the 32B from
+  disk. Use it when the 32B does not load at all. **Keep one encoder for a whole piece**; do not switch when re-rendering
   segments with `rerun_segments`.
 * **Fast-motion ghosting**: a fast arm swing can briefly show ghost hands (4 frames are packed into 1 latent step, plus
   few sampling steps). Re-render that segment with a new seed via `rerun_segments`.
@@ -504,8 +506,8 @@ how we solved them — feel free to build on them.
   already drifted. **The anchor must be a source that has not drifted.**
 
 ### 8. Text encoder: 32B vs 4B + ClipProj
-- 4B + ClipProj saves about 20 GB of RAM and 10+ GB of VRAM with no visible loss in image quality, only slightly weaker
-  prompt understanding, so it is the default since 0.3.7. Don't switch encoders in the middle of one piece.
+- 4B + ClipProj saves 10+ GB of VRAM with no loss in image quality, only slightly weaker prompt understanding. Fine for
+  generating from scratch; don't switch encoders in the middle of one piece.
 
 ### 9. Method
 - **Search the community before testing**: a GPU runs only a few tests a day.
