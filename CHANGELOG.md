@@ -30,7 +30,7 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   RefMods are switched off in window mode. 窗口模式和动作复刻下自动关闭深度图 / 骨骼图控制（视频改作普通参考视频）；
   窗口模式下自动关闭 RefMod。
 * Memory: chunked decode (~10 s chunks written straight to the cache) and per-window high-res strip planning; 2K
-  (2560×1408, 30 s) runs on 64 GB RAM. 内存：分块解码（约 10 秒一块直接写进缓存）、高清条带按窗口估算；2K 30 秒 64 GB 内存可跑。
+  (2560×1408) runs on 64 GB RAM. 内存：分块解码（约 10 秒一块直接写进缓存）、高清条带按窗口估算；2K 在 64 GB 内存上可跑。
 * Example workflows now use the 4B text encoder + ClipProj by default (about 20 GB less RAM and 10+ GB less VRAM than
   32B, no visible difference); the 32B encoder stays available. 示例工作流默认改用 4B 文本编码器 + ClipProj
   （比 32B 省约 20 GB 内存、十几 GB 显存，画质看不出区别）；32B 仍可选。

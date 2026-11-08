@@ -98,7 +98,7 @@ changes:
   `"redraw": [[4, 8]]` re-renders only seconds 4–8 of a finished run with a new seed: everything else stays
   frame-identical, the previous version is kept in the cache folder.
 * Memory: the result is decoded and written in ~10 s chunks, and the high-res pass plans its strips per window, so
-  2K works on 64 GB RAM (measured 41 min for 30 s at 2560×1408 on an RTX 5090).
+  2K works on 64 GB RAM (measured: 21 s at 2560×1408 in 41 min on an RTX 5090).
 * About 25% slower than the old chain. Turn it off to get the old behaviour back exactly.
 
 ## More (click to open)
