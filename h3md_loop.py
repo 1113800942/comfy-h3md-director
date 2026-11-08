@@ -131,6 +131,77 @@ def decode_video_seam_context(vae, video: torch.Tensor, prev: dict | None, trim:
     return imgs[drop:]
 
 
+# --- window-exp (11-07): chunked decode of a long window-mode group ---
+# A group (up to ~60 s) decoded in one piece needed ~3x its frames in RAM (68 GB for 60 s at 1088x1664).  Here the
+# latent is decoded a few clips at a time, straight into the disk cache: each chunk starts CLIP-aligned with
+# DECODE_CTX_CLIPS clips of the latent right before it as VAE warm-up (dropped again, as seam_decode_context does) and
+# ends 2 latents into the next clip (a valid 5n+2 stream), whose 5 frames are dropped again.  RAM ~ one chunk.
+DECODE_CHUNK_CLIPS = 14   # ~238 frames (~10 s) per chunk
+DECODE_CTX_CLIPS = 2
+
+
+class ChunkedFrames:
+    """[N,H,W,3] frames of a [1,C,5n+2,h,w] video latent, decoded chunk by chunk on access (slices only).  Behaves
+    like the decoded tensor for h3md_cache.SegmentCache.write and for tail slices."""
+
+    def __init__(self, vae, video: torch.Tensor, chunk_clips: int = DECODE_CHUNK_CLIPS, ctx: int = DECODE_CTX_CLIPS,
+                 decode=None):
+        if video.ndim != 5 or video.shape[0] != 1 or (int(video.shape[2]) - 2) % CLIP_TOKENS:
+            raise ValueError(f"not a 5n+2 video latent: {tuple(video.shape)}")
+        self.vae, self.video, self.ctx = vae, video, int(ctx)
+        self.decode = decode or decode_video
+        self.n_clips = (int(video.shape[2]) - 2) // CLIP_TOKENS
+        self.chunk = max(1, int(chunk_clips))
+        self.n = self.n_clips * CLIP_FRAMES + 5
+        self._cur = None    # (first frame, frames)
+        self._hw = None
+
+    def _decode_chunk(self, j0: int):
+        j1 = min(self.n_clips, j0 + self.chunk)
+        c = min(self.ctx, j0)
+        last = j1 == self.n_clips
+        lat = self.video[:, :, CLIP_TOKENS * (j0 - c):CLIP_TOKENS * j1 + 2]
+        imgs = self.decode(self.vae, lat)
+        want = CLIP_FRAMES * (j1 - j0) + (5 if last else 0)
+        if imgs.shape[0] != CLIP_FRAMES * (j1 - j0 + c) + 5:
+            raise RuntimeError(f"chunk decode gave {imgs.shape[0]} frames, expected {CLIP_FRAMES * (j1 - j0 + c) + 5}")
+        out = imgs[CLIP_FRAMES * c:CLIP_FRAMES * c + want].to("cpu")
+        del imgs
+        self._cur = (CLIP_FRAMES * j0, out)
+        return self._cur
+
+    def _frames(self, a: int, b: int):
+        parts = []
+        while a < b:
+            if self._cur is None or not (self._cur[0] <= a < self._cur[0] + self._cur[1].shape[0]):
+                self._decode_chunk(min(a // CLIP_FRAMES, self.n_clips - 1) // self.chunk * self.chunk)
+            f0, fr = self._cur
+            e = min(b, f0 + fr.shape[0])
+            parts.append(fr[a - f0:e - f0])
+            a = e
+        return parts[0] if len(parts) == 1 else torch.cat(parts, 0)
+
+    @property
+    def shape(self):
+        if self._hw is None:
+            self._hw = tuple(self._frames(0, 1).shape[1:])
+        return (self.n,) + self._hw
+
+    def __getitem__(self, idx):
+        if not isinstance(idx, slice):
+            raise TypeError("ChunkedFrames supports slices only")
+        a, b, step = idx.indices(self.n)
+        if step != 1:
+            raise TypeError("ChunkedFrames supports step-1 slices only")
+        return self._frames(a, b) if b > a else self._frames(0, 1)[:0]
+
+
+def chunked_decode_ok(video: torch.Tensor, window_mode) -> bool:
+    """Chunked decode for window-mode segments longer than one chunk."""
+    return bool(window_mode) and video.ndim == 5 and (int(video.shape[2]) - 2) % CLIP_TOKENS == 0 and \
+        (int(video.shape[2]) - 2) // CLIP_TOKENS > DECODE_CHUNK_CLIPS
+
+
 def encode_video(vae, frames: torch.Tensor) -> torch.Tensor:
     """Same as core VAEEncode on [N,H,W,3] frames -> [1,24,T,h,w] (H3 video VAE)."""
     return vae.encode(frames[..., :3])
@@ -1002,7 +1073,12 @@ class H3MDLoopSampler:
                 report[-1]["lowres_carry"] = list(prev_low.shape)
             if cache is not None:  # decode now, write to disk, free RAM
                 v, a = final["samples"].unbind()
-                imgs = decode_video_seam_context(vae, v, ctx_prevs[-1], trims[-1], ctx_clips, where)  # H3MD-Exp
+                if chunked_decode_ok(v, isinstance(plan, dict) and plan.get("windowMode")) and not self._seam.active:
+                    imgs = ChunkedFrames(vae, v)   # window-exp: decoded chunk by chunk while it is written to disk
+                    LOG.info("%s %s: chunked decode (%d frames, %d-clip chunks)", _TAG, where, imgs.n,
+                             DECODE_CHUNK_CLIPS)
+                else:
+                    imgs = decode_video_seam_context(vae, v, ctx_prevs[-1], trims[-1], ctx_clips, where)  # H3MD-Exp
                 ctx_prevs[-1] = None
                 nxt = segs[indices[step + 1]]["overlapIn"] if step + 1 < len(indices) else 0
                 if nxt > 0 and lowres_prefix_mode in ("pixel_reencode", BETA) and imgs.shape[0] >= nxt:

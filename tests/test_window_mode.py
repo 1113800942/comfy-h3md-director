@@ -389,17 +389,63 @@ class TilingWindow(unittest.TestCase):
 
 class AutoGroup(unittest.TestCase):
     def test_ram(self):
-        self.assertEqual(WIN.auto_group_length(1088, 1664, 64)[0], 906)
-        self.assertEqual(WIN.auto_group_length(2560, 1408, 64)[0], 447)
-        self.assertEqual(WIN.auto_group_length(1088, 1664, 32)[0], 243)
-        self.assertEqual(WIN.auto_group_length(1088, 1664, 128)[0], 1450)
-        for ram in (16, 32, 48, 64, 96):
-            for wh in ((1088, 1664), (2560, 1408)):
-                f = WIN.auto_group_length(*wh, ram)[0]
-                self.assertEqual(f % 17, 5)
+        self.assertEqual(WIN.auto_group_length(1088, 1664, 64)[0], 1450)
+        self.assertEqual(WIN.auto_group_length(2560, 1408, 64)[0], 1450)
+        self.assertEqual(WIN.auto_group_length(1088, 1664, 32)[0], 719)
 
     def test_plan_note(self):
         p = D.parse_plan(multi_plan())
         self.assertTrue(any("groups up to" in n for n in p["notes"]))
         p = D.parse_plan(multi_plan({"groupLength": 1445}))
         self.assertFalse(any("groups up to" in n for n in p["notes"]))
+
+
+def _fake_decode(vae, lat):
+    """Fake H3 video VAE: [1,C,5m+2,h,w] -> 17m+5 frames, each frame = the value of the latent it comes from."""
+    import torch
+    t = int(lat.shape[2])
+    vals = lat[0, 0, :, 0, 0]
+    out = []
+    for k in range(t):
+        out += [float(vals[k])] * (1 if k % 5 == 0 else 4)
+    return torch.tensor(out).view(-1, 1, 1, 1).expand(-1, 2, 2, 3).clone()
+
+
+class ChunkedDecode(unittest.TestCase):
+    def test_same_as_full(self):
+        import torch
+        import h3md_loop as L
+        for n_clips in (15, 29, 44, 84):
+            T = 5 * n_clips + 2
+            v = torch.arange(T).float().view(1, 1, T, 1, 1).expand(1, 2, T, 1, 1).clone()
+            full = _fake_decode(None, v)
+            cf = L.ChunkedFrames(None, v, chunk_clips=14, ctx=2, decode=_fake_decode)
+            self.assertEqual(cf.shape[0], full.shape[0])
+            got = torch.cat([cf[i:i + 16] for i in range(0, cf.shape[0], 16)], 0)
+            self.assertTrue(torch.equal(got, full), n_clips)
+            self.assertTrue(torch.equal(cf[-39:], full[-39:]))
+
+    def test_switch(self):
+        import torch
+        import h3md_loop as L
+        self.assertTrue(L.chunked_decode_ok(torch.zeros(1, 1, 5 * 20 + 2, 1, 1), {"length": 243}))
+        self.assertFalse(L.chunked_decode_ok(torch.zeros(1, 1, 5 * 10 + 2, 1, 1), {"length": 243}))
+        self.assertFalse(L.chunked_decode_ok(torch.zeros(1, 1, 5 * 20 + 2, 1, 1), None))
+
+
+class ChunkedCacheWrite(unittest.TestCase):
+    def test_write(self):
+        import tempfile, torch
+        import numpy as np
+        import comfy.nested_tensor as NT
+        import h3md_loop as L
+        T = 5 * 30 + 2
+        v = torch.arange(T).float().view(1, 1, T, 1, 1).expand(1, 2, T, 1, 1).clone()
+        full = _fake_decode(None, v)
+        cf = L.ChunkedFrames(None, v, chunk_clips=14, ctx=2, decode=_fake_decode)
+        with tempfile.TemporaryDirectory() as d:
+            cache = C.SegmentCache(d, "abc" * 6, True)
+            lat = {"samples": NT.NestedTensor((v, torch.zeros(1, 2, 3)))}
+            cache.write(0, "k", lat, cf, None, {"trim": 0})
+            fr = np.asarray(cache.frames(0))
+            self.assertTrue(np.allclose(fr, full.numpy().astype(np.float16)))
