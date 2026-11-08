@@ -498,15 +498,29 @@ def _detail_body(prompt: str) -> str:
     return ""
 
 
+SHOT_TAG = re.compile(r"\[Shot \d+\]\s*", re.I)
+_SENTENCE = re.compile(r"(?<=[.!?])\s+")
+
+
+def _continuation(base_body: str, body: str) -> str:
+    """11-08 (2:20 MV: a continued shot came out as a CUT): the later shot's text without its '[Shot N]' tag and
+    without the sentences the first shot already says (style preamble, identity / singing lines).  A second
+    '[Shot 1]' after a repeated style preamble reads as a new shot to H3."""
+    seen = {s.strip() for s in _SENTENCE.split(SHOT_TAG.sub("", base_body)) if s.strip()}
+    return " ".join(s.strip() for s in _SENTENCE.split(SHOT_TAG.sub("", body)) if s.strip() and s.strip() not in seen)
+
+
 def combine_part_prompts(parts):
     """3e fix (11-07 ghost at a continuation): a window that covers the end of one continued shot and the start of the
     next gets ONE prompt telling both, in order: the first shot's full prompt, then for each later shot
-    'At about N s into this part, the shot continues: <its detailed_description>'.  parts = [(seconds into the window
-    where the shot starts, prompt)], in time order.  The neighbouring windows then describe the same thing in their
-    overlap (before: each window took one shot's prompt, so the overlap mixed two different actions -> double image)."""
+    'At about N s into this part, with no cut, the same shot continues: <its new sentences>'.  parts = [(seconds into
+    the window where the shot starts, prompt)], in time order.  The neighbouring windows then describe the same thing
+    in their overlap (before: each window took one shot's prompt, so the overlap mixed two different actions ->
+    double image)."""
     base = parts[0][1]
-    extra = " ".join(f"At about {max(0.0, sec):.0f} s into this part, the shot continues: {_detail_body(p)}"
-                     for sec, p in parts[1:] if _detail_body(p))
+    base_body = _detail_body(base)
+    extra = " ".join(f"At about {max(0.0, sec):.0f} s into this part, with no cut, the same shot continues: {txt}"
+                     for sec, p in parts[1:] if (txt := _continuation(base_body, _detail_body(p))))
     if not extra:
         return base
     out = []

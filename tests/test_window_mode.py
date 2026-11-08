@@ -509,7 +509,7 @@ class GroupWindowPrompts(unittest.TestCase):
             pr = kw["prompt"]
             if a < 294 < b:            # straddles the continuation 1 -> 2: both actions, in order
                 self.assertIn("ACTION1", pr)
-                self.assertIn("the shot continues: ACTION2", pr)
+                self.assertIn("with no cut, the same shot continues: ACTION2", pr)
             if a >= cut:               # after the hard cut: shot 3 only
                 self.assertIn("ACTION3", pr)
                 self.assertNotIn("ACTION2", pr)
@@ -729,7 +729,7 @@ class ReviewFixes(unittest.TestCase):
         wps = WIN.auto_window_prompts(pr, 719, 243, 56)
         self.assertEqual(sum(w["events"] for w in wps), 2)
         self.assertEqual(sum("sits down" in w["prompt"] for w in wps), 1)
-        self.assertIn("the shot continues: B", WIN.combine_part_prompts(
+        self.assertIn("the same shot continues: B", WIN.combine_part_prompts(
             [(0, "integrated_multimodal_description:\nA\n\n"), (3, "integrated_multimodal_description:\nB\n\n")]))
 
     def test_short_shot_with_cut_keeps_both_prompts(self):
@@ -912,6 +912,25 @@ class RefsPronouns(unittest.TestCase):
             a, b = c[1][WIN.RANGE_KEY]
             first = float(kw["ref_audios"]["ref_audio_0"]["waveform"][0, 0, 0])
             self.assertEqual(first, float(round((g["locked"]["offset"] + a / 24) * 100)), (a, b))
+
+
+class ContinuationNoCut(unittest.TestCase):
+    """11-08 2:20 MV: the S2 -> S3 continuation came out as a cut - the window prompt repeated S3's style preamble
+    and its own '[Shot 1]'.  The later shot now adds only its new sentences, without a shot tag, as 'with no cut'."""
+
+    def test_combined_text(self):
+        style = "Photorealistic footage, no captions. All motion plays at natural real-time speed."
+        a = (f"summary:\nx.\n\ndetailed_description:\n{style} [Shot 1] One tracking shot: she walks toward the "
+             "camera. Her face keeps the exact identity of <Picture 1>. She is the only person.\n\n")
+        b = (f"summary:\ny.\n\ndetailed_description:\n{style} [Shot 1] The same tracking shot continues: she stops "
+             "at the railing. Her face keeps the exact identity of <Picture 1>. She is the only person.\n\n")
+        out = WIN.combine_part_prompts([(0, a), (8, b)])
+        body = WIN._detail_body(out)
+        self.assertEqual(body.count("[Shot"), 1)
+        self.assertEqual(body.count("Photorealistic footage"), 1)
+        self.assertEqual(body.count("She is the only person."), 1)
+        self.assertIn("At about 8 s into this part, with no cut, the same shot continues: The same tracking shot "
+                      "continues: she stops at the railing.", body)
 
 
 class WindowPlanExportImport(unittest.TestCase):
