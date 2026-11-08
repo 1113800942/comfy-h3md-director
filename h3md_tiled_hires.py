@@ -661,6 +661,22 @@ def _free_after_oom():
         pass
 
 
+def window_shape(model_patcher, video_shape, audio_t: int):
+    """window-exp: with context windows on the model, each model call sees one window, not the whole shot - plan the
+    strips for the window length (latents) and the matching share of the audio, else for the whole shot."""
+    try:
+        handler = (getattr(model_patcher, "model_options", None) or {}).get("context_handler")
+        cl = int(getattr(handler, "context_length", 0) or 0)
+    except Exception:
+        cl = 0
+    t = int(video_shape[2])
+    if cl <= 0 or cl >= t:
+        return tuple(video_shape), int(audio_t)
+    shp = list(video_shape)
+    shp[2] = cl
+    return tuple(shp), max(1, math.ceil(int(audio_t) * cl / t))
+
+
 def _run(executor, state, req, stats, noise, latent_image, sampler, sigmas, denoise_mask, callback, disable_pbar,
          seed, latent_shapes):
     """Plan, run, and on CUDA out-of-memory retry the high-res pass with more strips (the low-res result is kept):
@@ -678,8 +694,8 @@ def _run(executor, state, req, stats, noise, latent_image, sampler, sigmas, deno
         attempt += 1
         plan = None
         try:
-            plan = plan_tiles(patcher, [tuple(x) for x in latent_shapes][0], tuple(latent_shapes[1])[-1],
-                              guider.conds, req, min_tiles=min_tiles, device=device)
+            vshape, audio_t = window_shape(patcher, [tuple(x) for x in latent_shapes][0], tuple(latent_shapes[1])[-1])
+            plan = plan_tiles(patcher, vshape, audio_t, guider.conds, req, min_tiles=min_tiles, device=device)
             stats["plan"] = plan
             with FF.chunked_mlp(ff_rows):
                 out = _run_plan(executor, state, plan, stats, noise, latent_image, sampler, sigmas, denoise_mask,

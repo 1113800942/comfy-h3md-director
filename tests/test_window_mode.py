@@ -369,3 +369,19 @@ class LoopProgress(unittest.TestCase):
             self.assertTrue(st.dir.endswith("seg_000_progress"))
             self.assertIsNone(L.progress_store(cache, 0, "k", D.parse_plan(plan(length=345))))
             self.assertIsNone(L.progress_store(None, 0, "k", plan_on))
+
+
+class TilingWindow(unittest.TestCase):
+    def test_window_shape(self):
+        import h3md_tiled_hires as T
+
+        class H:
+            context_length = 52
+
+        class P:
+            model_options = {"context_handler": H()}
+
+        class P0:
+            model_options = {}
+        self.assertEqual(T.window_shape(P(), (1, 24, 422, 104, 68), 2400), ((1, 24, 52, 104, 68), 296))
+        self.assertEqual(T.window_shape(P0(), (1, 24, 422, 104, 68), 2400), ((1, 24, 422, 104, 68), 2400))
