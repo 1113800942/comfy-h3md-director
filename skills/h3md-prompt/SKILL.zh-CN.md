@@ -67,6 +67,9 @@ non_diegetic_music:
   `At 00:07.9 she sings: <d>[English] ...</d>.`，或者 `[8s] she raises one hand, then lowers it.`。系统把每一条只分给一个
   窗口（约 8–10 秒），并告诉那个窗口在第几秒，所以不会演两遍、唱两遍；没有动作的窗口自动写“延续，不加新动作”。
   只有时间后面的第一句话属于它，其余文字整个镜头共用。两个动作隔约 8 秒。不写时间时每个窗口拿到整个镜头的文字，只能写持续的状态。
+- 续接镜头：开头写 "The same ... continues without a cut"，先写上一个镜头结束时的状态，每个新动作、每次镜头变化都写时间
+  （`[3s] she gradually slows down ...`），并写成慢慢变化。实测（11-08）：不写时间的 "she slows down, stops at the railing and
+  turns toward the sea, the camera settling into a medium shot" 变成了一个硬切，后一个窗口又演了一遍（重影）。
 - summary 里带 “then / after / finally” 的句子会自动从窗口提示词里去掉；最好 summary 本来就只写不变的东西。
 - 参考照片自动跟着窗口走：一个窗口只带它自己文字里提到的照片。
 - 对白和歌词一律写在 `<d>[English] ...</d>` 里（实测：不加会说得听不懂）。
