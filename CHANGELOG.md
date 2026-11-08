@@ -2,6 +2,26 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.3.7-beta] — 2026-11-07
+**In short / 简要：**
+* **Seamless long video (window mode, beta)**: one switch on the Director. Continued shots are rendered together on
+  one timeline (no continuation seams); hard cuts stay cuts; long plans are grouped only at hard cuts. 导演台一个开关：
+  续接的镜头在同一条时间线上一起生成（没有续接接缝）；硬切照常；长计划只在硬切处分组。
+
+**Details / 详细：**
+* Core MiniMax H3 context windows (ComfyUI 0.44+) with H3MD additions: low-res windows 243 / overlap 56, high-res
+  175 / 22 (measured: no double faces, no window seams). 核心上下文窗口 + H3MD 扩展：低清 243 / 重叠 56、高清 175 / 22（实测无重影、无窗口接缝）。
+* Each shot's prompt, pictures, reference videos (sliced per window, so guides longer than ~15 s work) and audio follow
+  its own time range. 每个镜头的提示词、参考图、参考视频（按窗口切开，超过约 15 秒也能用）、音频只管自己的时间段。
+* Timed actions `[Ns] ...` and in-shot hard cuts `[Ns cut] ...` in `detailed_description`; each action is played once;
+  pictures are left out of windows whose shot does not show the person; summary sentences about the order of events
+  are left out per window. 提示词里的时间动作和镜头内硬切；每个动作只演一次；镜头里没有人物的窗口不带人物照片；
+  summary 里讲先后的句子按窗口自动去掉。
+* Progress cache: an interrupted run resumes at the last sampling step; the low-res result is kept, and
+  `windowMode.preview` renders the low-res pass only (about half the time), reused by the full run. 进度缓存：中断后从
+  最后一步接着跑；低清结果保留；低清预览约省一半时间，之后的完整版直接复用。
+* Off = exactly the old behaviour (same cache keys). 关闭时和原来完全一样（缓存键不变）。
+
 ## [0.3.6] — 2026-11-07
 **In short / 简要：**
 * Face refine save node: the face-refine options (detector … feather) are no longer greyed out when `face_refine` is

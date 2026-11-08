@@ -79,6 +79,20 @@ generate them segment by segment, keep every finished segment on disk, and repai
 H3MD Director --plan--> H3MD Loop Sampler (+ H3MD Loop Options) --long video--> H3MD Save Video Interp
 ```
 
+## Seamless long video (window mode, beta)
+Tick **Seamless long video** at the top of the Director. Your plan stays exactly as it is; only how it is rendered
+changes:
+* Shots that continue each other are rendered **together on one timeline** with overlapping context windows, so there
+  is **no continuation seam** and no drift from segment to segment.
+* Hard cuts stay hard cuts (the windows break there, nothing is blended across a cut).
+* A very long plan is split into groups (about 60 s each) **only at a hard cut**, where the picture changes anyway.
+  If one continuous take is longer than a group, the Director says where to put a hard cut.
+* Each shot keeps its own prompt, pictures, reference video and music for its own time range; reference videos longer
+  than H3's ~15 s limit work (each window gets its own slice).
+* Inside one shot you can also write timed actions and cuts in `detailed_description`, e.g.
+  `[3s] she raises one hand to her hair. [7s cut] Close-up by the lake at sunset ...` (see the prompt skill).
+* About 25% slower than the old chain. Turn it off to get the old behaviour back exactly.
+
 ## More (click to open)
 
 <details>
