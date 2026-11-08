@@ -1,7 +1,7 @@
 {
  "id": "ae199950-ee64-4d60-918b-94513d88482f",
  "revision": 0,
- "last_node_id": 345,
+ "last_node_id": 346,
  "last_link_id": 229,
  "nodes": [
   {
@@ -467,9 +467,7 @@
      "localized_name": "semantic_bridge",
      "name": "semantic_bridge",
      "type": "H3MD_SEMANTIC_BRIDGE",
-     "links": [
-      220
-     ]
+     "links": []
     }
    ],
    "properties": {
@@ -691,6 +689,76 @@
    ],
    "color": "#432",
    "bgcolor": "#653"
+  },
+  {
+   "id": 346,
+   "type": "H3MDSemanticBridge",
+   "pos": [
+    800,
+    720
+   ],
+   "size": [
+    300,
+    110
+   ],
+   "flags": {},
+   "order": 7,
+   "mode": 4,
+   "title": "Semantic Bridge (bypassed - Ctrl+B to use) 语义桥（默认旁路，Ctrl+B 打开）",
+   "inputs": [
+    {
+     "localized_name": "bridge_chain",
+     "name": "bridge_chain",
+     "shape": 7,
+     "type": "H3MD_SEMANTIC_BRIDGE",
+     "link": null
+    },
+    {
+     "localized_name": "bridge",
+     "name": "bridge",
+     "type": "COMBO",
+     "widget": {
+      "name": "bridge"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "strength_mode",
+     "name": "strength_mode",
+     "type": "COMBO",
+     "widget": {
+      "name": "strength_mode"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "strength",
+     "name": "strength",
+     "type": "FLOAT",
+     "widget": {
+      "name": "strength"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "semantic_bridge",
+     "name": "semantic_bridge",
+     "type": "H3MD_SEMANTIC_BRIDGE",
+     "links": [
+      220
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "H3MDSemanticBridge"
+   },
+   "widgets_values": [
+    "MiniMaxH3_SemanticBridge_v1_T8_Compat.safetensors",
+    "manual",
+    0.12
+   ]
   }
  ],
  "links": [
@@ -784,8 +852,8 @@
   ],
   [
    220,
-   337,
-   9,
+   346,
+   0,
    339,
    6,
    "H3MD_SEMANTIC_BRIDGE"

@@ -87,6 +87,32 @@ def test_outputs_and_fps_lock():
     assert res[5] == 60.0
 
 
+def test_styles_switch_no_semantic_bridge():
+    """0.3.9-beta: no style turns a semantic bridge on (the output stays, always off)."""
+    node = CP.H3MDControlPanel()
+    for style in CP.STYLES:
+        assert CP.BRIDGES[style] is None and CP.bridge_for(style) is None
+        res = node.run(object(), object(), 704, 1280, False, 24.0, False, 1, "", style, "[]", "[]")["result"]
+        assert res[9] is None, style
+
+
+def test_simple_workflow_bridge_wired_and_bypassed():
+    """The simple example workflow: a bypassed H3MD Semantic Bridge feeds the sampler's semantic_bridge input; the
+    Control Panel's semantic_bridge output is not connected."""
+    path = os.path.join(os.path.dirname(HERE), "example_workflows", "H3MD Director simple.json")
+    wf = json.load(open(path, encoding="utf-8"))
+    nodes = {n["id"]: n for n in wf["nodes"]}
+    bridges = [n for n in wf["nodes"] if n["type"] == "H3MDSemanticBridge"]
+    assert len(bridges) == 1 and bridges[0]["mode"] == 4                  # 4 = bypassed
+    out = bridges[0]["outputs"][0]["links"]
+    assert len(out) == 1
+    link = [l for l in wf["links"] if l[0] == out[0]][0]
+    target = nodes[link[3]]
+    assert target["inputs"][link[4]]["name"] == "semantic_bridge"
+    panel = [n for n in wf["nodes"] if n["type"] == "H3MDControlPanel"][0]
+    assert not [o for o in panel["outputs"] if o["name"] == "semantic_bridge"][0]["links"]
+
+
 if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"):

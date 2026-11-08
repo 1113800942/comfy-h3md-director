@@ -4,8 +4,11 @@ Top to bottom: resolution, fps + interpolation, face refine, seed, "which segmen
 (balanced / high motion / motion copy), low-res LoRA list, high-res LoRA list.
 0.3.4: every row is a normal LoRA; a style button also sets the model subgraph's high-res 768 turbo strength.
 
-The node applies the two LoRA lists to the low-res and high-res models itself (no rgthree / Crystools nodes), picks the
-semantic bridge from the style and hands every other value to the Director, Loop and Save nodes through its outputs.
+The node applies the two LoRA lists to the low-res and high-res models itself (no rgthree / Crystools nodes) and hands
+every other value to the Director, Loop and Save nodes through its outputs.
+0.3.9-beta: the style no longer switches a semantic bridge on (its author does not support reference-conditioned use;
+the 11-08 A/B showed no visible gain).  The `semantic_bridge` output stays (old workflows keep their links) and is
+always off; the example workflow has an H3MD Semantic Bridge node wired to the Loop, bypassed.
 The editor (web/js/h3md_control_panel.js) draws the style buttons and the LoRA tables; the lists are stored as JSON in
 two hidden STRING widgets, so a workflow saved with the panel loads anywhere.
 """
@@ -76,10 +79,10 @@ OFF_STRENGTH = {"low": {"weapon": 0.45, "fightflow": 0.65}, "high": {"weapon": 0
 # The low-res 768 turbo stays 1.0.
 TURBO_HIGH = {"balanced": 0.5, "high_motion": 1.0, "motion_copy": 0.5}
 TURBO_FILE = "minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors"
-# style -> semantic bridge (file name fragment, strength); motion copy: none
-BRIDGES = {"balanced": ("MiniMaxH3_SemanticBridge_v1_T8_Compat", 0.12),
-           "high_motion": ("BUNNY_H3_ActionLogic_Bridge_V1_T8_Compat", 0.12),
-           "motion_copy": None}
+# style -> semantic bridge (file name fragment, strength), or None.  0.3.9-beta: none for every style (up to 0.3.8:
+# balanced MiniMaxH3_SemanticBridge_v1_T8_Compat 0.12, high_motion BUNNY_H3_ActionLogic_Bridge_V1_T8_Compat 0.12).
+# A bridge is now a bypassed H3MD Semantic Bridge node in the example workflow: un-bypass it to use one.
+BRIDGES = {"balanced": None, "high_motion": None, "motion_copy": None}
 
 
 def preset_rows(style: str, which: str) -> list:
@@ -181,7 +184,8 @@ def apply_rows(model, rows: list, cache: _LoraCache, which: str):
 
 
 def bridge_for(style: str):
-    """Semantic bridge chain for the style, or None (motion copy, or the file is not installed: skipped, logged)."""
+    """Semantic bridge chain for the style, or None (no bridge for the style - every style since 0.3.9-beta - or the
+    file is not installed: skipped, logged)."""
     spec = BRIDGES.get(style)
     if not spec:
         return None
@@ -233,7 +237,8 @@ class H3MDControlPanel:
                                     "空 = 全部跑完；填 2 / 1-2 / 3, 6-7, 9 = 只生成这几段。框里的值会保留（橙色提示），要跑完整片请清空。"}),
                 "style": (STYLES, {"default": "balanced", "tooltip":
                           "balanced: drama, walking, dancing · high_motion: fights, gunfights · motion_copy: "
-                          "dance / motion transfer. Sets the recommended LoRAs and the semantic bridge."}),
+                          "dance / motion transfer. Sets the recommended LoRAs (no semantic bridge: un-bypass the "
+                          "Semantic Bridge node in the workflow to use one)."}),
                 "lora_low": ("STRING", {"default": lo, "multiline": True, "tooltip": "Low-res LoRA list (JSON)."}),
                 "lora_high": ("STRING", {"default": hi, "multiline": True, "tooltip": "High-res LoRA list (JSON)."}),
             },

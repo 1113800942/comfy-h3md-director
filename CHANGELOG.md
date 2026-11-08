@@ -16,6 +16,16 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   one timeline (no continuation seams); hard cuts stay cuts; long plans are grouped only at hard cuts. 导演台一个开关：
   续接的镜头在同一条时间线上一起生成（没有续接接缝）；硬切照常；长计划只在硬切处分组。
 
+* **Semantic bridge: wired but bypassed / 语义桥：接着但旁路**: the style buttons no longer switch a semantic bridge on
+  (up to 0.3.8: balanced v1 T8_Compat 0.12, high motion BUNNY ActionLogic 0.12). The simple workflow has an H3MD Semantic
+  Bridge node wired to the Loop, bypassed: select it and press Ctrl+B to use it. Reason: the bridge's author does not
+  support reference-conditioned use (worse singing / lip-sync), and an 11-08 A/B with and without it looked the same.
+  The Control Panel's `semantic_bridge` output stays (old workflows keep their links) and is always off; old caches made
+  with balanced / high motion are not reused. 风格按钮不再自动开语义桥（0.3.8 以前：均衡 v1 T8_Compat 0.12、高动态
+  BUNNY ActionLogic 0.12）；清爽版里加了一个接好的语义桥节点，默认旁路，选中按 Ctrl+B 打开。原因：原作者不支持带参考
+  的用法（唱歌口型变差），11-08 开桥 / 关桥对比画面一样。总控台的 `semantic_bridge` 口保留（旧工作流不断线），永远是关；
+  以前用均衡 / 高动态跑的缓存不会再复用。
+
 **Details / 详细：**
 * Core MiniMax H3 context windows (ComfyUI 0.44+) with H3MD additions: low-res windows 243 / overlap 22 (chained),
   high-res 175 / 22. 核心上下文窗口 + H3MD 扩展：低清 243 / 重叠 22（接续窗口）、高清 175 / 22。
