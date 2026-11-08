@@ -108,6 +108,7 @@ non_diegetic_music:
   - Without marks every window gets the whole prompt: write only a continuous, loopable state.
 - The `Duration:` line is rewritten by H3MD (each window gets its own length).
 - A scene / framing change inside a shot (hard cut): write `[7s cut] [Shot 2] close-up by the lake at sunset ...`. The cut snaps to 17 frames (about 0.7 s); the windows break there with no fusion, so the cut is clean. Put each shot's setting, framing and light after its own `[Ns cut]`; the first shot is `[0s cut] [Shot 1] ...`.
+- Reference pictures follow the windows: a window carries a picture only if its text names that `<Subject N>` / `<Picture N>` (an empty-landscape window carries none, and tested: no person appears in it). So **the shared description before the first mark must not mention the person**; mention people only after their own shot's `[Ns cut]`.
 - **summary and retention_analysis describe only what stays the same for the whole shot; no "first ... then ..."** (tested: a summary saying "then appears by the lake" made the windows after the cut start in the meadow and push in to the lake).
 
 ## 3. Seams: hard cut or continuation
