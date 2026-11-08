@@ -145,7 +145,7 @@ class ChunkedFrames:
     like the decoded tensor for h3md_cache.SegmentCache.write and for tail slices."""
 
     def __init__(self, vae, video: torch.Tensor, chunk_clips: int = DECODE_CHUNK_CLIPS, ctx: int = DECODE_CTX_CLIPS,
-                 decode=None):
+                 decode=None, reuse=None):
         if video.ndim != 5 or video.shape[0] != 1 or (int(video.shape[2]) - 2) % CLIP_TOKENS:
             raise ValueError(f"not a 5n+2 video latent: {tuple(video.shape)}")
         self.vae, self.video, self.ctx = vae, video, int(ctx)
@@ -155,11 +155,40 @@ class ChunkedFrames:
         self.n = self.n_clips * CLIP_FRAMES + 5
         self._cur = None    # (first frame, frames)
         self._hw = None
+        # local redraw: (old frames .npy of the same latent, (first, end) changed latents): a chunk whose latents
+        # (warm-up included) are all unchanged is copied from the old frames instead of decoded (identical result)
+        self._reuse, self._old = reuse, None
+        self.reused = self.decoded = 0
+
+    def _old_frames(self, j0: int, want: int):
+        if self._old is None:
+            import numpy as np
+            try:
+                self._old = np.load(self._reuse[0], mmap_mode="r")
+                if self._old.ndim != 4 or self._old.shape[0] != self.n:
+                    self._old = False
+            except Exception:
+                self._old = False
+        if self._old is False:
+            return None
+        import numpy as np
+        part = np.asarray(self._old[CLIP_FRAMES * j0:CLIP_FRAMES * j0 + want])
+        fr = torch.from_numpy(part.astype(np.float32))
+        return fr / 255.0 if part.dtype == np.uint8 else fr
 
     def _decode_chunk(self, j0: int):
         j1 = min(self.n_clips, j0 + self.chunk)
         c = min(self.ctx, j0)
         last = j1 == self.n_clips
+        if self._reuse is not None:
+            l0, l1 = self._reuse[1]
+            if l1 <= CLIP_TOKENS * (j0 - c) or l0 >= CLIP_TOKENS * j1 + 2:
+                old = self._old_frames(j0, CLIP_FRAMES * (j1 - j0) + (5 if last else 0))
+                if old is not None:
+                    self.reused += 1
+                    self._cur = (CLIP_FRAMES * j0, old)
+                    return self._cur
+        self.decoded += 1
         lat = self.video[:, :, CLIP_TOKENS * (j0 - c):CLIP_TOKENS * j1 + 2]
         imgs = self.decode(self.vae, lat)
         want = CLIP_FRAMES * (j1 - j0) + (5 if last else 0)
@@ -1121,16 +1150,44 @@ class H3MDLoopSampler:
             report[-1]["steps"] = step_summary(getattr(sampler_node, "last_steps", None))
             prev, prev_key, prev_tail = final, key, None
             prev_low = getattr(sampler_node, "last_lowres", None) if beta else None
+            if redraw and isinstance(prev_low, torch.Tensor) and cache is not None:
+                # local redraw: the low-res pass started from the DOWNSCALED final picture; outside the redrawn
+                # seconds keep the segment's own native low-res result (the continuation carry / anchor source)
+                try:
+                    old_low = cache.load_lowres(k)
+                    if isinstance(old_low, torch.Tensor) and old_low.shape == prev_low.shape:
+                        vm, _am, _act = WIN.redraw_masks(int(prev_low.shape[2]), 1, redraw)
+                        keep = (vm == 0).view(1, 1, -1, 1, 1)
+                        prev_low = torch.where(keep, old_low.to(prev_low), prev_low)
+                except Exception as exc:
+                    LOG.warning("%s %s: local redraw: old low-res result not kept (%s)", _TAG, where, exc)
             if anchor_strength > 0 and not continued:  # H3MD low-res anchor: a shot's first segment is the reference
                 anchor_ref = LA.stats(prev_low) if isinstance(prev_low, torch.Tensor) else None
             if beta and prev_low is not None:
                 report[-1]["lowres_carry"] = list(prev_low.shape)
             if cache is not None:  # decode now, write to disk, free RAM
                 v, a = final["samples"].unbind()
+                redraw_arc = None
                 if chunked_decode_ok(v, isinstance(plan, dict) and plan.get("windowMode")) and not self._seam.active:
-                    imgs = ChunkedFrames(vae, v)   # window-exp: decoded chunk by chunk while it is written to disk
-                    LOG.info("%s %s: chunked decode (%d frames, %d-clip chunks)", _TAG, where, imgs.n,
-                             DECODE_CHUNK_CLIPS)
+                    reuse = None
+                    if redraw:   # local redraw: unchanged chunks are copied from the previous version's frames
+                        try:
+                            old_v = D._streams(cache.load_latent(k), "cached latent")[0]
+                            if tuple(old_v.shape) == tuple(v.shape):
+                                ch = torch.nonzero((v.float() - old_v.float()).abs().flatten(3)
+                                                   .amax(dim=3).amax(dim=(0, 1)) > 0).flatten()
+                                changed = (int(ch[0]), int(ch[-1]) + 1) if ch.numel() else (0, 0)
+                                redraw_arc = cache.archive_dir()
+                                cache.archive(k, redraw_arc)
+                                reuse = (os.path.join(redraw_arc, os.path.basename(cache._p(k, "_frames.npy"))),
+                                         changed)
+                            del old_v
+                        except Exception as exc:
+                            LOG.warning("%s %s: local redraw: decoding everything (%s)", _TAG, where, exc)
+                    imgs = ChunkedFrames(vae, v, reuse=reuse)   # window-exp: decoded chunk by chunk while written
+                    LOG.info("%s %s: chunked decode (%d frames, %d-clip chunks)%s", _TAG, where, imgs.n,
+                             DECODE_CHUNK_CLIPS, f", unchanged latents outside {reuse[1]} copied from the previous "
+                             f"version" if reuse else "")
                 else:
                     imgs = decode_video_seam_context(vae, v, ctx_prevs[-1], trims[-1], ctx_clips, where)  # H3MD-Exp
                 ctx_prevs[-1] = None
@@ -1142,11 +1199,14 @@ class H3MDLoopSampler:
                 imgs = self._seam.tone(imgs, trims[-1], where, report[-1])  # H3MD seam hook (no-op when off)
                 if rerun and k in rerun:  # H3MD rerun: old files -> _replaced_<time> only once the new ones exist
                     cache.archive(k, archive)
-                elif redraw:   # local redraw: the previous version is kept in the archive folder
+                elif redraw and redraw_arc is None:   # local redraw: the previous version is kept in the archive
                     cache.archive(k, cache.archive_dir())
                 cache.write(k, key, final, imgs, aud, dict({"trim": trims[-1], "report": report[-1]},
                                                          **({"base_key": base_key, "redraw": redraw} if redraw else {})),
                             lowres=prev_low if beta else None)
+                if getattr(imgs, "reused", 0):
+                    LOG.info("%s %s: local redraw: %d chunk(s) decoded, %d copied unchanged", _TAG, where,
+                             imgs.decoded, imgs.reused)
                 del imgs, aud, v, a
                 gc.collect()
                 h3md_vram.soft_empty_cache(f"(after caching {where})")

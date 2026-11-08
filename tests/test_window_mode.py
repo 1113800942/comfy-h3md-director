@@ -425,6 +425,32 @@ class ChunkedDecode(unittest.TestCase):
             self.assertTrue(torch.equal(got, full), n_clips)
             self.assertTrue(torch.equal(cf[-39:], full[-39:]))
 
+    def test_reuse_unchanged_chunks(self):
+        import tempfile, os
+        import numpy as np
+        import torch
+        import h3md_loop as L
+        T = 5 * 44 + 2
+        v = torch.arange(T).float().view(1, 1, T, 1, 1).expand(1, 2, T, 1, 1).clone()
+        full = _fake_decode(None, v)
+        with tempfile.TemporaryDirectory() as d:
+            old = os.path.join(d, "old.npy")
+            np.save(old, (full + 1000.0).numpy().astype(np.float16))   # marks copied frames
+            calls = []
+
+            def dec(vae, lat):
+                calls.append(int(lat.shape[2]))
+                return _fake_decode(vae, lat)
+            cf = L.ChunkedFrames(None, v, chunk_clips=14, ctx=2, decode=dec, reuse=(old, (80, 135)))
+            got = torch.cat([cf[i:i + 16] for i in range(0, cf.shape[0], 16)], 0)
+            # chunk 0 (clips 0-13, latents 0-71) and chunk 3 (clips 42-43, latents 200-221 + ctx 190-) are copied;
+            # chunks 1 (latents 60-141) and 2 (latents 130-211) touch the change and are decoded
+            self.assertEqual((cf.reused, cf.decoded), (2, 2))
+            self.assertTrue(torch.equal(got[:238], full[:238] + 1000.0))
+            self.assertTrue(torch.equal(got[238:714], full[238:714]))
+            self.assertTrue(torch.equal(got[714:], full[714:] + 1000.0))
+            del cf
+
     def test_switch(self):
         import torch
         import h3md_loop as L
