@@ -2,6 +2,21 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.3.6] — 2026-11-07
+**In short / 简要：**
+* Face refine save node: the face-refine options (detector … feather) are no longer greyed out when `face_refine` is
+  fed by a link (as in the example workflows). 修脸保存节点：`face_refine` 由连线输入时（示例工作流就是这样），
+  detector 到 feather 这些修脸选项不再被灰掉、可以正常修改。
+* The registry entry no longer declares "NVIDIA CUDA only", so ComfyUI-Manager stops showing an
+  "unsupported accelerator" warning. 注册表信息去掉"只支持 NVIDIA CUDA"，ComfyUI-Manager 不再提示"加速器不受支持"。
+
+**Details / 详细：**
+* The grey-out only looked at the node's own `face_refine` toggle; a linked input leaves that toggle at a stale value,
+  so the options stayed greyed out whatever the link carried. Running was not affected (defaults were used). Now a
+  linked `face_refine` keeps the options editable, and linking / unlinking refreshes them. 之前只看节点自己的
+  `face_refine` 开关；连线输入时开关的值是旧的，所以不管外面传 true 还是 false 都灰掉（运行不受影响，用默认值）。
+  现在连线时选项保持可改，连线 / 断开时会重新判断。
+
 ## [0.3.5] — 2026-11-05
 **In short / 简要：**
 * Motion copy (TARA) no longer fails at the end of a video: the shot length that follows the source video is now

@@ -1,14 +1,13 @@
 [project]
 name = "comfyui-h3md-director"
 description = "H3MD Director: long multi-shot MiniMax H3 video - visual Director, segment-by-segment low-res/high-res generation with disk cache, streamed save with optional RIFE interpolation."
-version = "0.3.5-win1"
+version = "0.3.7-beta"
 license = { text = "AGPL-3.0-or-later" }
 authors = [{ name = "YJ" }]
 requires-python = ">=3.10"
 dependencies = []  # no pip dependencies beyond a standard ComfyUI install (torch, numpy, av, Pillow)
 classifiers = [
     "Operating System :: OS Independent",
-    "Environment :: GPU :: NVIDIA CUDA",
     "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
 ]
 
