@@ -89,8 +89,16 @@ changes:
   If one continuous take is longer than a group, the Director says where to put a hard cut.
 * Each shot keeps its own prompt, pictures, reference video and music for its own time range; reference videos longer
   than H3's ~15 s limit work (each window gets its own slice).
-* Inside one shot you can also write timed actions and cuts in `detailed_description`, e.g.
-  `[3s] she raises one hand to her hair. [7s cut] Close-up by the lake at sunset ...` (see the prompt skill).
+* Lines and actions inside a long shot: write their time from the shot's start, the usual way
+  (`At 00:07.9 she sings: <d>[English] ...</d>.`) or as `[8s] ...`; each one goes to the one window that holds that
+  second, so nothing is sung or played twice (see the prompt skill).
+* Switched off automatically: depth / pose control (the video stays a normal reference video; also off in motion copy)
+  and RefMods (identity comes from the reference pictures).
+* `"preview": true` renders the low-res pass only (about half the time; the full run reuses it).
+  `"redraw": [[4, 8]]` re-renders only seconds 4–8 of a finished run with a new seed: everything else stays
+  frame-identical, the previous version is kept in the cache folder.
+* Memory: the result is decoded and written in ~10 s chunks, and the high-res pass plans its strips per window, so
+  2K works on 64 GB RAM (measured 41 min for 30 s at 2560×1408 on an RTX 5090).
 * About 25% slower than the old chain. Turn it off to get the old behaviour back exactly.
 
 ## More (click to open)

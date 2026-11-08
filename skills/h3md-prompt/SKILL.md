@@ -98,18 +98,28 @@ non_diegetic_music:
     several shots, each with its own prompt.
   - One continuous camera take per shot (`[Shot 1]` only), no sub-shots.
 
-### Window mode (experimental branch window-exp / 0.3.5-win1, not released)
-- In the plan, `"windowMode": {"length": 243, "overlap": 56, "highLength": 175, "highOverlap": 22}` renders one long shot (a 30–60 s one-take) in one sampling run: no autosplit, no seams. Add `"preview": true` to see motion and framing first (low-res only, about half the time; a later run without preview reuses the low-res result).
-- Still **one** six-section prompt. For actions that happen in order, put time marks at the **end** of detailed_description: `... [3s] she raises one hand to brush her hair, then lowers it. [13s] she lets both arms drift outward, then brings them back. [25s] she looks across the meadow and back to the camera.`
-  - Everything shared (subject, setting, camera, light, "sways gently the whole time") goes **before the first mark**; the text after a mark belongs to that action only.
-  - H3MD gives each action to exactly one window (about 8 s each), so no action is played twice; windows without an action are told to continue without new gestures.
-  - Keep actions at least one window step (about 8 s) apart; write short actions that return to rest ("then lowers it").
-  - Timing is accurate to about one window, not to the second.
-  - Without marks every window gets the whole prompt: write only a continuous, loopable state.
+### Window mode (0.3.7 beta: the Director's "Seamless long video" switch)
+- Write the plan as usual: shots, continued shots (`overlapIn` 22/39) and hard cuts (`overlapIn` 0). With the switch on
+  (plan `"windowMode": {"length": 243, "overlap": 56, "highLength": 175, "highOverlap": 22}`) H3MD joins continued
+  shots into one timeline sampled in one run (no seams) and keeps hard cuts as clean cuts. A group runs up to about
+  60 s (30 s with less than 40 GB RAM) and ends at the last hard cut that fits; a continuous take longer than that
+  gets a note saying where to add a hard cut.
+- Switched off automatically in window mode: autosplit, depth / pose control (the video stays a normal reference video;
+  also off in motion copy) and RefMods (identity comes from the reference pictures).
+- Timing inside a long shot (recommended): give each action or sung line its time from the shot's start, in the usual
+  form `At 00:07.9 she sings: <d>[English] ...</d>.` or as `[8s] she raises one hand, then lowers it.` H3MD gives each
+  one to exactly one window (about 8–10 s) and tells that window when it happens, so nothing is played or sung twice;
+  windows without one are told to carry on without new gestures. Only the sentence right after the time belongs to it;
+  the rest of the text is shared by the whole shot. Keep actions about 8 s apart. Without times every window gets the
+  whole shot text, so write continuous states there.
+- Summary sentences with "then / after / finally" are left out of the window prompts automatically; better still,
+  write the summary as what stays the same.
+- Reference pictures follow the windows automatically: a window carries only the pictures its own text names.
+- Dialogue and lyrics always in `<d>[English] ...</d>` (tested: plain text gave unintelligible speech).
 - The `Duration:` line is rewritten by H3MD (each window gets its own length).
-- A scene / framing change inside a shot (hard cut): write `[7s cut] [Shot 2] close-up by the lake at sunset ...`. The cut snaps to 17 frames (about 0.7 s); the windows break there with no fusion, so the cut is clean. Put each shot's setting, framing and light after its own `[Ns cut]`; the first shot is `[0s cut] [Shot 1] ...`.
-- Reference pictures follow the windows: a window carries a picture only if its text names that `<Subject N>` / `<Picture N>` (an empty-landscape window carries none, and tested: no person appears in it). So **the shared description before the first mark must not mention the person**; mention people only after their own shot's `[Ns cut]`.
-- **summary and retention_analysis describe only what stays the same for the whole shot; no "first ... then ..."** (tested: a summary saying "then appears by the lake" made the windows after the cut start in the meadow and push in to the lake).
+- `"preview": true` renders the low-res pass only (motion and framing; a later full run reuses it).
+  `"redraw": [[4, 8]]` re-renders only seconds 4–8 of a finished run with a new seed; everything else stays identical.
+- A hard cut inside one shot (`[7s cut] [Shot 2] ...`) also works, but a separate shot with `overlapIn` 0 is simpler.
 
 ## 3. Seams: hard cut or continuation
 - `overlapIn = 0`, hard cut: generated independently, joined end to end. Use it when the scene or background changes.
@@ -299,7 +309,7 @@ After the prompts, also give the whole plan as ONE JSON code block that the user
 - [ ] Times start at 0; the last shot time is inside the length; in continued shots new action starts after the overlap.
 - [ ] Lengths are 5+17n; total counted as length − overlap; motion copy total within the reference video.
 - [ ] Long shots that will autosplit describe a steady state, no ordered events or sub-shots.
-- [ ] Window mode: time marks all at the end of detailed_description, shared description before the first mark, actions about 8 s or more apart; with hard cuts, no "then" in the summary and each shot's setting after its own `[Ns cut]`.
+- [ ] Window mode: lines and actions inside long shots timed from the shot's start (`At 00:07.9 ...` or `[8s] ...`), about 8 s apart; dialogue / lyrics in `<d>[English] ...</d>`; the summary says what stays the same.
 - [ ] Tag numbers match the shot's media order; depth videos have no `<Video N>`; RefMods written `<RefMod j>`; no
       undefined tags.
 - [ ] Each `<Picture N>`'s role (person / outfit / location) matches the actual picture; no plain / grey photo

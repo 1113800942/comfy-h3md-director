@@ -20,6 +20,20 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
 * Progress cache: an interrupted run resumes at the last sampling step; the low-res result is kept, and
   `windowMode.preview` renders the low-res pass only (about half the time), reused by the full run. 进度缓存：中断后从
   最后一步接着跑；低清结果保留；低清预览约省一半时间，之后的完整版直接复用。
+* Lyrics and lines timed the usual way (`At 00:07.9 she sings: ...`) count as time marks, also inside continued
+  shots on one timeline: each line goes to exactly one window, timed inside it. 用平常写法标时间的歌词 / 台词
+  （`At 00:07.9 she sings: ...`）也算时间标记，接成一条时间线的续接镜头里也一样：每句只给一个窗口，并写明在窗口里的第几秒。
+* Local redraw: `windowMode.redraw [[start_s, end_s]]` re-renders only those seconds of a finished run (new seed, soft
+  edges, only the windows touching them are computed); the rest stays frame-identical and the previous version is kept.
+  局部重绘：只重画已完成视频的指定秒数（换种子、边缘柔和过渡、只算碰到的窗口），其他部分一帧不变，旧版本保留。
+* Depth / pose control is switched off in window mode and in motion copy (the video stays a normal reference video);
+  RefMods are switched off in window mode. 窗口模式和动作复刻下自动关闭深度图 / 骨骼图控制（视频改作普通参考视频）；
+  窗口模式下自动关闭 RefMod。
+* Memory: chunked decode (~10 s chunks written straight to the cache) and per-window high-res strip planning; 2K
+  (2560×1408, 30 s) runs on 64 GB RAM. 内存：分块解码（约 10 秒一块直接写进缓存）、高清条带按窗口估算；2K 30 秒 64 GB 内存可跑。
+* Example workflows now use the 4B text encoder + ClipProj by default (about 20 GB less RAM and 10+ GB less VRAM than
+  32B, no visible difference); the 32B encoder stays available. 示例工作流默认改用 4B 文本编码器 + ClipProj
+  （比 32B 省约 20 GB 内存、十几 GB 显存，画质看不出区别）；32B 仍可选。
 * Off = exactly the old behaviour (same cache keys). 关闭时和原来完全一样（缓存键不变）。
 
 ## [0.3.6] — 2026-11-07
