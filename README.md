@@ -92,6 +92,10 @@ changes:
 * Lines and actions inside a long shot: write their time from the shot's start, the usual way
   (`At 00:07.9 she sings: <d>[English] ...</d>.`) or as `[8s] ...`; each one goes to the one window that holds that
   second, so nothing is sung or played twice (see the prompt skill).
+* Inside one continuous take each shot is drawn from its own text only: write place, light and outfit in full in
+  every shot (continued shots too) and give big changes a time. A big change inside a take (turning around, a back view
+  becoming a front view, a new camera angle) can show as a short dissolve where two windows overlap (tested on a 2:20
+  two-person music video); hard cuts are the safe place for such changes.
 * Switched off automatically: depth / pose control (the video stays a normal reference video; also off in motion copy)
   and RefMods (identity comes from the reference pictures).
 * `"preview": true` renders the low-res pass only (about half the time; the full run reuses it).

@@ -42,6 +42,13 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
 * Autosplit places its cuts at quiet moments of the reference video again (0.3.5 bug: the motion profile never reached
   it); only over-budget shots with a reference video split differently. Window mode never splits, so it is unaffected.
   自动拆段重新按参考视频动作安静的地方切（0.3.5 的 bug：动作曲线没传进去）；只影响超预算、带参考视频的镜头。窗口模式不拆段，不受影响。
+* A window that covers a continuation adds only the next shot's new sentences ("with no cut, the same shot continues",
+  no second `[Shot 1]`, no repeated style lines). Found on a 2:20 two-person test video, where a continued shot came out
+  as a cut; the rest came from the prompts (now in the skill: time new actions, write place and outfit in full in every
+  shot). Known limit: a big change inside one take (turning around, back view to front view) can dissolve where two
+  windows overlap - put such changes at a hard cut. 跨续接的窗口只加下一个镜头的新句子（不再重复 `[Shot 1]` 和风格句）。
+  2 分 20 秒两人测试片里续接镜头变成了硬切，其余原因在提示词（skill 已加：新动作写时间、每个镜头写全场景和服装）。
+  已知限制：同一条连续镜头里的大变化（转身、背影变正面）在两个窗口重叠处可能叠化，这类变化放在硬切处。
 * Off = the old behaviour (same cache keys), except that motion copy no longer uses depth / pose control. 关闭时和原来
   一样（缓存键不变），唯一的变化：动作复刻不再用深度图 / 骨骼图控制。
 
