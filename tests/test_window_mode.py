@@ -392,7 +392,7 @@ class AutoGroup(unittest.TestCase):
         self.assertEqual(WIN.auto_group_length(1088, 1664, 64)[0], 906)
         self.assertEqual(WIN.auto_group_length(2560, 1408, 64)[0], 447)
         self.assertEqual(WIN.auto_group_length(1088, 1664, 32)[0], 243)
-        self.assertEqual(WIN.auto_group_length(1088, 1664, 128)[0], 1445)
+        self.assertEqual(WIN.auto_group_length(1088, 1664, 128)[0], 1450)
         for ram in (16, 32, 48, 64, 96):
             for wh in ((1088, 1664), (2560, 1408)):
                 f = WIN.auto_group_length(*wh, ram)[0]

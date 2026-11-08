@@ -47,7 +47,7 @@ def auto_group_length(width: int, height: int, total_ram_gb: float = None):
     """window-exp (11-07): longest group (frames, 17n+5) this machine's RAM can hold.  A group is decoded and cached in
     one piece; measured on a 64 GB machine the peak RAM is about 18 GB (models moved off the GPU) + a quarter of the
     RAM (system / other apps) + 3x the group's decoded frames (fp16) - 1088x1664 60 s: 68 GB, 2K 21 s: 63.8 GB.
-    Returns (frames, reason); at least one low-res window (243), at most 1445 (~60 s)."""
+    Returns (frames, reason); at least one low-res window (243), at most 1450 (~60 s)."""
     if total_ram_gb is None:
         try:
             import psutil
@@ -57,7 +57,7 @@ def auto_group_length(width: int, height: int, total_ram_gb: float = None):
     frame_gb = max(1, int(width)) * max(1, int(height)) * 3 * 2 / 1e9
     budget = max(0.0, (total_ram_gb - 18.0 - 0.25 * total_ram_gb) / 3.0)
     frames = int(budget / frame_gb)
-    frames = min(1445, max(243, 5 + 17 * ((frames - 5) // 17) if frames >= 22 else 243))
+    frames = min(1450, max(243, 5 + 17 * ((frames - 5) // 17) if frames >= 22 else 243))
     return frames, f"{total_ram_gb:.0f} GB RAM at {width}x{height}"
 
 
