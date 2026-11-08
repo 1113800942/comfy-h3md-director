@@ -57,6 +57,17 @@ non_diegetic_music:
   - 没有参考视频的长 shot：不要写按时间先后发生的事件（“先走到海边，再坐下，最后回头”）或 `[Shot 2] At 00:20` 这类镜头切换，否则后面的段会把开头重演一遍。写成**持续、可循环的状态**（“she walks slowly along the water's edge, the camera tracks beside her at walking pace”）。需要剧情先后时，手动分成几个 shot，各写各的提示词。
   - 一个 shot 只写一个连续镜头（`[Shot 1]`），不再加子镜头。
 
+### 窗口模式（实验分支 window-exp / 0.3.5-win1，未正式发布）
+- 计划里写 `"windowMode": {"length": 243, "overlap": 56, "highLength": 175, "highOverlap": 22}`：一个长镜头（30–60 秒一镜到底）一次采样完成，不再自动拆段，没有接缝。只想先看动作和构图时加 `"preview": true`（只跑低清，约省一半时间；之后去掉 preview 再跑，会直接复用低清结果）。
+- 还是**一份**六段式提示词。要按先后发生的动作，在 detailed_description **最后**用时间标记写：`... [3s] she raises one hand to brush her hair, then lowers it. [13s] she lets both arms drift outward, then brings them back. [25s] she looks across the meadow and back to the camera.`
+  - 人物、场景、机位、光线、"全程轻摆"这类公共描述写在**第一个标记之前**；标记后面的文字只属于那一个动作。
+  - 系统按窗口（约 8 秒一个）把每个动作只分给一个窗口，所以动作不会被演两遍；没有动作的窗口自动写"延续，不加新动作"。
+  - 两个动作至少隔一个窗口步长（约 8 秒）；动作写成短动作并回到原状态（"then lowers it"）。
+  - 时间精度约等于一个窗口：动作会落在对的那几秒附近，不保证精确到秒。
+  - 没写标记时，每个窗口拿到整段提示词：只能写持续、可循环的状态。
+- `Duration:` 行由系统改写（每个窗口写自己的时长），不用自己算。
+- 镜头里的硬切（换场景）窗口模式还不支持，先分成两个 shot。
+
 ## 3. 接缝：硬切还是续接
 - `overlapIn = 0` 硬切：独立生成、首尾直接拼。场景或背景换了就用硬切。
 - `overlapIn = 22 / 39` 续接：新 shot 以上一个 shot 最终 latent 的最后 22/39 帧开头。同一个连续镜头、动作要接上时用续接。
@@ -172,6 +183,8 @@ non_diegetic_music:
 - [ ] 时间从 0 秒算，最后一个镜头在 shot 长度以内；续接 shot 的新动作在 overlap 之后开始。
 - [ ] 长度都是 5+17n；总时长按“长度 − overlap”累加；动作复刻的分镜总长不超过参考视频。
 - [ ] 会被自动拆段的长 shot：写的是持续状态，没有按时间先后的事件和子镜头。
+- [ ] 窗口模式：时间标记都在 detailed_description 最后，公共描述在第一个标记前，两个动作至少隔约 8 秒。
+
 - [ ] 标签编号和本 shot 素材顺序一致；depth 视频没有 `<Video N>`；RefMod 写成 `<RefMod j>`；没有未定义的标签。
 - [ ] 每张 `<Picture N>` 写的作用（人物 / 服装 / 场景）和它实际的图片内容一致；照片没有纯色 / 灰色背景，或已换成场景模糊背景。
 - [ ] 表情写明了（不照搬照片的大笑）；没有打光形容词堆砌；光线写成固定不变。

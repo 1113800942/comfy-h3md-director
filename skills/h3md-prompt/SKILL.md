@@ -98,6 +98,17 @@ non_diegetic_music:
     several shots, each with its own prompt.
   - One continuous camera take per shot (`[Shot 1]` only), no sub-shots.
 
+### Window mode (experimental branch window-exp / 0.3.5-win1, not released)
+- In the plan, `"windowMode": {"length": 243, "overlap": 56, "highLength": 175, "highOverlap": 22}` renders one long shot (a 30–60 s one-take) in one sampling run: no autosplit, no seams. Add `"preview": true` to see motion and framing first (low-res only, about half the time; a later run without preview reuses the low-res result).
+- Still **one** six-section prompt. For actions that happen in order, put time marks at the **end** of detailed_description: `... [3s] she raises one hand to brush her hair, then lowers it. [13s] she lets both arms drift outward, then brings them back. [25s] she looks across the meadow and back to the camera.`
+  - Everything shared (subject, setting, camera, light, "sways gently the whole time") goes **before the first mark**; the text after a mark belongs to that action only.
+  - H3MD gives each action to exactly one window (about 8 s each), so no action is played twice; windows without an action are told to continue without new gestures.
+  - Keep actions at least one window step (about 8 s) apart; write short actions that return to rest ("then lowers it").
+  - Timing is accurate to about one window, not to the second.
+  - Without marks every window gets the whole prompt: write only a continuous, loopable state.
+- The `Duration:` line is rewritten by H3MD (each window gets its own length).
+- Hard cuts inside a window-mode shot are not supported yet; use two shots.
+
 ## 3. Seams: hard cut or continuation
 - `overlapIn = 0`, hard cut: generated independently, joined end to end. Use it when the scene or background changes.
 - `overlapIn = 22 / 39`, continuation: the new shot starts with the last 22/39 frames of the previous shot's final
@@ -286,6 +297,7 @@ After the prompts, also give the whole plan as ONE JSON code block that the user
 - [ ] Times start at 0; the last shot time is inside the length; in continued shots new action starts after the overlap.
 - [ ] Lengths are 5+17n; total counted as length − overlap; motion copy total within the reference video.
 - [ ] Long shots that will autosplit describe a steady state, no ordered events or sub-shots.
+- [ ] Window mode: time marks all at the end of detailed_description, shared description before the first mark, actions about 8 s or more apart.
 - [ ] Tag numbers match the shot's media order; depth videos have no `<Video N>`; RefMods written `<RefMod j>`; no
       undefined tags.
 - [ ] Each `<Picture N>`'s role (person / outfit / location) matches the actual picture; no plain / grey photo
