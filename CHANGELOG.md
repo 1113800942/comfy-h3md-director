@@ -26,6 +26,15 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   的用法（唱歌口型变差），11-08 开桥 / 关桥对比画面一样。总控台的 `semantic_bridge` 口保留（旧工作流不断线），永远是关；
   以前用均衡 / 高动态跑的缓存不会再复用。
 
+* **Defaults match the Director switch / 默认值和导演台一致**: a plan with just `"windowMode": true` (or `{}`) now
+  means low-res 243 / 22 chained, high-res 175 / 22 - what the Director's switch writes (it was a 124-frame window).
+  The manual node H3MD Context Windows gets a `chain` switch (default on) and defaults 243 / 22. Docs: the "big
+  changes dissolve" limit is gone from README / CHANGELOG (接续窗口 fixed it), technical reference has a window-mode
+  section, the speed note is re-measured (about +25 %: low-res +11 %, high-res +34 % per frame).
+  计划里只写 `"windowMode": true`（或 `{}`）时，现在就是低清 243 / 22 接续、高清 175 / 22，和导演台开关写的一样（以前是
+  124 帧窗口）；手动节点 H3MD Context Windows 加了 `chain` 开关（默认开），默认 243 / 22。文档：README / CHANGELOG 去掉
+  "大变化会叠化"的限制（接续窗口已解决），技术参考加了窗口模式一节，速度说明重新实测（约慢 25%：低清每帧约 11%，高清约 34%）。
+
 **Details / 详细：**
 * Core MiniMax H3 context windows (ComfyUI 0.44+) with H3MD additions: low-res windows 243 / overlap 22 (chained),
   high-res 175 / 22. 核心上下文窗口 + H3MD 扩展：低清 243 / 重叠 22（接续窗口）、高清 175 / 22。
@@ -63,10 +72,10 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
 * A window that covers a continuation adds only the next shot's new sentences ("with no cut, the same shot continues",
   no second `[Shot 1]`, no repeated style lines). Found on a 2:20 two-person test video, where a continued shot came out
   as a cut; the rest came from the prompts (now in the skill: time new actions, write place and outfit in full in every
-  shot). Known limit: a big change inside one take (turning around, back view to front view) can dissolve where two
-  windows overlap - put such changes at a hard cut. 跨续接的窗口只加下一个镜头的新句子（不再重复 `[Shot 1]` 和风格句）。
+  shot). With averaged windows (`"chain": false`) a big change inside one take (turning around, back view to front
+  view) can dissolve where two windows overlap; 接续窗口 (default) removes this. 跨续接的窗口只加下一个镜头的新句子（不再重复 `[Shot 1]` 和风格句）。
   2 分 20 秒两人测试片里续接镜头变成了硬切，其余原因在提示词（skill 已加：新动作写时间、每个镜头写全场景和服装）。
-  已知限制：同一条连续镜头里的大变化（转身、背影变正面）在两个窗口重叠处可能叠化，这类变化放在硬切处。
+  窗口平均（`"chain": false`）时，同一条连续镜头里的大变化（转身、背影变正面）在两个窗口重叠处可能叠化；默认的接续窗口没有这个问题。
 * Off = the old behaviour (same cache keys), except that motion copy no longer uses depth / pose control. 关闭时和原来
   一样（缓存键不变），唯一的变化：动作复刻不再用深度图 / 骨骼图控制。
 ## [0.3.8] — 2026-11-08

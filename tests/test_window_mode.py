@@ -30,15 +30,38 @@ class Normalize(unittest.TestCase):
     def test_defaults_and_snap(self):
         self.assertIsNone(WIN.normalize_window_mode(None))
         self.assertIsNone(WIN.normalize_window_mode(False))
-        wm = WIN.normalize_window_mode(True)
-        self.assertEqual((wm["length"], wm["overlap"], wm["chain"]), (124, 22, True))   # 0.3.9: chained, overlap 22
+        wm = WIN.normalize_window_mode(True)     # 0.3.9-beta: = the Director switch, low 243 / 22 chained, high 175 / 22
+        self.assertEqual((wm["length"], wm["overlap"], wm["chain"]), (243, 22, True))
+        self.assertEqual((wm["highLength"], wm["highOverlap"]), (175, 22))
+        self.assertEqual(WIN.normalize_window_mode({}), wm)
+        self.assertEqual(WIN.normalize_window_mode({"length": 243, "overlap": 22, "highLength": 175,
+                                                    "highOverlap": 22}), wm)
         wm = WIN.normalize_window_mode({"chain": False})
-        self.assertEqual((wm["length"], wm["overlap"], wm["chain"]), (124, 56, False))  # averaged windows: 56
+        self.assertEqual((wm["length"], wm["overlap"], wm["chain"]), (243, 56, False))  # averaged windows: 56
+        self.assertEqual((wm["highLength"], wm["highOverlap"]), (175, 22))
         wm = WIN.normalize_window_mode({"length": 130, "overlap": 40})
         self.assertEqual((wm["length"], wm["overlap"]), (124, 39))
         self.assertEqual((wm["highLength"], wm["highOverlap"]), (124, 39))
         wm = WIN.normalize_window_mode({"length": 294, "overlap": 56, "highLength": 180})
         self.assertEqual((wm["length"], wm["highLength"], wm["highOverlap"]), (294, 175, 56))
+
+    def test_manual_node_defaults_chain(self):
+        """0.3.9-beta: the manual Context Windows node defaults to the Loop's low-res pass (243 / 22, chain on)."""
+        req = WIN.H3MDContextWindows.INPUT_TYPES()["required"]
+        self.assertEqual((req["context_length"][1]["default"], req["context_overlap"][1]["default"]), (243, 22))
+        self.assertTrue(req["chain"][1]["default"])
+        self.assertEqual(list(req)[-1], "chain")                 # last: graphs saved before keep their values
+        seen = []
+        orig = WIN.apply
+        WIN.apply = lambda *a: seen.append(a) or "patched"
+        try:
+            node = WIN.H3MDContextWindows()
+            self.assertEqual(node.run("m", 243, 22, "pyramid", True, True), ("patched",))     # old graph: chain on
+            node.run("m", 124, 56, "pyramid", True, True, False)
+        finally:
+            WIN.apply = orig
+        self.assertEqual(seen[0][-1], True)
+        self.assertEqual(seen[1][-1], False)
 
     def test_window_prompts(self):
         wps = WIN.normalize_window_prompts([{"at": 5, "prompt": "b"}, {"at": 0.4, "prompt": "a"},
@@ -136,7 +159,7 @@ class TimedPrompts(unittest.TestCase):
         p = D.parse_plan(timed_plan())
         seg = p["segments"][0]
         self.assertTrue(seg.get("windowPromptsAuto"))
-        self.assertEqual(len(seg["windowPrompts"]), len(WIN.window_spans(1445, 124, 22)[0]))
+        self.assertEqual(len(seg["windowPrompts"]), len(WIN.window_spans(1445, 243, 22)[0]))   # true = 243 / 22
 
     def test_plan_off_or_manual_untouched(self):
         p = D.parse_plan(timed_plan(window=None))

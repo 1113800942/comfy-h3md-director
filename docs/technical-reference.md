@@ -16,6 +16,7 @@ Multi-segment MiniMax H3 pipeline nodes (category `MiniMax H3/H3MD`):
 | H3MDLoopOptions | H3MD Loop Options | advanced Loop switches (Alpha/Beta prefix, handoff, seams, ref windows, tiling, cache details) -> `options` |
 | H3MDLoopSampler | H3MD Loop Sampler (legacy) | the original single node, inputs unchanged, kept so saved workflows load exactly; same computation |
 | H3MDSemanticBridge | H3MD Semantic Bridge | chainable Semantic Bridge (six-tensor MLP / trainer MLP / T8 transformer) -> Loop Sampler `semantic_bridge` |
+| H3MDContextWindows | H3MD Context Windows (window mode, exp) | the window-mode patch on one MODEL for hand-built graphs (243 / 22, 接续窗口 on); the Loop applies it itself when the plan has `windowMode` |
 | H3MDLowVRAMLoraLoader | H3MD LowVRAM LoRA Loader | token-sliced bypass LoRA loader (same behaviour as H3LowVRAMBypassLoraLoader) |
 
 ### Director editor (Phase 2 UI)
@@ -325,6 +326,48 @@ Not connected = off: behaviour and segment-cache key unchanged.
   `[H3MD SemanticBridge] ON (2 bridges, CPU): ...` once and per segment
   `[H3MD SemanticBridge] segment N/M: 2 bridge(s) applied to 1 tensor(s), T token(s); cos(native, bridged) 0.97..`;
   summary `semantic_bridge` per segment; `... NOT applied ...` = no 5120-dim tensor found.
+* 0.3.9-beta: the Control Panel's style buttons no longer switch a bridge on (its `semantic_bridge` output is always
+  off; kept so old links stay). The example workflows have the bridge nodes wired and bypassed: un-bypass (Ctrl+B) to
+  use one. The bridge's author does not support reference-conditioned use (Ref2VA, reference audio / lip-sync).
+
+### Window mode (`h3md_window.py`, `h3md_progress.py`; plan key `windowMode`; 0.3.9-beta)
+One continuous take (continued shots up to the next hard cut, or a group of shots split only at hard cuts) is
+rendered in ONE sampling run with the core MiniMax H3 context windows (ComfyUI 0.44+), instead of segment by segment.
+* Plan: `"windowMode": true` or `{"length": 243, "overlap": 22, "highLength": 175, "highOverlap": 22, "chain": true}`
+  (what the Director's "Seamless long video" switch writes; `true` / `{}` mean the same). `"chain": false` = the
+  core's averaged windows, low-res overlap 56. A `length` / `overlap` given without `highLength` / `highOverlap` is
+  used for both passes. Lengths snap to 17n+5; windows longer than 362 frames (H3's trained range) log a warning.
+  Other keys: `preview` (low-res pass only), `redraw` ([[start_s, end_s], ...]: re-render seconds of a finished run with
+  a new seed, the rest frame-identical), `refs` (pictures per window), `groups` / `groupLength` (multi-shot plans as
+  timelines of at most ~60 s, split only at hard cuts; 30 s below ~40 GB RAM), `videoPerWindow` (`auto`: reference
+  videos longer than ~15 s are sliced per window), `cropGuide` (timeline-aligned guide video cropped per window),
+  `freenoise`, `chainPin`.
+* **接续窗口 (low-res pass, default)**: every step runs the windows in time order. The latent rows a window shares with
+  the windows before it are pinned to their result of the same step: input = that result moved to `chainPin * sigma`
+  (0 = kept, the per-row `denoise_mask` H3 already uses for continuation prefixes), output = that result. Each latent
+  gets exactly one version per step, nothing is averaged, so two different pictures can not be blended into a double
+  image. Audio rows are still fused as in core. Same work per window as core; overlap 22 instead of 56 makes it
+  cheaper. Log: `[H3MD Window] 接续窗口 (chain): w2 latents 15-71 keep the previous window's result (pin 0.00), no
+  averaging`.
+* **High-res pass**: core averaged windows, 175 / 22 (it refines the upscaled low-res result; 11-08: a 124-frame
+  overlap of two high-res windows showed no double image).
+* Per-window prompts: timed marks in a shot (`[8s] ...`, `At 00:07.9 ...`) are split automatically; each window gets
+  only the actions of its own span. Chained low-res: a window's span runs from the previous window's END to its own
+  end and it picks its prompt by its last frame (an action goes to the window that really draws it); high-res and
+  `"chain": false`: spans meet in the middle of the overlaps and the prompt is picked by the window centre.
+* Hard cuts are window boundaries (no overlap across a cut). Continued shots inside a take add only the next shot's new
+  sentences ("with no cut, the same shot continues").
+* Switched off in window mode: depth / pose control (the video stays a plain reference video) and RefMods.
+* Progress cache (`seg_XXX_progress/` in the segment cache folder): `pass1.pt` (low-res result, kept: a rerun or the
+  full run after a preview skips the low-res pass) and the sampler state at the start of the two newest steps of each
+  pass (resume after a crash re-runs from that step; deleted when the segment finishes). Loaded with
+  `weights_only=True`; a different cache key wipes the folder.
+* Decode: a group is decoded and written ~10 s at a time straight into the disk cache (RAM no longer grows with the
+  group); the high-res pass plans its strips per window.
+* Speed (RTX 5090, 1920x1088, per latent and step vs one pass): low-res chained 243 / 22 about +11 %, high-res 175 / 22
+  about +34 %, about +25 % overall (11-08, 22 s take).
+* Manual node `H3MD Context Windows (window mode, exp)`: the same patch on one MODEL for hand-built graphs; defaults
+  243 / 22 with `chain` on (use it on the low-res model).
 
 ### H3MD drift (own implementation)
 Per sampler step, for overlap-prefix tokens that the static mask keeps (mask 0):

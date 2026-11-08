@@ -103,7 +103,10 @@ non_diegetic_music:
   (plan `"windowMode": {"length": 243, "overlap": 22, "highLength": 175, "highOverlap": 22}`) H3MD joins continued
   shots into one timeline sampled in one run (no seams) and keeps hard cuts as clean cuts. A group runs up to about
   60 s (30 s with less than 40 GB RAM) and ends at the last hard cut that fits; a continuous take longer than that
-  gets a note saying where to add a hard cut.
+  gets a note saying where to add a hard cut. (`"windowMode": true` means the same values.)
+- Low-res windows are chained (接续窗口): each window continues from the one before it instead of being averaged with
+  it, so big changes inside a take (a spin, a back view turning to the front, running past changing scenery) no longer
+  dissolve where windows overlap (tested 11-08). Still give every big change a time, so only one window plays it.
 - Switched off automatically in window mode: autosplit, depth / pose control (the video stays a normal reference video;
   also off in motion copy) and RefMods (identity comes from the reference pictures).
 - Timing inside a long shot (recommended): give each action or sung line its time from the shot's start, in the usual

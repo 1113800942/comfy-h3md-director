@@ -1,8 +1,11 @@
-"""H3MD window mode (experimental branch window-exp, 2026-11-07).
+"""H3MD window mode (window-exp, 2026-11-07; 0.3.9-beta: 接续窗口 default).
 
 Window mode renders one whole shot in a single sampling run with the core MiniMax H3 context windows: every
-denoising step goes over all windows and the overlaps are fused at every step, so there is no continuation seam.
-H3MD adds three things on top of the core MiniMaxH3ContextWindows patch:
+denoising step goes over all windows, so there is no continuation seam.  Low-res pass (0.3.9-beta): 接续窗口 - the
+windows run in time order and a window's overlap with the windows before it is pinned to their result of the same
+step (no averaging, so no double images; overlap 22).  High-res pass: the core's averaged windows (175 / 22; it only
+refines the upscaled low-res result, 11-08 tests showed no double images there).
+H3MD adds these things on top of the core MiniMaxH3ContextWindows patch:
 
 1. Guide video cropped per window.  Core passes reference videos whole to every window.  A timeline-aligned
    reference video (latent length == the target's, i.e. the motion-copy guide with useDuration = shot length) is
@@ -12,12 +15,16 @@ H3MD adds three things on top of the core MiniMaxH3ContextWindows patch:
    model function, e.g. BFS / TARA temporal alignment, read payload["layout"] first).
 3. Window prompts.  A segment may carry several prompts with start times (plan segment "windowPrompts").  The
    encoder tags each conditioning with its frame span (key SPAN_KEY); each window uses the prompt whose span holds
-   the window's centre, instead of the core's even split by count.  Without it every window re-plays the whole
+   the window's centre (chained low-res windows: the window's last frame, 0.3.9-beta), instead of the core's even
+   split by count.  Without it every window re-plays the whole
    action list of the one prompt (11-07 test: the hair-brush gesture came back every window).
 
 Plan keys (Director passes them through; old plans are unchanged):
-  "windowMode": true | {"length": 124, "overlap": 56, "highLength": 175, "highOverlap": 56, "freenoise": true,
-                        "cropGuide": true}     (high* default to the low-res values)
+  "windowMode": true | {"length": 243, "overlap": 22, "highLength": 175, "highOverlap": 22, "chain": true,
+                        "freenoise": true, "cropGuide": true}
+  true / {} = exactly what the Director's switch writes: low 243 / 22 chained, high 175 / 22.  "chain": false = the
+  core's averaging, low overlap 56.  A "length" / "overlap" given without highLength / highOverlap is used for both
+  passes (as before; earlier builds used a 124-frame window for `true`).
   segment "windowPrompts": [{"at": 0.0, "prompt": "..."}, {"at": 5.0, "prompt": "..."}]   (seconds from shot start)
 Window mode turns autosplit off (one sampling run per shot); hard cuts and continuation segments stay as before.
 """
@@ -30,7 +37,7 @@ LOG = logging.getLogger("H3MD")
 _TAG = "[H3MD Window]"
 _KEY = "h3md_window"
 SPAN_KEY = "h3md_window_span"          # conditioning dict key: (start_frame, end_frame) in shot pixel frames
-DEFAULTS = {"videoPerWindow": "auto", "length": 124, "overlap": None, "highLength": None, "highOverlap": None, "freenoise": True,
+DEFAULTS = {"videoPerWindow": "auto", "length": 243, "overlap": None, "highLength": None, "highOverlap": None, "freenoise": True,
             "cropGuide": True, "preview": False,
             "refs": True, "groups": True, "groupLength": 1445,
             "redraw": None,
@@ -43,6 +50,8 @@ DEFAULTS = {"videoPerWindow": "auto", "length": 124, "overlap": None, "highLengt
             "chain": True, "chainPin": 0.0}
 OVERLAP_CHAIN = 22         # default low-res overlap with 接续窗口 (enough context once the overlap is pinned, 11-08 tests)
 OVERLAP_AVERAGED = 56      # default low-res overlap without it (56 removed the 11-07 ghosting case of averaged windows)
+HIGH_LENGTH = 175          # default high-res window (11-07: 243 filled a 32 GB card at 1088x1664; 175 is 1/3 faster)
+HIGH_OVERLAP = 22          # default high-res overlap (the high-res pass refines the low-res result; 22 showed no seams)
 MAX_TRAINED = 362          # H3 was trained on ~124-362 frame clips; longer windows are outside that range
 FPS = 24
 
@@ -82,9 +91,13 @@ def normalize_window_mode(value):
         out["overlap"] = OVERLAP_CHAIN if out["chain"] else OVERLAP_AVERAGED
     out["length"] = _round_17(out["length"], 22)
     out["overlap"] = min(_round_17(out["overlap"], 5), out["length"] - 17)
-    # 11-07: the high-res pass may need a smaller window than low-res (243 filled a 32 GB card at 1088x1664)
-    out["highLength"] = _round_17(out["highLength"] or out["length"], 22)
-    out["highOverlap"] = min(_round_17(out["highOverlap"] or out["overlap"], 5), out["highLength"] - 17)
+    # 11-07: the high-res pass may need a smaller window than low-res (243 filled a 32 GB card at 1088x1664).
+    # 0.3.9-beta: not given -> 175 / 22 (what the Director writes), unless the plan set the low-res value itself
+    given = value if isinstance(value, dict) else {}
+    hl = out["highLength"] or (out["length"] if given.get("length") is not None else HIGH_LENGTH)
+    out["highLength"] = _round_17(hl, 22)
+    ho = out["highOverlap"] or (out["overlap"] if given.get("overlap") is not None else HIGH_OVERLAP)
+    out["highOverlap"] = min(_round_17(ho, 5), out["highLength"] - 17)
     for k in ("length", "highLength"):
         if out[k] > MAX_TRAINED:
             LOG.warning("%s window %s %d frames is longer than H3's trained range (<= %d)", _TAG, k, out[k], MAX_TRAINED)
@@ -912,21 +925,29 @@ def wrap_models(window_mode: dict, low, high):
 
 
 class H3MDContextWindows:
-    """Manual node: the same patch on one MODEL (for hand-built graphs; the Loop applies it itself in window mode)."""
+    """Manual node: the same patch on one MODEL (for hand-built graphs; the Loop applies it itself in window mode).
+    0.3.9-beta: defaults = the Loop's low-res pass (243 / 22, 接续窗口 on); `chain` is the last input, so graphs saved
+    before keep their values and get chain on."""
 
     @classmethod
     def INPUT_TYPES(cls):
         import comfy.context_windows as cw
         return {"required": {
             "model": ("MODEL",),
-            "context_length": ("INT", {"default": 124, "min": 22, "max": 4096, "step": 17,
-                                       "tooltip": "Window length in real frames (17n+5)."}),
-            "context_overlap": ("INT", {"default": 56, "min": 5, "max": 4096, "step": 17,
-                                        "tooltip": "Overlap in real frames (17n+5). 56 removed the 11-07 ghosting case."}),
+            "context_length": ("INT", {"default": 243, "min": 22, "max": 4096, "step": 17,
+                                       "tooltip": "Window length in real frames (17n+5). Loop window mode: low-res 243, "
+                                                  "high-res 175."}),
+            "context_overlap": ("INT", {"default": 22, "min": 5, "max": 4096, "step": 17,
+                                        "tooltip": "Overlap in real frames (17n+5). 22 with chain on; 56 with chain off "
+                                                   "(56 removed the 11-07 ghosting case of averaged windows)."}),
             "fuse_method": (cw.ContextFuseMethods.LIST_STATIC, {"default": cw.ContextFuseMethods.PYRAMID}),
             "freenoise": ("BOOLEAN", {"default": True}),
             "crop_guide_video": ("BOOLEAN", {"default": True,
                                              "tooltip": "Crop the timeline-aligned guide video (motion copy) to each window."}),
+            "chain": ("BOOLEAN", {"default": True, "tooltip":
+                      "接续窗口: windows run in time order and a window's overlap takes the previous window's result "
+                      "(no averaging, no double images). For the low-res model; the Loop's window mode leaves the "
+                      "high-res model averaged. Off = the core's averaging."}),
         }}
 
     RETURN_TYPES = ("MODEL",)
@@ -934,10 +955,10 @@ class H3MDContextWindows:
     CATEGORY = "H3MD/experimental"
     EXPERIMENTAL = True
 
-    def run(self, model, context_length, context_overlap, fuse_method, freenoise, crop_guide_video):
-        LOG.info("%s manual node: windows %d / overlap %d, %s, freenoise %s, crop guide %s", _TAG, context_length,
-                 context_overlap, fuse_method, freenoise, crop_guide_video)
-        return (apply(model, context_length, context_overlap, fuse_method, freenoise, crop_guide_video),)
+    def run(self, model, context_length, context_overlap, fuse_method, freenoise, crop_guide_video, chain=True):
+        LOG.info("%s manual node: windows %d / overlap %d, %s, freenoise %s, crop guide %s, chain %s", _TAG,
+                 context_length, context_overlap, fuse_method, freenoise, crop_guide_video, chain)
+        return (apply(model, context_length, context_overlap, fuse_method, freenoise, crop_guide_video, bool(chain)),)
 
 
 NODE_CLASS_MAPPINGS = {"H3MDContextWindows": H3MDContextWindows}

@@ -100,9 +100,9 @@ changes:
   (`At 00:07.9 she sings: <d>[English] ...</d>.`) or as `[8s] ...`; each one goes to the one window that holds that
   second, so nothing is sung or played twice (see the prompt skill).
 * Inside one continuous take each shot is drawn from its own text only: write place, light and outfit in full in
-  every shot (continued shots too) and give big changes a time. A big change inside a take (turning around, a back view
-  becoming a front view, a new camera angle) can show as a short dissolve where two windows overlap (tested on a 2:20
-  two-person music video); hard cuts are the safe place for such changes.
+  every shot (continued shots too) and give big changes a time. With 接续窗口 big changes inside a take (a spin, a back
+  view turning to the front, running past changing scenery) no longer dissolve where windows overlap (11-08 tests:
+  spin, back-to-front turn, a 22 s take with two hand-overs, a 12 s run along the sea). With `"chain": false` they can.
 * Switched off automatically: depth / pose control (the video stays a normal reference video; also off in motion copy)
   and RefMods (identity comes from the reference pictures).
 * `"preview": true` renders the low-res pass only (about half the time; the full run reuses it).
@@ -114,7 +114,8 @@ changes:
   changing only high-res settings (high-res LoRAs, high-res windows) reuses the finished low-res pass.
 * Segment numbers (`segments_to_run`, `rerun_segments`, `stop_after`) count **groups** in window mode, as the
   Director's notes list them (one group = the shots rendered together).
-* About 25% slower than the old chain. Turn it off to get the old behaviour back exactly.
+* About 25% slower than the old chain (11-08, 1920×1088: low-res about +11 %, high-res about +34 % per frame). Turn
+  it off to get the old behaviour back exactly.
 
 ## More (click to open)
 
