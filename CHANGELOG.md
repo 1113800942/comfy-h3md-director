@@ -4,18 +4,21 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
 ## [0.3.9-beta] — 2026-11-08 (window mode, includes 0.3.8)
 **In short / 简要：**
-* **接续窗口 (experimental, `"chain": true` in windowMode)**: in the low-res pass the windows run in time order and a
+* **接续窗口 (default on, `"chain": false` turns it off)**: in the low-res pass the windows run in time order and a
   window's overlap with the windows before it takes their result of the same step (input and output) instead of being
   averaged - averaging two different pictures was the ghosting / double layers of the 2:20 test video. Same amount of
-  computation; off by default until the test decides. 低清阶段按时间顺序跑窗口，重叠区直接用前一个窗口这一步的结果，
-  不再两边平均（平均两份不同的画面就是 2 分 20 秒测试片里的重影）；计算量不变；测试后再定是否默认打开。
+  computation; default low-res overlap 22 (56 with chain off). Timed actions go to the window that really draws those
+  frames. Tested 11-08: a 27 s piece of the 2:20 video and two turns (spin, back view to facing each other) - no double
+  images, same speed per window. 低清阶段按时间顺序跑窗口，重叠区直接用前一个窗口这一步的结果，不再两边平均（平均两份
+  不同的画面就是 2 分 20 秒测试片里的重影）；计算量不变；低清默认重叠 22（关掉时 56）；带时间的动作交给真正画那几帧的
+  窗口。11-08 实测：2 分 20 秒片子里的 27 秒和两次转身（转圈、背影转面对面）都没有重影，每个窗口速度不变。
 * **Seamless long video (window mode, beta)**: one switch on the Director. Continued shots are rendered together on
   one timeline (no continuation seams); hard cuts stay cuts; long plans are grouped only at hard cuts. 导演台一个开关：
   续接的镜头在同一条时间线上一起生成（没有续接接缝）；硬切照常；长计划只在硬切处分组。
 
 **Details / 详细：**
-* Core MiniMax H3 context windows (ComfyUI 0.44+) with H3MD additions: low-res windows 243 / overlap 56, high-res
-  175 / 22 (measured: no double faces, no window seams). 核心上下文窗口 + H3MD 扩展：低清 243 / 重叠 56、高清 175 / 22（实测无重影、无窗口接缝）。
+* Core MiniMax H3 context windows (ComfyUI 0.44+) with H3MD additions: low-res windows 243 / overlap 22 (chained),
+  high-res 175 / 22. 核心上下文窗口 + H3MD 扩展：低清 243 / 重叠 22（接续窗口）、高清 175 / 22。
 * Each shot's prompt, pictures, reference videos (sliced per window, so guides longer than ~15 s work) and audio follow
   its own time range. 每个镜头的提示词、参考图、参考视频（按窗口切开，超过约 15 秒也能用）、音频只管自己的时间段。
 * Timed actions `[Ns] ...` and in-shot hard cuts `[Ns cut] ...` in `detailed_description`; each action is played once;

@@ -31,7 +31,9 @@ class Normalize(unittest.TestCase):
         self.assertIsNone(WIN.normalize_window_mode(None))
         self.assertIsNone(WIN.normalize_window_mode(False))
         wm = WIN.normalize_window_mode(True)
-        self.assertEqual((wm["length"], wm["overlap"]), (124, 56))
+        self.assertEqual((wm["length"], wm["overlap"], wm["chain"]), (124, 22, True))   # 0.3.9: chained, overlap 22
+        wm = WIN.normalize_window_mode({"chain": False})
+        self.assertEqual((wm["length"], wm["overlap"], wm["chain"]), (124, 56, False))  # averaged windows: 56
         wm = WIN.normalize_window_mode({"length": 130, "overlap": 40})
         self.assertEqual((wm["length"], wm["overlap"]), (124, 39))
         self.assertEqual((wm["highLength"], wm["highOverlap"]), (124, 39))
@@ -55,7 +57,7 @@ class PlanParse(unittest.TestCase):
     def test_window_mode_no_autosplit(self):
         p = D.parse_plan(plan(True, [{"at": 0, "prompt": "a"}, {"at": 10, "prompt": "b"}]))
         self.assertEqual(len(p["segments"]), 1)
-        self.assertEqual(p["windowMode"]["overlap"], 56)
+        self.assertEqual(p["windowMode"]["overlap"], 22)
         wps = p["segments"][0]["windowPrompts"]
         self.assertEqual([(w["start"], w["end"]) for w in wps], [(0, 240), (240, LONG)])
         self.assertTrue(wps[1]["prompt"].startswith("g"))
@@ -134,7 +136,7 @@ class TimedPrompts(unittest.TestCase):
         p = D.parse_plan(timed_plan())
         seg = p["segments"][0]
         self.assertTrue(seg.get("windowPromptsAuto"))
-        self.assertEqual(len(seg["windowPrompts"]), len(WIN.window_spans(1445, 124, 56)[0]))
+        self.assertEqual(len(seg["windowPrompts"]), len(WIN.window_spans(1445, 124, 22)[0]))
 
     def test_plan_off_or_manual_untouched(self):
         p = D.parse_plan(timed_plan(window=None))
@@ -1018,7 +1020,55 @@ class ChainWindows(unittest.TestCase):
         self.assertTrue(wm["chain"])
         self.assertEqual(wm["chainPin"], 1.0)
         self.assertEqual(wm["overlap"], 22)
-        self.assertFalse(WIN.normalize_window_mode({})["chain"])
+        self.assertTrue(WIN.normalize_window_mode({})["chain"])            # default on since 0.3.9-beta
+        self.assertFalse(WIN.normalize_window_mode({"chain": False})["chain"])
+
+
+class ChainSpans(unittest.TestCase):
+    """0.3.9-beta: with 接续窗口 a timed action belongs to the window that generates its frames (previous window's end
+    .. its end); without it, to the window owning the middle of the overlap."""
+
+    def test_spans(self):
+        wins, spans = WIN.window_spans(1445, 243, 22, (), chain=True)
+        self.assertEqual(spans[0][0], 0)
+        self.assertEqual(spans[-1][1], 1445)
+        for i in range(1, len(wins)):
+            self.assertEqual(spans[i][0], wins[i - 1][1])          # starts where the previous window ends
+            self.assertEqual(spans[i - 1][1], spans[i][0])         # tiled
+        wins2, spans2 = WIN.window_spans(1445, 243, 22, ())
+        self.assertEqual(wins, wins2)
+        self.assertNotEqual(spans, spans2)
+        # after a hard cut the first window starts at the cut
+        cut = 17 * 30
+        wins3, spans3 = WIN.window_spans(1445, 243, 22, (cut,), chain=True)
+        k = next(i for i, (a, b) in enumerate(wins3) if a >= cut)
+        self.assertEqual(spans3[k][0], wins3[k][0])
+
+    def test_action_just_before_window_end(self):
+        wins, _ = WIN.window_spans(1445, 243, 22, ())
+        (a0, b0), (a1, b1) = wins[0], wins[1]
+        sec = (b0 - 4) / 24.0                                      # inside the overlap, past its middle
+        prompt = ("summary:\nx.\n\ndetailed_description:\nA woman on a stage. [%.2fs] She raises both arms.\n\n"
+                  "overall_soundscape: music." % sec)
+        chained = WIN.auto_window_prompts(prompt, 1445, 243, 22, chain=True)
+        averaged = WIN.auto_window_prompts(prompt, 1445, 243, 22, chain=False)
+        self.assertEqual([w["events"] for w in chained][:2], [1, 0])     # the window that draws it
+        self.assertEqual([w["events"] for w in averaged][:2], [0, 1])    # the mid-overlap owner
+        self.assertIn("raises both arms", chained[0]["prompt"])
+
+    def test_pick_by_last_frame(self):
+        from types import SimpleNamespace
+        n = WIN.video_latent_t(289)
+        px = WIN.latent_pixel_starts(n)
+        # a short shot: windows (0, 71) and (10, 84) latents; the second one's centre lies in the first one's span
+        wins, spans = WIN.window_spans(289, 243, 22, (), chain=True)
+        self.assertEqual(len(wins), 2)
+        conds = [{WIN.SPAN_KEY: s} for s in spans]
+        la = [k for k in range(n + 1) if px[k] == wins[1][0]][0]
+        lb = [k for k in range(n + 1) if px[k] == wins[1][1]][0]
+        win = SimpleNamespace(index_list=list(range(la, lb)), total_frames=n)
+        self.assertEqual(WIN.pick_span_cond(conds, win, at_end=True), 1)
+        self.assertEqual(WIN.pick_span_cond(conds, win, at_end=False), 0)
 
 
 class ChainRealModel(unittest.TestCase):

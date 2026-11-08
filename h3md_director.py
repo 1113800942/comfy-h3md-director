@@ -645,7 +645,8 @@ def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = Fa
         elif window_mode is not None:
             # H3MD window 3a (2026-11-07): "[12s] ..." marks in detailed_description -> one prompt per window, each
             # action given to exactly one window (no action replayed by two windows)
-            auto = WIN.auto_window_prompts(seg["prompt"], length, window_mode["length"], window_mode["overlap"])
+            auto = WIN.auto_window_prompts(seg["prompt"], length, window_mode["length"], window_mode["overlap"],
+                                           chain=bool(window_mode.get("chain")))
             if auto:
                 seg["windowPrompts"] = [{k: a[k] for k in ("start", "end", "prompt")} for a in auto]
                 if auto[0].get("removed"):
@@ -1897,9 +1898,13 @@ def encode_video_windows(core, plan, seg, picked, kwargs, wps, prompt, clip, vae
     cuts = tuple(seg.get("windowCuts") or ())
     ranges = WIN.all_window_ranges(int(seg["length"]), wm, cuts)
     base = wps or [{"start": 0, "end": int(seg["length"]), "prompt": prompt}]
+    # 接续窗口: a chained low-res window's own span is the part it generates (previous end .. its end), which need
+    # not hold its centre - pick its prompt by its last frame, as the window handler does
+    chained = set(WIN.window_spans(int(seg["length"]), wm["length"], wm["overlap"], cuts)[0]) if wm.get("chain") \
+        else set()
     positive, latent, texts = [], None, []
     for a, b in ranges:
-        mid = (a + b) / 2.0
+        mid = (b - 1) if (a, b) in chained else (a + b) / 2.0
         wp = next((w for w in base if w["start"] <= mid < w["end"]), None) or \
             min(base, key=lambda w: min(abs(mid - w["start"]), abs(mid - w["end"])))
         kw = dict(kwargs)

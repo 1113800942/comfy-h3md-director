@@ -89,6 +89,9 @@ changes:
 * Shots that continue each other are rendered **together on one timeline** with overlapping context windows, so there
   is **no continuation seam** and no drift from segment to segment.
 * Hard cuts stay hard cuts (the windows break there, nothing is blended across a cut).
+* Low-res windows are **chained** (接续窗口): they run in time order and a window takes over the overlap from the one
+  before it instead of averaging two pictures, so there are no double images in the overlaps (`"chain": false` = the
+  old averaging, with overlap 56).
 * A very long plan is split into groups (about 60 s each) **only at a hard cut**, where the picture changes anyway.
   If one continuous take is longer than a group, the Director says where to put a hard cut.
 * Each shot keeps its own prompt, pictures, reference video and music for its own time range; reference videos longer

@@ -100,7 +100,7 @@ non_diegetic_music:
 
 ### Window mode (0.3.9 beta: the Director's "Seamless long video" switch)
 - Write the plan as usual: shots, continued shots (`overlapIn` 22/39) and hard cuts (`overlapIn` 0). With the switch on
-  (plan `"windowMode": {"length": 243, "overlap": 56, "highLength": 175, "highOverlap": 22}`) H3MD joins continued
+  (plan `"windowMode": {"length": 243, "overlap": 22, "highLength": 175, "highOverlap": 22}`) H3MD joins continued
   shots into one timeline sampled in one run (no seams) and keeps hard cuts as clean cuts. A group runs up to about
   60 s (30 s with less than 40 GB RAM) and ends at the last hard cut that fits; a continuous take longer than that
   gets a note saying where to add a hard cut.

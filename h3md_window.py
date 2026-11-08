@@ -30,7 +30,7 @@ LOG = logging.getLogger("H3MD")
 _TAG = "[H3MD Window]"
 _KEY = "h3md_window"
 SPAN_KEY = "h3md_window_span"          # conditioning dict key: (start_frame, end_frame) in shot pixel frames
-DEFAULTS = {"videoPerWindow": "auto", "length": 124, "overlap": 56, "highLength": None, "highOverlap": None, "freenoise": True,
+DEFAULTS = {"videoPerWindow": "auto", "length": 124, "overlap": None, "highLength": None, "highOverlap": None, "freenoise": True,
             "cropGuide": True, "preview": False,
             "refs": True, "groups": True, "groupLength": 1445,
             "redraw": None,
@@ -38,8 +38,11 @@ DEFAULTS = {"videoPerWindow": "auto", "length": 124, "overlap": 56, "highLength"
             # window's overlap with the previous one is pinned to that window's result of the same step instead of
             # being averaged (averaging two different pictures = the ghosting of the 2:20 test video).  chainPin is
             # the noise level the pinned rows run at, as a fraction of the step's sigma (0 = kept like a
-            # continuation prefix).  Default off until the 20 s test decides.
-            "chain": False, "chainPin": 0.0}
+            # continuation prefix).  Default ON since the 11-08 tests (27 s and the two turns: no double images,
+            # same speed); "chain": false = the core's averaging again.
+            "chain": True, "chainPin": 0.0}
+OVERLAP_CHAIN = 22         # default low-res overlap with 接续窗口 (enough context once the overlap is pinned, 11-08 tests)
+OVERLAP_AVERAGED = 56      # default low-res overlap without it (56 removed the 11-07 ghosting case of averaged windows)
 MAX_TRAINED = 362          # H3 was trained on ~124-362 frame clips; longer windows are outside that range
 FPS = 24
 
@@ -74,6 +77,9 @@ def normalize_window_mode(value):
         for k in DEFAULTS:
             if k in value and value[k] is not None:
                 out[k] = value[k]
+    out["chain"] = bool(out["chain"])
+    if out["overlap"] is None:
+        out["overlap"] = OVERLAP_CHAIN if out["chain"] else OVERLAP_AVERAGED
     out["length"] = _round_17(out["length"], 22)
     out["overlap"] = min(_round_17(out["overlap"], 5), out["length"] - 17)
     # 11-07: the high-res pass may need a smaller window than low-res (243 filled a 32 GB card at 1088x1664)
@@ -87,7 +93,6 @@ def normalize_window_mode(value):
     out["preview"] = bool(out["preview"])
     out["refs"] = bool(out["refs"])
     out["groups"] = bool(out["groups"])            # 3e: multi-shot plans -> one timeline per group
-    out["chain"] = bool(out["chain"])
     out["chainPin"] = min(1.0, max(0.0, float(out["chainPin"] or 0.0)))
     out["groupLength"] = _round_17(out["groupLength"], 22)
     v = out["videoPerWindow"]   # 3d: "auto" = when a reference video is longer than H3's ~15 s limit
@@ -216,17 +221,24 @@ def latent_schedule(n: int, cl: int, co: int, cut_lats=()):
     return out
 
 
-def window_spans(total_frames: int, length: int, overlap: int, cuts=()):
+def window_spans(total_frames: int, length: int, overlap: int, cuts=(), chain: bool = False):
     """Pixel-frame ranges [a, b) of the windows and each window's own span: from the middle of its overlap with the
     previous window to the middle of its overlap with the next (at a hard cut: the cut).  The spans tile the shot, and
-    each window's centre lies in its own span, so per-window prompts tagged with these spans are picked once."""
+    each window's centre lies in its own span, so per-window prompts tagged with these spans are picked once.
+    chain (接续窗口, 11-08): a window generates only what the windows before it did not (the overlap is pinned to
+    their result), so its own span runs from the previous window's END to its own end (the first window, and the
+    first one after a cut, from its start); a timed action then goes to the window that really draws those frames."""
     n = video_latent_t(total_frames)
     px = latent_pixel_starts(n)
     wins = [(px[a], px[b + 1]) for a, b in core_windows(total_frames, length, overlap, cuts)]
     spans = []
     for i, (a, b) in enumerate(wins):
-        lo = 0 if i == 0 else (a + wins[i - 1][1]) // 2
-        hi = int(total_frames) if i == len(wins) - 1 else (wins[i + 1][0] + b) // 2
+        if chain:
+            lo = 0 if i == 0 else max(a, wins[i - 1][1])
+            hi = int(total_frames) if i == len(wins) - 1 else b
+        else:
+            lo = 0 if i == 0 else (a + wins[i - 1][1]) // 2
+            hi = int(total_frames) if i == len(wins) - 1 else (wins[i + 1][0] + b) // 2
         spans.append((lo, hi))
     return wins, spans
 
@@ -372,7 +384,8 @@ def prompt_cuts(prompt: str, fps: int = FPS):
     return sorted({int(round(sec * fps)) for sec, _ in parts[2] if sec > 0})
 
 
-def auto_window_prompts(prompt: str, total_frames: int, length: int, overlap: int, fps: int = FPS, cuts=None):
+def auto_window_prompts(prompt: str, total_frames: int, length: int, overlap: int, fps: int = FPS, cuts=None,
+                        chain: bool = False):
     """3a/3b: one timed prompt -> per-window prompts [{"start", "end", "prompt", "events"}] (pixel frames), each action
     given to exactly ONE window (the one whose own span holds its time).  A '[Ns cut] text' mark starts a new shot:
     its text describes every window after the cut (until the next cut), and windows never straddle it.  None when the
@@ -383,7 +396,7 @@ def auto_window_prompts(prompt: str, total_frames: int, length: int, overlap: in
     before, common, shots, acts, after = parts
     if cuts is None:
         cuts = prompt_cuts(prompt, fps)
-    wins, spans = window_spans(total_frames, length, overlap, cuts)
+    wins, spans = window_spans(total_frames, length, overlap, cuts, chain)
     if len(wins) < 2:
         return None
     out = []
@@ -424,11 +437,12 @@ def timed_window_prompt(prompt: str, a: int, b: int, lo: int, hi: int, origin: i
 
 
 def window_span_map(total_frames: int, window_mode: dict, cuts=()):
-    """{(a, b): (lo, hi)} for the windows of both passes: each window's own span (the first pass wins a tie)."""
+    """{(a, b): (lo, hi)} for the windows of both passes: each window's own span (the first pass wins a tie).  The
+    low-res windows use the 接续窗口 spans when chain is on; the high-res pass is never chained."""
     out = {}
-    for ln, ov in ((window_mode["length"], window_mode["overlap"]),
-                   (window_mode["highLength"], window_mode["highOverlap"])):
-        wins, spans = window_spans(total_frames, ln, ov, cuts)
+    for ln, ov, ch in ((window_mode["length"], window_mode["overlap"], bool(window_mode.get("chain"))),
+                       (window_mode["highLength"], window_mode["highOverlap"], False)):
+        wins, spans = window_spans(total_frames, ln, ov, cuts, ch)
         for w, s in zip(wins, spans):
             out.setdefault(w, s)
     return out
@@ -613,9 +627,11 @@ def window_pixel_span(window):
     return starts[window.index_list[0]], starts[window.index_list[-1] + 1]
 
 
-def pick_span_cond(cond_in, window):
+def pick_span_cond(cond_in, window, at_end: bool = False):
     """Index of the conditioning whose SPAN_KEY span holds the window centre (nearest span otherwise), or None
-    when the conds carry no spans.  3d: conds tagged with RANGE_KEY are matched to the window's exact pixel range."""
+    when the conds carry no spans.  3d: conds tagged with RANGE_KEY are matched to the window's exact pixel range.
+    at_end (接续窗口): use the window's last frame instead of its centre - a chained window's own span is the part it
+    generates (previous window's end .. its end), which need not hold its centre (e.g. a short last window)."""
     ranges = [c.get(RANGE_KEY) for c in cond_in]
     if len(cond_in) >= 2 and all(r is not None for r in ranges):
         a, b = window_pixel_span(window)
@@ -627,7 +643,7 @@ def pick_span_cond(cond_in, window):
     if len(cond_in) < 2 or any(s is None for s in spans):
         return None
     a, b = window_pixel_span(window)
-    mid = (a + b) / 2.0
+    mid = (b - 1) if at_end else (a + b) / 2.0
     best, dist = 0, None
     for i, (s, e) in enumerate(spans):
         d = 0.0 if s <= mid < e else min(abs(mid - s), abs(mid - e))
@@ -720,7 +736,7 @@ def install(handler, crop_guide: bool):
 
         def get_resized_cond(self, cond_in, x_in, window, device=None):
             if cond_in is not None:
-                k = pick_span_cond(cond_in, window)
+                k = pick_span_cond(cond_in, window, bool(getattr(self, "_h3md_chain", False)))
                 if k is not None:
                     key = (window.index_list[0], window.index_list[-1], k)
                     if key not in self._h3md_seen:
