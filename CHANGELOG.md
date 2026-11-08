@@ -2,6 +2,12 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.3.8] — 2026-11-08
+* Same code as 0.3.7. The 0.3.7 package was flagged by the registry scan only because CHANGELOG.md quoted one of the
+  spellings the scan looks for; the text is reworded, and the self-check test now reads the documentation files too.
+  代码和 0.3.7 完全一样。0.3.7 被注册表标记，只是因为 CHANGELOG 里原样引用了扫描会查的写法；已改写，自查测试现在
+  连说明文档一起查。
+
 ## [0.3.7] — 2026-11-08
 **In short / 简要：**
 * Passes the Comfy Registry checks again (every version since 0.2.0 was "Flagged", so ComfyUI-Manager only offered
