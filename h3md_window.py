@@ -95,8 +95,8 @@ FRAME_PER_TOKEN = (1, 4, 4, 4, 4)
 TIME_MARK = re.compile(r"\[\s*(\d+(?:\.\d+)?)\s*s(\s+cut)?\s*\]", re.I)
 SECTION = re.compile(r"(?m)^\s*(subject_definitions|summary|retention_analysis|detailed_description|"
                      r"overall_soundscape|non_diegetic_music|dialogue|sound_effects)\s*:")
-NO_NEW_ACTION = ("The subject continues the same movement from the moment before, without starting any new gesture or "
-                 "action in this part.")
+NO_NEW_ACTION = ("No new action starts in this part; whatever is moving keeps moving the same way as the moment "
+                 "before.")   # 11-07: no "subject" wording - an empty landscape window must not invite a person
 CUT_KEY = "h3md_window_cuts"
 
 
