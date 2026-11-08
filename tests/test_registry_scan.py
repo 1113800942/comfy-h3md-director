@@ -23,7 +23,8 @@ PATTERNS = {
     "process": re.compile(r"\bsubprocess\b|\bos\.system\s*\(|\bos\.popen\s*\(|\bPopen\s*\("),
     "code objects": re.compile(r"\bmarshal\b|\bpickle\.loads?\s*\(|\bnew Function\s*\("),
 }
-CODE_EXT = (".py", ".js", ".mjs", ".ts", ".html")
+CODE_EXT = (".py", ".js", ".mjs", ".ts", ".html", ".css", ".md", ".txt", ".json", ".toml", ".yml", ".yaml")  # 0.3.7 was
+# flagged for ".bind(" quoted in CHANGELOG.md: the network rule reads every file, not only code
 
 
 def _ignored(rel, rules):
@@ -38,7 +39,8 @@ def _ignored(rel, rules):
 def shipped_files():
     rules = [ln.strip() for ln in open(os.path.join(ROOT, ".comfyignore"), encoding="utf-8")
              if ln.strip() and not ln.startswith("#")]
-    files = subprocess.run(["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.split()
+    files = [f for f in subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, text=True,
+                                       check=True).stdout.split("\0") if f]
     return [f for f in files if not _ignored(f, rules) and f.endswith(CODE_EXT)]
 
 

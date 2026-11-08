@@ -401,7 +401,7 @@ def make_stage(name: str, strength_mode: str, strength: float, adapters: dict = 
 
 # ---------------------------------------------------------------------------
 # T8 interop (v0.3.3): the Loop also accepts the output of T8's "H3 Semantic Bridge / 模型与设置", "自动模型参数"
-# and "多桥组合" nodes (socket type T8_SEMANTIC_BRIDGE).  Only public fields of T8's config objects are read
+# and "多桥组合" nodes (link type T8_SEMANTIC_BRIDGE).  Only public fields of T8's config objects are read
 # (path, alpha, enabled, sha256, magnitude_match, token_scope / bridges); the file is loaded and applied by the
 # H3MD code above.  No T8 code is imported.
 # ---------------------------------------------------------------------------
