@@ -914,6 +914,43 @@ class RefsPronouns(unittest.TestCase):
             self.assertEqual(first, float(round((g["locked"]["offset"] + a / 24) * 100)), (a, b))
 
 
+class WindowPlanExportImport(unittest.TestCase):
+    """11-08 (YJ): plan export / import keeps window mode, and the imported plan renders the same groups."""
+
+    def test_roundtrip(self):
+        import tempfile, os
+        import h3md_plan_io as P
+        src = tempfile.mkdtemp()
+        os.makedirs(os.path.join(src, "h3md_chars"))
+        for f in ("h3md_chars/Eva.png", "h3md_chars/Peter.png", "song.mp3"):
+            open(os.path.join(src, f), "wb").write(b"fake")
+        raw = json.loads(multi_plan({"length": 243, "overlap": 56, "highLength": 175, "highOverlap": 22,
+                                     "groupLength": 1450, "redraw": [[4, 8]]}, segs=((294, 0), (362, 39), (243, 0))))
+        raw["media"] = {"images": [{"id": "eva", "file": "h3md_chars/Eva.png"},
+                                   {"id": "peter", "file": "h3md_chars/Peter.png"}],
+                        "videos": [], "audios": [{"id": "song", "file": "song.mp3", "duration": 100.0}], "refmods": []}
+        st = 0
+        for i, s in enumerate(raw["segments"]):
+            st = st - s["overlapIn"] if i else 0
+            s["images"] = ["eva"] if i < 2 else ["eva", "peter"]
+            s["audios"] = [{"id": "song", "mode": "locked", "offset": st / 24}]
+            s["audioMode"] = "locked"
+            s["prompt"] = ("summary:\nx.\n\ndetailed_description:\n<Subject 1> walks. At 00:02.0 she sings: "
+                           "<d>[English] la</d>.\n")
+            st += s["length"]
+        data, man = P.export_plan(json.dumps(raw), {"nodes": []}, src, with_media=True, name="Eva Peter")
+        dst = tempfile.mkdtemp()
+        out = P.import_plan(data, dst, "Eva Peter.zip")
+        self.assertEqual(out["problems"], [])
+        back = json.loads(out["plan_json"])
+        self.assertEqual(back["windowMode"], raw["windowMode"])
+        self.assertEqual(back["segments"][1]["audios"], raw["segments"][1]["audios"])
+        a, b = D.parse_plan(json.dumps(raw)), D.parse_plan(json.dumps(back))
+        self.assertEqual([(s["startFrame"], s["length"], s.get("windowCuts")) for s in a["segments"]],
+                         [(s["startFrame"], s["length"], s.get("windowCuts")) for s in b["segments"]])
+        self.assertEqual(len(b["segments"][0]["groupParts"]), 3)
+
+
 class DepthOff(unittest.TestCase):
     def _raw(self, window, prompt="shot"):
         raw = json.loads(plan(window, length=345))
