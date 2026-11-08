@@ -614,6 +614,14 @@ def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = Fa
                 # H3MD lockrule (2026-10-26): the locked start follows the video's start by rule (stale saved
                 # offsets are replaced): start - overlapIn/24 (syncfix: may be negative = leading silence)
                 locked["offset"] = video_lock_offset(lref["trimStart"], overlap)
+        # YJ 11-07: the depth / pose control (Fun ControlNet) is switched off by window mode and by motion copy (TARA):
+        # the video stays as a normal reference video (TARA's guide), no depth / pose model, no ControlNet
+        if (window_mode is not None or motion) and any(r.get("depth") for r in videos):
+            for r in videos:
+                if r.pop("depth", None):
+                    r.pop("sam3Prompt", None)
+                    notes.append(f"segment {n}: depth / pose control off ({'window mode' if window_mode is not None else 'motion copy'}); "
+                                 f"video '{r['id']}' is used as a normal reference video")
 
         seg = {
             "index": i, "startFrame": start, "length": length, "overlapIn": overlap,

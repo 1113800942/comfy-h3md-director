@@ -488,3 +488,22 @@ class GroupWindowPrompts(unittest.TestCase):
                 self.assertIn("ACTION3", pr)
                 self.assertNotIn("ACTION2", pr)
             self.assertFalse(a < cut < b)
+
+
+class DepthOff(unittest.TestCase):
+    def _raw(self, window, prompt="shot"):
+        raw = json.loads(plan(window, length=345))
+        raw["media"]["videos"] = [{"id": "v", "file": "v.mp4", "duration": 20.0, "hasAudio": False}]
+        raw["segments"][0]["videos"] = [{"id": "v", "depth": True, "useSoundtrack": False}]
+        raw["segments"][0]["prompt"] = prompt
+        return json.dumps(raw)
+
+    def test_window_mode_turns_depth_off(self):
+        seg = D.parse_plan(self._raw(True))["segments"][0]
+        self.assertFalse(seg["videos"][0].get("depth"))
+        seg = D.parse_plan(self._raw(None))["segments"][0]
+        self.assertTrue(seg["videos"][0].get("depth"))
+
+    def test_motion_copy_turns_depth_off(self):
+        seg = D.parse_plan(self._raw(None, "motion_transfer: shot"))["segments"][0]
+        self.assertFalse(seg["videos"][0].get("depth"))
