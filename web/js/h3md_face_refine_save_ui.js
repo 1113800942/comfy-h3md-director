@@ -27,7 +27,10 @@ export const FACE_WIDGETS = [
   "paste_region", "mask_dilation", "feather", "colour_match", "blend", "undetected_frames", "feather_scales_with_crop",
   "vosr2_seed", "refine_model"];
 export function syncFaceWidgets(node) {
-  const on = node?.widgets?.find((w) => w.name === "face_refine")?.value !== false;
+  // face_refine fed by a link (e.g. from the Director / an outer subgraph input): its value is only known at run time,
+  // so the face widgets stay editable (11-07 user report: everything greyed out whatever the outer value was)
+  const linked = (node?.inputs ?? []).some((i) => i.name === "face_refine" && i.link != null);
+  const on = linked || node?.widgets?.find((w) => w.name === "face_refine")?.value !== false;
   for (const w of node?.widgets ?? []) if (FACE_WIDGETS.includes(w.name)) w.disabled = !on;
   return on;
 }
@@ -83,6 +86,12 @@ app.registerExtension({
     nodeType.prototype.onConfigure = function () {
       const r = onConfigure?.apply(this, arguments);
       refresh(this);
+      return r;
+    };
+    const onConn = nodeType.prototype.onConnectionsChange;
+    nodeType.prototype.onConnectionsChange = function () {
+      const r = onConn?.apply(this, arguments);
+      refresh(this);   // face_refine linked / unlinked -> face widgets editable or follow the toggle
       return r;
     };
     const onExecuted = nodeType.prototype.onExecuted;
