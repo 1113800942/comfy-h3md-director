@@ -70,6 +70,8 @@ non_diegetic_music:
 - 续接镜头：开头写 "The same ... continues without a cut"，先写上一个镜头结束时的状态，每个新动作、每次镜头变化都写时间
   （`[3s] she gradually slows down ...`），并写成慢慢变化。实测（11-08）：不写时间的 "she slows down, stops at the railing and
   turns toward the sea, the camera settling into a medium shot" 变成了一个硬切，后一个窗口又演了一遍（重影）。
+- 场景和光线：同一条连续镜头里的每个镜头（包括续接镜头）都要用同样的文字写全。每个窗口只知道自己镜头的文字：
+  只写 "the same boardwalk" 的续接镜头生成了另一座栈桥（旧木头、串灯），约一秒内叠化过去（11-08 实测）。
 - summary 里带 “then / after / finally” 的句子会自动从窗口提示词里去掉；最好 summary 本来就只写不变的东西。
 - 参考照片自动跟着窗口走：一个窗口只带它自己文字里提到的照片。
 - 对白和歌词一律写在 `<d>[English] ...</d>` 里（实测：不加会说得听不懂）。

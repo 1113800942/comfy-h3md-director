@@ -116,6 +116,9 @@ non_diegetic_music:
   give every new action and every camera change a time (`[3s] she gradually slows down ...`), described as gradual.
   Tested 11-08: an untimed "she slows down, stops at the railing and turns toward the sea, the camera settling into a
   medium shot" came out as a hard cut, and the next window played it again (double image).
+- Place and light: write them in full, in the same words, in every shot of a take, continued shots included. Each
+  window knows only its own shot's text: a continued shot that said only "the same boardwalk" got a different pier
+  (weathered wood, string lights), dissolving into it over about a second (tested 11-08).
 - Summary sentences with "then / after / finally" are left out of the window prompts automatically; better still,
   write the summary as what stays the same.
 - Reference pictures follow the windows automatically: a window carries only the pictures its own text names.
