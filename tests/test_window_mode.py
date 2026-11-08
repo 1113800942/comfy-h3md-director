@@ -572,6 +572,91 @@ class TimedGroupParts(unittest.TestCase):
         self.assertGreater(win[1], 323 + 48)
 
 
+class GroupGuideVideo(unittest.TestCase):
+    """11-08: a motion-copy guide split into continued shots stays on the timeline's clock in every window."""
+
+    def test_guide_slices_follow_the_source_clock(self):
+        import torch
+        raw = json.loads(multi_plan({"length": 243, "overlap": 56, "highLength": 175, "highOverlap": 22,
+                                     "groupLength": 1450}, segs=((362, 0), (396, 39))))
+        raw["media"]["videos"] = [{"id": "g", "file": "g.mp4", "duration": 60.0, "hasAudio": False}]
+        starts, durs = (0.0, 362 / 24), (362 / 24, (396 - 39) / 24)
+        for i, s in enumerate(raw["segments"]):
+            s["videos"] = [{"id": "g", "trimStart": starts[i], "useSoundtrack": False, "useDuration": durs[i]}]
+        p = D.parse_plan(json.dumps(raw))
+        seg = p["segments"][0]
+        self.assertEqual(seg["length"], 719)
+        calls = []
+
+        class FakeCore:
+            class MiniMaxH3ReferenceToVideo:
+                @staticmethod
+                def execute(**kw):
+                    calls.append(kw)
+                    return ([[torch.zeros(1), {}]], {"samples": torch.zeros(1)})
+
+        def media(plan, s, size="match", extra=0):
+            f0 = round(D.video_window_origin(s["videos"][0], s) * 24)
+            fr = torch.arange(f0, f0 + s["length"]).float().view(-1, 1, 1, 1).expand(-1, 2, 2, 3).clone()
+            return {"images": [], "videos": [fr], "video_audios": [None], "audios": [], "locked_audio": None}
+        orig = D.pick_media_for
+        try:
+            D.pick_media_for = media
+            pos, lat, text = D.encode_group_windows(FakeCore, p, seg, None, None, None, None, "match")
+        finally:
+            D.pick_media_for = orig
+        for c, kw in zip(pos, calls):
+            a, b = c[1][WIN.RANGE_KEY]
+            got = kw["ref_videos"]["ref_video_0"][:, 0, 0, 0].tolist()
+            self.assertEqual(got, [float(x) for x in range(a, b)], (a, b))
+
+
+class GroupGuideHold(unittest.TestCase):
+    def test_hard_cut_before_shot_start_holds_first_frame(self):
+        import torch
+        raw = json.loads(multi_plan({"length": 243, "overlap": 56, "highLength": 175, "highOverlap": 22,
+                                     "groupLength": 1450}, segs=((294, 0), (345, 0))))
+        raw["media"]["videos"] = [{"id": "g", "file": "g.mp4", "duration": 60.0, "hasAudio": False}]
+        raw["segments"][1]["videos"] = [{"id": "g", "trimStart": 10.0, "useSoundtrack": False,
+                                         "useDuration": 345 / 24}]
+        p = D.parse_plan(json.dumps(raw))
+        seg = p["segments"][0]
+        cut = seg["windowCuts"][0]
+        origin = seg["groupParts"][1]["origin"]
+        self.assertLess(cut, origin)        # 294 snaps to 289
+        calls = []
+
+        class FakeCore:
+            class MiniMaxH3ReferenceToVideo:
+                @staticmethod
+                def execute(**kw):
+                    calls.append(kw)
+                    return ([[torch.zeros(1), {}]], {"samples": torch.zeros(1)})
+
+        def media(plan, s, size="match", extra=0):
+            if not s["videos"]:
+                return {"images": [], "videos": [], "video_audios": [], "audios": [], "locked_audio": None}
+            fr = torch.arange(1000, 1000 + s["length"]).float().view(-1, 1, 1, 1).expand(-1, 2, 2, 3).clone()
+            return {"images": [], "videos": [fr], "video_audios": [None], "audios": [], "locked_audio": None}
+        orig = D.pick_media_for
+        try:
+            D.pick_media_for = media
+            pos, lat, text = D.encode_group_windows(FakeCore, p, seg, None, None, None, None, "match")
+        finally:
+            D.pick_media_for = orig
+        n = 0
+        for c, kw in zip(pos, calls):
+            a, b = c[1][WIN.RANGE_KEY]
+            if a < cut:
+                self.assertIsNone(kw["ref_videos"])
+                continue
+            got = kw["ref_videos"]["ref_video_0"][:, 0, 0, 0].tolist()
+            want = [1000.0 + max(0, x - origin) for x in range(a, min(b, origin + 345))]
+            self.assertEqual(got, want, (a, b))
+            n += 1
+        self.assertGreater(n, 0)
+
+
 class DepthOff(unittest.TestCase):
     def _raw(self, window, prompt="shot"):
         raw = json.loads(plan(window, length=345))

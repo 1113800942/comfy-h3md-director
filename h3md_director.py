@@ -1865,6 +1865,75 @@ def encode_video_windows(core, plan, seg, picked, kwargs, wps, prompt, clip, vae
     return positive, latent, "\n\n".join(texts)
 
 
+def _same_clock_frames(plan, parts, media, k, kk, j, t0, t1, ref_image_size):
+    """3e: timeline frames [t0, t1) of shot k's video j taken from neighbouring shot kk, when kk plays the same video
+    on the same clock (source time at its frame 0 + the shot distance = shot k's) and has those frames.
+    (frames, soundtrack slice or None) or None."""
+    if not 0 <= kk < len(parts) or t1 <= t0:
+        return None
+    cur, nb = parts[k], parts[kk]
+    refs = cur["seg"]["videos"]
+    if j >= len(refs):
+        return None
+    jj = next((i for i, r in enumerate(nb["seg"]["videos"]) if r["id"] == refs[j]["id"]), None)
+    if jj is None:
+        return None
+    t_cur = video_window_origin(refs[j], cur["seg"])
+    t_nb = video_window_origin(nb["seg"]["videos"][jj], nb["seg"])
+    if abs(t_nb + (cur["origin"] - nb["origin"]) / FPS - t_cur) > 1.5 / FPS:
+        return None
+    if kk not in media:
+        media[kk] = pick_media_for(plan, nb["seg"], ref_image_size)
+    nf = media[kk]["videos"][jj]
+    s0, s1 = t0 - nb["origin"], t1 - nb["origin"]
+    if s0 < 0 or s1 > int(nf.shape[0]):
+        return None
+    snd = media[kk]["video_audios"][jj] if jj < len(media[kk]["video_audios"]) else None
+    return nf[s0:s1], (slice_audio(snd, s0 / FPS, (s1 - s0) / FPS) if snd is not None else None)
+
+
+def _cat_audio(parts):
+    parts = [x for x in parts if x is not None]
+    if not parts:
+        return None
+    return {"waveform": torch.cat([x["waveform"] for x in parts], -1), "sample_rate": parts[0]["sample_rate"]}
+
+
+def _window_video(plan, parts, media, k, j, frames, snd, a, b, ref_image_size):
+    """3e: shot k's video j for window [a, b) of the timeline, on the timeline's clock (frame i of the result = output
+    frame a + i).  Frames before / after shot k's own video come from the neighbouring shot when it plays the same
+    video on the same clock (a motion-copy guide split into continued shots, 11-08); otherwise the first frame is held
+    before the shot start (as load_video_window does) and the slice ends where the video ends.  -> (frames, audio, note)"""
+    origin, n = parts[k]["origin"], int(frames.shape[0])
+    s0, s1 = max(a, origin), min(b, origin + n)
+    if s1 <= s0:
+        return frames[:0], None, ""
+    sl, aud, note = [frames[s0 - origin:s1 - origin]], [slice_audio(snd, (s0 - origin) / FPS, (s1 - s0) / FPS)
+                                                       if snd is not None else None], []
+    if a < s0:
+        lead = _same_clock_frames(plan, parts, media, k, k - 1, j, a, s0, ref_image_size)
+        if lead is not None and tuple(lead[0].shape[1:]) == tuple(sl[0].shape[1:]):
+            sl.insert(0, lead[0])
+            aud.insert(0, lead[1] if snd is not None else None)
+            note.append(f"first {s0 - a} frames from shot {k}")
+        else:
+            sl.insert(0, sl[0][:1].expand(s0 - a, *sl[0].shape[1:]))
+            if snd is not None:
+                sr = int(snd["sample_rate"])
+                w = snd["waveform"]
+                aud.insert(0, {"waveform": w.new_zeros(*w.shape[:-1], int(round((s0 - a) / FPS * sr))),
+                               "sample_rate": sr})
+            note.append(f"first frame held for {s0 - a} frames")
+    if s1 < b:
+        trail = _same_clock_frames(plan, parts, media, k, k + 1, j, s1, b, ref_image_size)
+        if trail is not None and tuple(trail[0].shape[1:]) == tuple(sl[-1].shape[1:]):
+            sl.append(trail[0])
+            aud.append(trail[1] if snd is not None else None)
+            note.append(f"last {b - s1} frames from shot {k + 2}")
+    out = sl[0] if len(sl) == 1 else torch.cat(sl, 0)
+    return out, (_cat_audio(aud) if snd is not None else None), ", ".join(note)
+
+
 def encode_group_windows(core, plan, seg, picked, clip, vae, audio_vae, ref_image_size):
     """3e: one conditioning per window of both passes; the window belongs to the shot (group part) holding its
     centre and gets THAT shot's prompt, pictures, reference audio and the matching slice of its reference videos
@@ -1909,19 +1978,16 @@ def encode_group_windows(core, plan, seg, picked, clip, vae, audio_vae, ref_imag
             LOG.warning("[H3MD Encode] window %d-%d covers shots %s with different pictures - prompt of shot %d only",
                         a, b, [i + 1 for i in cover], k + 1)
         vids, auds = {}, {}
-        off = a - gp["origin"]          # window start inside this shot's own reference window
         for j, frames in enumerate(pm["videos"]):
-            o = max(0, off)
-            sl = frames[o:min(o + (b - a), int(frames.shape[0]))]
-            if off < 0:
-                LOG.info("[H3MD Encode] window %d-%d starts %d frames before shot %d: its video %d starts at the "
-                         "shot start", a, b, -off, k + 1, j + 1)
+            snd = pm["video_audios"][j] if j < len(pm["video_audios"]) else None
+            sl, sa, note = _window_video(plan, parts, media, k, j, frames, snd, a, b, ref_image_size)
+            if note:
+                LOG.info("[H3MD Encode] window %d-%d, shot %d video %d: %s", a, b, k + 1, j + 1, note)
             if sl.shape[0] < 5:
                 continue
             vids[f"ref_video_{j}"] = sl
-            snd = pm["video_audios"][j] if j < len(pm["video_audios"]) else None
-            if snd is not None:
-                auds[f"ref_video_audio_{j}"] = slice_audio(snd, o / FPS, sl.shape[0] / FPS)
+            if sa is not None:
+                auds[f"ref_video_audio_{j}"] = sa
         kw["ref_videos"] = vids or None
         kw["ref_video_audios"] = auds or None
         text = fix_duration_line(combined or own[k], b - a, 0)
