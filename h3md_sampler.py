@@ -350,7 +350,7 @@ class H3MDSampler:
                high_res_model=None, highres_tiling=True, tiling_axis="auto", tiling_overlap=8, ff_chunk_rows=0,
                release_upscaler=True, unload_idle_models=True,
                h3md_low_res_prefix=None, h3md_low_res_prefix_source="pixel_reencode", h3md_capture_lowres=False,
-               h3md_on_lowres_end=None, h3md_low_res_suffix=None, h3md_lowres_anchor=None, h3md_progress=None,
+               h3md_on_lowres_end=None, h3md_low_res_suffix=None, h3md_lowres_anchor=None, h3md_progress=None, h3md_low_only=False,
                unique_id=None, **unknown):
         """Internal keyword inputs (set by the H3MD Loop):
         h3md_low_res_prefix: [1,24,vt,h,w] low-grid latent of the kept overlap prefix (engine low_res_head);
@@ -436,7 +436,7 @@ class H3MDSampler:
                 "simple", n_low + n_high, n_low, int(seed), float(cfg), float(cfg), float(lowres_scale),
                 float(rho), float(w_min), float(w_max), latent_lifter=lifter, high_res_model=high,
                 low_res_head=head, sigmas_low=sig_low, sigmas_high=sig_high, lift=lift, low_res_tail=tail,
-                pass1_store=h3md_progress)
+                pass1_store=h3md_progress, low_only=bool(h3md_low_only))
         except BaseException as exc:
             if not TILED.is_oom(exc) or isinstance(exc, TILED.HighResOutOfMemory):
                 raise

@@ -183,7 +183,7 @@ def segment_signature(plan: dict, k: int) -> dict:
            "size": [plan.get("width"), plan.get("height")]}
     # window-exp: only window-mode plans get these keys, so every other plan keeps its old cache keys
     if plan.get("windowMode"):
-        sig["windowMode"] = plan["windowMode"]
+        sig["windowMode"] = {k: v for k, v in plan["windowMode"].items() if k != "preview"}
         if seg.get("windowPrompts"):
             sig["windowPrompts"] = seg["windowPrompts"]
     # refVideoHeight: only non-native values enter the key, so native (and old plans) keep their old keys

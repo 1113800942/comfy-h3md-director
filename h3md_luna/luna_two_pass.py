@@ -173,7 +173,8 @@ def _sample(model, noise, latent, masks, nested, positive, negative, cfg, sample
 def two_pass_sample(low_res_model, positive, negative, vae, latent_image, sampler_low, sampler_high, scheduler,
                     total_steps, transition, noise_seed, cfg_low, cfg_high, lowres_scale, rho, w_min, w_max,
                     latent_lifter=None, high_res_model=None, low_res_head=None, highres_denoise=None,
-                    sigmas_low=None, sigmas_high=None, lift=None, low_res_tail=None, pass1_store=None):
+                    sigmas_low=None, sigmas_high=None, lift=None, low_res_tail=None, pass1_store=None,
+                    low_only=False):
     """Return (latent, low_res_latent), both ComfyUI LATENT dicts in VAE space.
 
     `sigmas_low` / `sigmas_high` override the computed schedules. `lift` defaults to `luna_lift.lift_video`.
@@ -273,6 +274,18 @@ def two_pass_sample(low_res_model, positive, negative, vae, latent_image, sample
         audio_eps.append(eps / noise_scale_high)  # the sampler multiplies its noise by noise_scale
     if masks is not None:  # a locked song stays the song
         audio_x0 = [torch.where(m == 0, a, x) for x, a, m in zip(audio_x0, audio, masks[1:])]
+
+    if low_only:   # H3MD window-exp preview: stop after pass 1; the lifted low-res result is the output
+        dtype = comfy.model_management.intermediate_dtype()
+        out_streams = [s.to(device=device, dtype=dtype) for s in [lifted] + audio_x0]
+        if masks is not None:
+            out_streams = _restore_exact(out_streams, [video] + audio, masks)
+        logging.info("[Luna-H3-Sampler] low-res preview: high-res pass skipped")
+        latent = latent_image.copy()
+        latent["samples"] = _pack(out_streams, nested)
+        low_res_latent = latent_image.copy()
+        low_res_latent["samples"] = _pack([z0_low.to(dtype=dtype)] + out_streams[1:], nested)
+        return latent, low_res_latent
 
     # Pass 2: the rest of the schedule at the high grid.
     high_masks = masks if masks is not None else None

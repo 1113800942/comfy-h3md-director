@@ -145,6 +145,22 @@ class TimedPrompts(unittest.TestCase):
         self.assertEqual(len(seg["windowPrompts"]), 2)
         self.assertNotIn("windowPromptsAuto", seg)
 
+
+class Preview(unittest.TestCase):
+    def test_flag_and_cache_key(self):
+        self.assertFalse(WIN.normalize_window_mode(True)["preview"])
+        self.assertTrue(WIN.normalize_window_mode({"preview": 1})["preview"])
+        a = D.parse_plan(timed_plan({"length": 243}))
+        b = D.parse_plan(timed_plan({"length": 243, "preview": True}))
+        self.assertEqual(C.segment_signature(a, 0), C.segment_signature(b, 0))
+
+    def test_auto_prompt_duration_is_window(self):
+        raw = json.loads(timed_plan({"length": 243}))
+        raw["segments"][0]["prompt"] = "Duration: 60 s.\n" + TIMED
+        seg = D.parse_plan(json.dumps(raw))["segments"][0]
+        for wp in seg["windowPrompts"]:
+            self.assertIn("Duration: 10.12 s (243 frames).", wp["prompt"])
+
 if __name__ == "__main__":
     unittest.main()
 

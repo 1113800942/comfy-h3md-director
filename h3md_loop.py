@@ -807,6 +807,7 @@ class H3MDLoopSampler:
                 import random
                 seg_seed = random.SystemRandom().randrange(1, 2 ** 50)
             will_continue = seg["overlapIn"] > 0 and prev is not None
+            preview = bool(isinstance(plan, dict) and (plan.get("windowMode") or {}).get("preview"))
             uses_cont = C.segment_uses_cont_settings(seg, will_continue, highres_tiling)
             key = C.segment_key(settings_hash["full" if uses_cont else "base"], plan, k, key_seed, will_continue,
                                 prev_key) if cache is not None else None
@@ -815,6 +816,11 @@ class H3MDLoopSampler:
                 key = C._sha({"key": key, "depth_control": dkey})
             if key is not None and lora_sig:   # 0.3.4: LoRAs recorded by H3MD loaders / the Control Panel
                 key = C._sha({"key": key, "loras": lora_sig})
+            # window-exp low-res preview: its own segment-cache key (never mistaken for a finished segment); the
+            # progress cache keeps the full run's key, so the full run reuses the preview's low-res pass (pass1.pt)
+            pkey = key
+            if key is not None and preview:
+                key = C._sha({"key": key, "preview": True})
             if rerun:  # H3MD rerun: not selected = cached (validated above), selected = re-rendered
                 hit = k not in rerun
                 if hit and not cache.has(k, key):
@@ -928,9 +934,11 @@ class H3MDLoopSampler:
                     LOG.warning("%s %s: lowres_anchor has no reference (the shot's first segment has no low-res "
                                 "result in the cache); not applied", _TAG, where)
             low_model, high_model, dctl = model, high_res_model, None
-            progress = progress_store(cache, k, key, plan, where)
+            progress = progress_store(cache, k, pkey, plan, where)
             if progress is not None:
                 extra["h3md_progress"] = progress
+            if preview:
+                extra["h3md_low_only"] = True
             nxt_ov = segs[indices[step + 1]]["overlapIn"] if step + 1 < len(indices) else 0
             try:
                 if dseg is not None:  # H3MD depth: int8 patch loaded now, on a CLONE of the low-res model only

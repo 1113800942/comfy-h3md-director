@@ -665,7 +665,10 @@ def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = Fa
             seg.pop(key, None)
         seg["prompt"] = fix_duration_line(seg["prompt"], int(seg["length"]), int(seg["overlapIn"]))
         for wp in seg.get("windowPrompts") or ():
-            wp["prompt"] = fix_duration_line(wp["prompt"], int(seg["length"]), int(seg["overlapIn"]))
+            if seg.get("windowPromptsAuto"):   # 3a: each auto window prompt describes one window, not the whole shot
+                wp["prompt"] = fix_duration_line(wp["prompt"], int(window_mode["length"]), 0)
+            else:
+                wp["prompt"] = fix_duration_line(wp["prompt"], int(seg["length"]), int(seg["overlapIn"]))
         if continuity and seg["overlapIn"] > 0:
             seg["prompt"] = continuity_note(seg["overlapIn"]) + "\n\n" + seg["prompt"]
     ref_video_height = normalize_ref_video_height(raw.get("refVideoHeight"))

@@ -31,7 +31,7 @@ _TAG = "[H3MD Window]"
 _KEY = "h3md_window"
 SPAN_KEY = "h3md_window_span"          # conditioning dict key: (start_frame, end_frame) in shot pixel frames
 DEFAULTS = {"length": 124, "overlap": 56, "highLength": None, "highOverlap": None, "freenoise": True,
-            "cropGuide": True}
+            "cropGuide": True, "preview": False}
 MAX_TRAINED = 362          # H3 was trained on ~124-362 frame clips; longer windows are outside that range
 FPS = 24
 
@@ -61,6 +61,7 @@ def normalize_window_mode(value):
             LOG.warning("%s window %s %d frames is longer than H3's trained range (<= %d)", _TAG, k, out[k], MAX_TRAINED)
     out["freenoise"] = bool(out["freenoise"])
     out["cropGuide"] = bool(out["cropGuide"])
+    out["preview"] = bool(out["preview"])   # low-res preview: stop after the low-res pass
     return out
 
 
