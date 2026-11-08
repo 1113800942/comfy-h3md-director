@@ -389,6 +389,32 @@ def window_refs(prompt: str, n_images: int, own: str = None):
     return kept, text
 
 
+def _detail_body(prompt: str) -> str:
+    for n, t in _sections(prompt):
+        if n == "detailed_description":
+            return t.partition(":")[2].strip()
+    return ""
+
+
+def combine_part_prompts(parts):
+    """3e fix (11-07 ghost at a continuation): a window that covers the end of one continued shot and the start of the
+    next gets ONE prompt telling both, in order: the first shot's full prompt, then for each later shot
+    'At about N s into this part, the shot continues: <its detailed_description>'.  parts = [(seconds into the window
+    where the shot starts, prompt)], in time order.  The neighbouring windows then describe the same thing in their
+    overlap (before: each window took one shot's prompt, so the overlap mixed two different actions -> double image)."""
+    base = parts[0][1]
+    extra = " ".join(f"At about {max(0.0, sec):.0f} s into this part, the shot continues: {_detail_body(p)}"
+                     for sec, p in parts[1:] if _detail_body(p))
+    if not extra:
+        return base
+    out = []
+    for n, t in _sections(base):
+        if n == "detailed_description":
+            t = t.rstrip() + " " + extra + "\n\n"
+        out.append(t)
+    return "".join(out)
+
+
 # ------------------------------------------------------------------------------------------- per-window payload
 def crop_refs(refs, window, total_t, audio_window, total_audio_t, stats):
     """refs with timeline-aligned videos cropped to the window (new list; inputs untouched)."""

@@ -1873,6 +1873,15 @@ def encode_group_windows(core, plan, seg, picked, clip, vae, audio_vae, ref_imag
             media[k] = pick_media_for(plan, gp["seg"], ref_image_size)
         pm = media[k]
         kw = build_core_kwargs(pm)
+        # the shots this window covers (a window never crosses a hard cut, so these are continued shots)
+        cover = [i for i, p in enumerate(parts) if p["start"] < b and p["end"] > a]
+        same_pics = all(list(parts[i]["seg"]["images"]) == list(gp["seg"]["images"]) for i in cover)
+        combined = None
+        if len(cover) > 1 and same_pics:
+            combined = WIN.combine_part_prompts([((parts[i]["start"] - a) / FPS, parts[i]["prompt"]) for i in cover])
+        elif len(cover) > 1:
+            LOG.warning("[H3MD Encode] window %d-%d covers shots %s with different pictures - prompt of shot %d only",
+                        a, b, [i + 1 for i in cover], k + 1)
         vids, auds = {}, {}
         off = a - gp["origin"]          # window start inside this shot's own reference window
         for j, frames in enumerate(pm["videos"]):
@@ -1889,7 +1898,7 @@ def encode_group_windows(core, plan, seg, picked, clip, vae, audio_vae, ref_imag
                 auds[f"ref_video_audio_{j}"] = slice_audio(snd, o / FPS, sl.shape[0] / FPS)
         kw["ref_videos"] = vids or None
         kw["ref_video_audios"] = auds or None
-        text = fix_duration_line(gp["prompt"], b - a, 0)
+        text = fix_duration_line(combined or gp["prompt"], b - a, 0)
         out = core.MiniMaxH3ReferenceToVideo.execute(
             clip=clip, prompt=text, width=plan["width"], height=plan["height"], length=seg["length"],
             ref_image_size=ref_image_size, vae=vae, audio_vae=audio_vae, **kw)
@@ -1899,7 +1908,7 @@ def encode_group_windows(core, plan, seg, picked, clip, vae, audio_vae, ref_imag
         if cuts:
             tag[WIN.CUT_KEY] = cuts
         positive += [[c[0], dict(c[1], **tag)] for c in pos]
-        texts.append(f"[window frames {a}-{b}: shot {gp['seg'].get('shotIndex', k) + 1}]\n{text}")
+        texts.append(f"[window frames {a}-{b}: shot(s) {[i + 1 for i in cover]}]\n{text}")
     LOG.info("[H3MD Encode] segment %d: %d shots on one timeline (3e), %d window conditionings %s, cuts %s",
              seg["index"], len(parts), len(ranges), ranges, list(cuts))
     return positive, latent, "\n\n".join(texts)

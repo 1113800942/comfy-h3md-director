@@ -449,3 +449,42 @@ class ChunkedCacheWrite(unittest.TestCase):
             cache.write(0, "k", lat, cf, None, {"trim": 0})
             fr = np.asarray(cache.frames(0))
             self.assertTrue(np.allclose(fr, full.numpy().astype(np.float16)))
+
+
+class GroupWindowPrompts(unittest.TestCase):
+    def test_window_across_continuation_gets_both_shots(self):
+        import torch
+        raw = json.loads(multi_plan({"length": 243, "overlap": 56, "highLength": 175, "highOverlap": 22, "groupLength": 1450},
+                                    segs=((294, 0), (345, 39), (243, 0))))
+        for i, s in enumerate(raw["segments"]):
+            s["prompt"] = (f"Duration: 1 s.\n\nsummary:\nshot {i + 1}.\n\ndetailed_description:\nACTION{i + 1} here."
+                           "\n\noverall_soundscape:\nquiet.")
+            s["images"] = ["a"]
+        p = D.parse_plan(json.dumps(raw))
+        seg = p["segments"][0]
+        calls = []
+
+        class FakeCore:
+            class MiniMaxH3ReferenceToVideo:
+                @staticmethod
+                def execute(**kw):
+                    calls.append(kw)
+                    return ([[torch.zeros(1), {}]], {"samples": torch.zeros(1)})
+        orig = D.pick_media_for
+        try:
+            D.pick_media_for = lambda plan, s, size="match", extra=0: {"images": [], "videos": [], "video_audios": [],
+                                                                         "audios": [], "locked_audio": None}
+            pos, lat, text = D.encode_group_windows(FakeCore, p, seg, None, None, None, None, "match")
+        finally:
+            D.pick_media_for = orig
+        ranges = [c[1][WIN.RANGE_KEY] for c in pos]
+        cut = seg["windowCuts"][0]
+        for (a, b), kw in zip(ranges, calls):
+            pr = kw["prompt"]
+            if a < 294 < b:            # straddles the continuation 1 -> 2: both actions, in order
+                self.assertIn("ACTION1", pr)
+                self.assertIn("the shot continues: ACTION2", pr)
+            if a >= cut:               # after the hard cut: shot 3 only
+                self.assertIn("ACTION3", pr)
+                self.assertNotIn("ACTION2", pr)
+            self.assertFalse(a < cut < b)
