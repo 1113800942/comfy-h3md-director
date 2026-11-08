@@ -480,6 +480,10 @@ def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = Fa
     legacy = [k for k in ("maxSegmentLength", "subOverlap") if raw.get(k) is not None]
     # window-exp (2026-11-07): window mode = one sampling run per shot with core context windows (no autosplit)
     window_mode = WIN.normalize_window_mode(raw.get("windowMode"))
+    if window_mode is not None and not (isinstance(raw.get("windowMode"), dict) and raw["windowMode"].get("groupLength")):
+        window_mode["groupLength"], why = WIN.auto_group_length(w, h)   # 11-07: RAM, not VRAM, limits a group
+        notes.append(f"window mode: groups up to {window_mode['groupLength']} frames "
+                     f"({window_mode['groupLength'] / FPS:.0f} s) - {why}")
 
     segs_raw = raw.get("segments") or []
     if not segs_raw:

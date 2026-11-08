@@ -315,7 +315,7 @@ def multi_plan(window=True, segs=((345, 0), (345, 39), (243, 0), (345, 39))):
 
 class Groups(unittest.TestCase):
     def test_one_timeline(self):
-        p = D.parse_plan(multi_plan())
+        p = D.parse_plan(multi_plan({"groupLength": 1445}))
         self.assertEqual(len(p["segments"]), 1)
         g = p["segments"][0]
         self.assertEqual(g["length"], 345 + 306 + 243 + 306 - 5)   # back on the 17n+5 grid, nearest way
@@ -385,3 +385,21 @@ class TilingWindow(unittest.TestCase):
             model_options = {}
         self.assertEqual(T.window_shape(P(), (1, 24, 422, 104, 68), 2400), ((1, 24, 52, 104, 68), 296))
         self.assertEqual(T.window_shape(P0(), (1, 24, 422, 104, 68), 2400), ((1, 24, 422, 104, 68), 2400))
+
+
+class AutoGroup(unittest.TestCase):
+    def test_ram(self):
+        self.assertEqual(WIN.auto_group_length(1088, 1664, 64)[0], 906)
+        self.assertEqual(WIN.auto_group_length(2560, 1408, 64)[0], 447)
+        self.assertEqual(WIN.auto_group_length(1088, 1664, 32)[0], 243)
+        self.assertEqual(WIN.auto_group_length(1088, 1664, 128)[0], 1445)
+        for ram in (16, 32, 48, 64, 96):
+            for wh in ((1088, 1664), (2560, 1408)):
+                f = WIN.auto_group_length(*wh, ram)[0]
+                self.assertEqual(f % 17, 5)
+
+    def test_plan_note(self):
+        p = D.parse_plan(multi_plan())
+        self.assertTrue(any("groups up to" in n for n in p["notes"]))
+        p = D.parse_plan(multi_plan({"groupLength": 1445}))
+        self.assertFalse(any("groups up to" in n for n in p["notes"]))
