@@ -121,7 +121,10 @@ CLOCK_MARK = re.compile(r"\bAt (\d{1,2}):(\d{2}\.\d{1,3})(?=[\s,:;])\s*,?\s*")
 def clock_marks(prompt: str) -> str:
     """'At 00:12.7 she sings: ...' -> '[12.7s] she sings: ...' (the time is from the shot's own start)."""
     return CLOCK_MARK.sub(lambda m: f"[{int(m.group(1)) * 60 + float(m.group(2)):g}s] ", prompt or "")
+# 11-08 review: a prompt without reference media (T2VA) carries its description in integrated_multimodal_description
+BODY_SECTIONS = ("detailed_description", "integrated_multimodal_description")
 SECTION = re.compile(r"(?m)^\s*(subject_definitions|summary|retention_analysis|detailed_description|"
+                     r"integrated_multimodal_description|"
                      r"overall_soundscape|non_diegetic_music|dialogue|sound_effects)\s*:")
 NO_NEW_ACTION = ("No new action starts in this part; whatever is moving keeps moving the same way as the moment "
                  "before.")   # 11-07: no "subject" wording - an empty landscape window must not invite a person
@@ -306,7 +309,7 @@ def split_timed_prompt(prompt: str):
     if not prompt or not TIME_MARK.search(prompt):
         return None
     heads = list(SECTION.finditer(prompt))
-    det = next((m for m in heads if m.group(1) == "detailed_description"), None)
+    det = next((m for m in heads if m.group(1) in BODY_SECTIONS), None)
     if det is None:
         return None
     nxt = next((m.start() for m in heads if m.start() > det.end()), len(prompt))
@@ -474,7 +477,7 @@ def window_refs(prompt: str, n_images: int, own: str = None):
         if n in ("subject_definitions", "retention_analysis"):
             lines = t.splitlines(keepends=True)
             t = lines[0] + "".join(l for l in lines[1:] if not (PIC_TAG.search(l) or SUBJ_TAG.search(l)) or not unused(l))
-        elif n in ("summary", "detailed_description"):
+        elif n in ("summary",) + BODY_SECTIONS:
             head, _, rest = t.partition(":")
             sents = [x for x in _SENT.split(rest.strip()) if x and not unused(x)]
             t = head + ":\n" + " ".join(sents) + "\n\n"
@@ -485,7 +488,7 @@ def window_refs(prompt: str, n_images: int, own: str = None):
 
 def _detail_body(prompt: str) -> str:
     for n, t in _sections(prompt):
-        if n == "detailed_description":
+        if n in BODY_SECTIONS:
             return t.partition(":")[2].strip()
     return ""
 
@@ -503,7 +506,7 @@ def combine_part_prompts(parts):
         return base
     out = []
     for n, t in _sections(base):
-        if n == "detailed_description":
+        if n in BODY_SECTIONS:
             t = t.rstrip() + " " + extra + "\n\n"
         out.append(t)
     return "".join(out)
@@ -652,6 +655,16 @@ def install(handler, crop_guide: bool):
     base = handler.__class__
 
     class H3MDWindowHandler(base):
+        def should_use_context(self, model, conds, x_in, timestep, model_options):
+            if super().should_use_context(model, conds, x_in, timestep, model_options):
+                return True
+            # 11-08 review: a shot / group no longer than one window that still carries per-window conditionings
+            # (several shots, a hard cut, window prompts): windowed anyway, so each conditioning keeps its own range
+            # and a cut stays a cut (without windows the sampler would average all of them over the whole clip)
+            tagged = sum(1 for clist in conds or () for c in clist or ()
+                         if isinstance(c, dict) and (c.get(RANGE_KEY) or c.get(SPAN_KEY) or c.get(CUT_KEY)))
+            return tagged >= 2
+
         def get_resized_cond(self, cond_in, x_in, window, device=None):
             if cond_in is not None:
                 k = pick_span_cond(cond_in, window)

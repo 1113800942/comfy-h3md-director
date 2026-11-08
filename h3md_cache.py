@@ -165,10 +165,7 @@ def _file_sig(file: str):
         return [file, None, None]
 
 
-def segment_signature(plan: dict, k: int) -> dict:
-    """Everything of segment k that changes its output (prompt, refs, windows, geometry, media files + stat)."""
-    seg = plan["segments"][k]
-    media = plan["media"]
+def _used_files(seg: dict, media: dict) -> list:
     used = [("images", i) for i in seg["images"]] + [("videos", v["id"]) for v in seg["videos"]]
     used += [("audios", a) for a in seg["audios"]]
     if seg.get("audioMode") == "locked" and seg.get("locked"):
@@ -178,6 +175,14 @@ def segment_signature(plan: dict, k: int) -> dict:
     for kind, ref in used:
         info = media.get(kind, {}).get(ref, {})
         files.append([kind, ref, info, _file_sig(info.get("file", ""))])
+    return files
+
+
+def segment_signature(plan: dict, k: int) -> dict:
+    """Everything of segment k that changes its output (prompt, refs, windows, geometry, media files + stat)."""
+    seg = plan["segments"][k]
+    media = plan["media"]
+    files = _used_files(seg, media)
     keep = ("startFrame", "length", "overlapIn", "prompt", "images", "videos", "audios", "audioMode", "locked")
     sig = {"seg": {key: seg.get(key) for key in keep}, "files": files,
            "size": [plan.get("width"), plan.get("height")]}
@@ -191,8 +196,7 @@ def segment_signature(plan: dict, k: int) -> dict:
         if seg.get("groupParts"):   # 3e: every shot of the group, with its own media files
             sig["groupParts"] = [{"start": gp["start"], "end": gp["end"], "origin": gp["origin"], "prompt": gp["prompt"],
                                   "seg": {k: gp["seg"].get(k) for k in keep},
-                                  "files": [[v["id"], _file_sig(media["videos"].get(v["id"], {}).get("file", ""))]
-                                            for v in gp["seg"].get("videos") or []]}
+                                  "files": _used_files(gp["seg"], media)}   # 11-08: pictures + sound too
                                  for gp in seg["groupParts"]]
     # refVideoHeight: only non-native values enter the key, so native (and old plans) keep their old keys
     rvh = D.normalize_ref_video_height(plan.get("refVideoHeight")) or "native"
@@ -349,6 +353,22 @@ class SegmentCache:
         if moved:
             LOG.info("%s segment %d: old files moved to %s", _TAG, k + 1, folder)
         return moved
+
+    def restore(self, k, folder: str) -> list:
+        """Undo archive(): segment k's files in `folder` go back in place (a half-written new version of the same
+        files is removed first).  Returns the restored file names."""
+        back = []
+        for suf in self.SEG_FILES:
+            dst = self._p(k, suf)
+            src = os.path.join(folder, os.path.basename(dst))
+            if os.path.isfile(src):
+                if os.path.isfile(dst):
+                    os.remove(dst)
+                os.replace(src, dst)
+                back.append(os.path.basename(dst))
+        if back:
+            LOG.info("%s segment %d: previous version restored from %s", _TAG, k + 1, folder)
+        return back
 
     def adopt(self, k, key: str):
         """Rerun mode: a kept segment gets the new chain key (its predecessor or the refs changed), so a later

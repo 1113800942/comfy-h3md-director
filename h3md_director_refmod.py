@@ -286,7 +286,8 @@ def parse_refmods(raw: dict, plan: dict, options: dict) -> list:
         plan["media"]["refmods"] = {}
         if used:
             notes.append(f"window mode: RefMods off ({', '.join(sorted(used))}); identity comes from the reference "
-                         f"pictures (RefMods do not go through the window-mode encode)")
+                         f"pictures (RefMods do not go through the window-mode encode) - take the 'RefMod N' "
+                         f"mentions out of the prompts, they are plain text now")
         return notes
     for item in media_raw:
         if not isinstance(item, dict) or not item.get("id") or not item.get("file"):

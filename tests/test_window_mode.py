@@ -699,6 +699,63 @@ class GroupGuideTrailHold(unittest.TestCase):
         self.assertGreater(n, 2)
 
 
+class ReviewFixes(unittest.TestCase):
+    """11-08 independent review: group sound track, T2VA section, short shot with a cut, cache restore."""
+
+    def _group(self, audios):
+        raw = json.loads(multi_plan({"length": 243, "overlap": 56, "highLength": 175, "highOverlap": 22,
+                                     "groupLength": 1450}, segs=((124, 0), (124, 0), (124, 0))))
+        raw["media"]["audios"] = [{"id": "A", "file": "a.mp3", "duration": 100.0},
+                                  {"id": "B", "file": "b.mp3", "duration": 100.0}]
+        for s, au in zip(raw["segments"], audios):
+            if au:
+                s["audios"] = [{"id": au[0], "mode": "locked", "offset": au[1]}]
+                s["audioMode"] = "locked"
+        return D.parse_plan(json.dumps(raw))
+
+    def test_group_splits_where_the_sound_track_changes(self):
+        same = self._group([("A", 0.0), ("A", 124 / 24), ("A", 248 / 24)])
+        self.assertEqual(len(same["segments"]), 1)
+        mixed = self._group([None, ("B", 0.0), ("A", 10.0)])
+        self.assertEqual(len(mixed["segments"]), 3)
+        self.assertTrue(any("own sound track" in n for n in mixed["notes"]))
+        jump = self._group([("A", 0.0), ("A", 50.0), ("A", 50.0 + 124 / 24)])
+        self.assertEqual(len(jump["segments"]), 2)
+        self.assertEqual(jump["segments"][1]["locked"]["offset"], 50.0)
+
+    def test_t2va_section_marks(self):
+        pr = ("summary:\na walk.\n\nintegrated_multimodal_description:\nA woman on a beach. [2s] she waves. "
+              "[20s] she sits down.\n\noverall_soundscape:\nwaves.")
+        wps = WIN.auto_window_prompts(pr, 719, 243, 56)
+        self.assertEqual(sum(w["events"] for w in wps), 2)
+        self.assertEqual(sum("sits down" in w["prompt"] for w in wps), 1)
+        self.assertIn("the shot continues: B", WIN.combine_part_prompts(
+            [(0, "integrated_multimodal_description:\nA\n\n"), (3, "integrated_multimodal_description:\nB\n\n")]))
+
+    def test_short_shot_with_cut_keeps_both_prompts(self):
+        pr = ("summary:\ntwo.\n\ndetailed_description:\nPhotoreal. [0s cut] SHOT_ONE in a meadow. "
+              "[4s cut] SHOT_TWO by a lake.\n\noverall_soundscape:\nwind.")
+        p = D.parse_plan(timed_plan(prompt=pr, length=192, window={"length": 243, "overlap": 56,
+                                                                    "highLength": 175, "highOverlap": 22}))
+        seg = p["segments"][0]
+        wps = D.window_prompts_for(p, seg)
+        self.assertEqual(len(wps), 2)
+        self.assertTrue(any("SHOT_TWO" in w["prompt"] for w in wps))
+
+    def test_cache_restore(self):
+        import tempfile, os
+        with tempfile.TemporaryDirectory() as d:
+            cache = C.SegmentCache(d, "abc" * 6, True)
+            for suf in (".json", "_latent.pt"):
+                open(cache._p(0, suf), "w").write("old" + suf)
+            arc = cache.archive_dir()
+            cache.archive(0, arc)
+            open(cache._p(0, "_latent.pt"), "w").write("half-written")
+            cache.restore(0, arc)
+            self.assertEqual(open(cache._p(0, "_latent.pt")).read(), "old_latent.pt")
+            self.assertEqual(open(cache._p(0, ".json")).read(), "old.json")
+
+
 class DepthOff(unittest.TestCase):
     def _raw(self, window, prompt="shot"):
         raw = json.loads(plan(window, length=345))

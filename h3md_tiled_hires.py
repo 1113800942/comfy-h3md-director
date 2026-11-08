@@ -528,6 +528,10 @@ def _joint_forward(state, executor, x, timestep, context, transformer_options, m
         key = ("joint", s, e, int(context.shape[1]), tuple(tile.shape), int(audio.shape[-1]),
                id(minimax_payload.get("keyframes")), id(minimax_payload.get("refs")))
         cached = state.cache.get(key)
+        if cached is None and len(state.cache) > 64:
+            # 11-08 review: window mode rebuilds the payload for every window and step, so these never hit; keep
+            # the cache from holding every window's payload for the whole pass
+            state.cache.clear()
         if cached is None:
             pay = tile_payload(minimax_payload, axis, s, e, (H, W))
             sig = (int(context.shape[1]), int(tile.shape[2]), (tile.shape[3] + 1) // 2 * 2,

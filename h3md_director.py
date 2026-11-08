@@ -739,6 +739,19 @@ def _shifted(seg: dict, drift: int) -> dict:
     return seg
 
 
+def _same_audio_clock(first: dict, seg: dict) -> bool:
+    """3e: True when `seg` can share `first`'s group sound track: neither is locked, or both lock the same file and
+    seg's offset is first's plus the time between their starts (the song runs on with the timeline)."""
+    la = first.get("locked") if first.get("audioMode") == "locked" else None
+    lb = seg.get("locked") if seg.get("audioMode") == "locked" else None
+    if la is None and lb is None:
+        return True
+    if la is None or lb is None or (la.get("kind"), la.get("id")) != (lb.get("kind"), lb.get("id")):
+        return False
+    gap = (int(seg["startFrame"]) - int(first["startFrame"])) / FPS
+    return abs(float(la.get("offset") or 0.0) + gap - float(lb.get("offset") or 0.0)) <= 1.5 / FPS
+
+
 def group_window_segments(segments: list, window_mode: dict, notes: list, continuity: bool = True) -> list:
     """window-exp 3e: the user's normal multi-shot plan -> one continuous timeline per GROUP, sampled in one run.
     Continued shots (overlapIn > 0) are joined into the timeline (no continuation, no seam); hard cuts (overlapIn 0)
@@ -751,6 +764,15 @@ def group_window_segments(segments: list, window_mode: dict, notes: list, contin
     limit = int(window_mode.get("groupLength") or 1445)
     groups, cur = [], [segments[0]]
     for seg in segments[1:]:
+        if not _same_audio_clock(cur[0], seg):
+            # 11-08 review: a group has ONE timeline sound track (the first shot's lock); a shot whose lock is
+            # another file, another place in it, or no lock where the group has one (or the reverse) starts a group
+            notes.append(f"window mode: shot {seg['index'] + 1} has its own sound track (lock source / offset / mode "
+                         f"differs from shot {cur[0]['index'] + 1}), so a new group starts there"
+                         + ("" if int(seg["overlapIn"]) == 0 else " (it continues the previous shot: a seam there)"))
+            groups.append(cur)
+            cur = [seg]
+            continue
         cur.append(seg)
         while len(cur) > 1 and cur[-1]["startFrame"] + cur[-1]["length"] - cur[0]["startFrame"] > limit:
             cuts = [k for k in range(1, len(cur)) if int(cur[k]["overlapIn"]) == 0]
@@ -1790,7 +1812,9 @@ def window_prompts_for(plan: dict, seg: dict):
     wm = plan.get("windowMode")
     if not wps or not wm:
         return None
-    if int(seg["length"]) <= int(wm.get("length", 124)) or len(wps) < 2:
+    # 11-08 review: a short shot with a hard cut keeps all its prompts (the windows break at the cut even when the
+    # shot fits one window); without a cut one window can only take one prompt
+    if (int(seg["length"]) <= int(wm.get("length", 124)) and not seg.get("windowCuts")) or len(wps) < 2:
         LOG.info("[H3MD Encode] segment %d: window prompts not needed (one window / one prompt) - first prompt used",
                  seg["index"])
         return [dict(wps[0], start=0, end=int(seg["length"]))] if wps else None
@@ -1892,6 +1916,12 @@ def _same_clock_frames(plan, parts, media, k, kk, j, t0, t1, ref_image_size):
     return nf[s0:s1], (slice_audio(snd, s0 / FPS, (s1 - s0) / FPS) if snd is not None else None)
 
 
+def _silence(like: dict, frames: int) -> dict:
+    sr = int(like["sample_rate"])
+    w = like["waveform"]
+    return {"waveform": w.new_zeros(*w.shape[:-1], int(round(frames / FPS * sr))), "sample_rate": sr}
+
+
 def _cat_audio(parts):
     parts = [x for x in parts if x is not None]
     if not parts:
@@ -1914,34 +1944,34 @@ def _window_video(plan, parts, media, k, j, frames, snd, a, b, ref_image_size):
         lead = _same_clock_frames(plan, parts, media, k, k - 1, j, a, s0, ref_image_size)
         if lead is not None and tuple(lead[0].shape[1:]) == tuple(sl[0].shape[1:]):
             sl.insert(0, lead[0])
-            aud.insert(0, lead[1] if snd is not None else None)
+            aud.insert(0, (lead[1] if lead[1] is not None else _silence(snd, s0 - a)) if snd is not None else None)
             note.append(f"first {s0 - a} frames from shot {k}")
         else:
             sl.insert(0, sl[0][:1].expand(s0 - a, *sl[0].shape[1:]))
             if snd is not None:
-                sr = int(snd["sample_rate"])
-                w = snd["waveform"]
-                aud.insert(0, {"waveform": w.new_zeros(*w.shape[:-1], int(round((s0 - a) / FPS * sr))),
-                               "sample_rate": sr})
+                aud.insert(0, _silence(snd, s0 - a))
             note.append(f"first frame held for {s0 - a} frames")
     if s1 < b:
         trail = _same_clock_frames(plan, parts, media, k, k + 1, j, s1, b, ref_image_size)
         if trail is not None and tuple(trail[0].shape[1:]) == tuple(sl[-1].shape[1:]):
             sl.append(trail[0])
-            aud.append(trail[1] if snd is not None else None)
+            aud.append((trail[1] if trail[1] is not None else _silence(snd, b - s1)) if snd is not None else None)
             note.append(f"last {b - s1} frames from shot {k + 2}")
         elif n >= int(parts[k]["seg"]["length"]) - 1:
             # a timeline video that covers its whole shot (a guide) and the window runs on into a shot without it:
             # hold the last frame, so the guide keeps the window's length (a native-temporal guide must match it)
             sl.append(sl[-1][-1:].expand(b - s1, *sl[-1].shape[1:]))
             if snd is not None:
-                sr = int(snd["sample_rate"])
-                w = snd["waveform"]
-                aud.append({"waveform": w.new_zeros(*w.shape[:-1], int(round((b - s1) / FPS * sr))),
-                            "sample_rate": sr})
+                aud.append(_silence(snd, b - s1))
             note.append(f"last frame held for {b - s1} frames")
     out = sl[0] if len(sl) == 1 else torch.cat(sl, 0)
-    return out, (_cat_audio(aud) if snd is not None else None), ", ".join(note)
+    audio = _cat_audio(aud) if snd is not None else None
+    m = 5 + 17 * ((int(out.shape[0]) - 5) // 17) if out.shape[0] >= 5 else int(out.shape[0])
+    if m < out.shape[0]:   # core keeps 17n+5 frames of a reference video; its soundtrack must end with it
+        out = out[:m]
+        if audio is not None:
+            audio = slice_audio(audio, 0.0, m / FPS)
+    return out, audio, ", ".join(note)
 
 
 def encode_group_windows(core, plan, seg, picked, clip, vae, audio_vae, ref_image_size):

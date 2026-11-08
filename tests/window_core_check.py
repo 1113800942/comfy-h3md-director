@@ -91,3 +91,17 @@ h._h3md_cuts = [170]
 cut_w = [(w.index_list[0], w.index_list[-1]) for w in h.get_context_windows(None, x, {})]
 assert cut_w == WIN.core_windows(345, 124, 56, [170]), cut_w
 print("3b handler windows OK", core_w, cut_w)
+
+# 11-08 review: a clip no longer than one window but with per-window conditionings is still windowed
+h = cw.IndexListContextHandler(cw.get_matching_context_schedule(cw.ContextSchedules.STATIC_STANDARD),
+                               cw.get_matching_fuse_method("pyramid"), context_length=72, context_overlap=17, dim=2)
+WIN.install(h, False)
+h._build_window_state = lambda x_in, conds, model: SimpleNamespace(latents=[x_in])
+x = torch.zeros(1, 1, WIN.video_latent_t(141), 1, 1)
+two = [[{WIN.RANGE_KEY: (0, 68), WIN.CUT_KEY: (68,)}, {WIN.RANGE_KEY: (68, 141), WIN.CUT_KEY: (68,)}]]
+assert h.should_use_context(None, two, x, None, {}), "short clip with two window conditionings must be windowed"
+assert not h.should_use_context(None, [[{"plain": 1}]], x, None, {}), "a plain short clip stays unwindowed"
+h._h3md_cuts = [68]
+short_w = [(w.index_list[0], w.index_list[-1]) for w in h.get_context_windows(None, x, {})]
+assert short_w == WIN.core_windows(141, 243, 56, [68]), short_w
+print("short clip windows OK", short_w)

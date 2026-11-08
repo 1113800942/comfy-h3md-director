@@ -948,6 +948,9 @@ class H3MDLoopSampler:
             # window-exp low-res preview: its own segment-cache key (never mistaken for a finished segment); the
             # progress cache keeps the full run's key, so the full run reuses the preview's low-res pass (pass1.pt)
             pkey = key
+            if key is not None and seg_seed != key_seed:
+                # 11-08 review: a rerun with a new seed must not reuse the old take's low-res pass (pass1.pt)
+                pkey = C._sha({"key": key, "seed": seg_seed})
             if key is not None and preview:
                 key = C._sha({"key": key, "preview": True})
             # window-exp local redraw: windowMode.redraw [[start_s, end_s], ...] re-renders only those seconds of the
@@ -971,8 +974,10 @@ class H3MDLoopSampler:
                     key = man["key"]   # untouched segment, redrawn earlier: its latest version in the cache is used
             if rerun:  # H3MD rerun: not selected = cached (validated above), selected = re-rendered
                 hit = k not in rerun
-                if hit and not cache.has(k, key):
-                    cache.adopt(k, key)   # new chain key, so a later normal resume reuses it too
+                if hit and not cache.has(k, key) and not preview:
+                    # new chain key, so a later normal resume reuses it too (not with the preview key: that would
+                    # relabel a finished full-quality segment as a preview and the next full run would redo it)
+                    cache.adopt(k, key)
             else:
                 hit = cache is not None and (resume or bool((plan.get("windowMode") or {}).get("redraw"))) \
                     and not redraw and cache.has(k, key)
@@ -1197,13 +1202,31 @@ class H3MDLoopSampler:
                 aud = D.fit_audio_to_frames(decode_audio(audio_vae, a), imgs.shape[0])  # H3MD syncfix: audio = picture length
                 report[-1]["decoded_frames"] = int(imgs.shape[0])
                 imgs = self._seam.tone(imgs, trims[-1], where, report[-1])  # H3MD seam hook (no-op when off)
+                moved_to = redraw_arc
                 if rerun and k in rerun:  # H3MD rerun: old files -> _replaced_<time> only once the new ones exist
                     cache.archive(k, archive)
+                    moved_to = archive
                 elif redraw and redraw_arc is None:   # local redraw: the previous version is kept in the archive
-                    cache.archive(k, cache.archive_dir())
-                cache.write(k, key, final, imgs, aud, dict({"trim": trims[-1], "report": report[-1]},
-                                                         **({"base_key": base_key, "redraw": redraw} if redraw else {})),
-                            lowres=prev_low if beta else None)
+                    moved_to = cache.archive_dir()
+                    cache.archive(k, moved_to)
+                try:
+                    cache.write(k, key, final, imgs, aud,
+                                dict({"trim": trims[-1], "report": report[-1]},
+                                     **({"base_key": base_key, "redraw": redraw} if redraw else {})),
+                                lowres=prev_low if beta else None)
+                except BaseException:
+                    # 11-08 review: with chunked decode the frames are decoded WHILE they are written; a failure or a
+                    # cancel there must not leave the segment missing - the previous version goes back in place
+                    if moved_to is not None:
+                        if hasattr(imgs, "_old"):
+                            imgs._old = None   # release the memmap of the archived frames (Windows can't move it)
+                        gc.collect()
+                        try:
+                            cache.restore(k, moved_to)
+                        except Exception as exc:
+                            LOG.warning("%s %s: previous version not restored from %s (%s)", _TAG, where, moved_to,
+                                        exc)
+                    raise
                 if getattr(imgs, "reused", 0):
                     LOG.info("%s %s: local redraw: %d chunk(s) decoded, %d copied unchanged", _TAG, where,
                              imgs.decoded, imgs.reused)
