@@ -282,6 +282,12 @@ def parse_refmods(raw: dict, plan: dict, options: dict) -> list:
     media_raw = (raw.get("media") or {}).get("refmods") or []
     lib = {}
     used, seen = used_refmod_ids(raw), set()
+    if plan.get("windowMode"):   # YJ 11-07: RefMods are switched off by window mode (identity from the pictures)
+        plan["media"]["refmods"] = {}
+        if used:
+            notes.append(f"window mode: RefMods off ({', '.join(sorted(used))}); identity comes from the reference "
+                         f"pictures (RefMods do not go through the window-mode encode)")
+        return notes
     for item in media_raw:
         if not isinstance(item, dict) or not item.get("id") or not item.get("file"):
             raise ValueError("H3MD Director + RefMod: every media.refmods entry needs 'id' and 'file'")

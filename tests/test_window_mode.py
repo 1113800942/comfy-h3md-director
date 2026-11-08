@@ -507,3 +507,16 @@ class DepthOff(unittest.TestCase):
     def test_motion_copy_turns_depth_off(self):
         seg = D.parse_plan(self._raw(None, "motion_transfer: shot"))["segments"][0]
         self.assertFalse(seg["videos"][0].get("depth"))
+
+
+class RefModOff(unittest.TestCase):
+    def test_window_mode_drops_refmods(self):
+        import h3md_director_refmod as R
+        raw = json.loads(plan(True, length=345))
+        raw["media"]["refmods"] = [{"id": "eve", "file": "character/eve"}]
+        raw["segments"][0]["refmods"] = ["eve"]
+        p = D.parse_plan(json.dumps(raw))
+        notes = R.parse_refmods(raw, p, {})
+        self.assertTrue(any("RefMods off" in n for n in notes))
+        self.assertFalse(p["segments"][0].get("refmods"))
+        self.assertEqual(p["media"]["refmods"], {})
