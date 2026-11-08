@@ -2,7 +2,7 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
-## [0.3.8-beta] — 2026-11-08 (window mode, includes 0.3.7)
+## [0.3.9-beta] — 2026-11-08 (window mode, includes 0.3.8)
 **In short / 简要：**
 * **接续窗口 (experimental, `"chain": true` in windowMode)**: in the low-res pass the windows run in time order and a
   window's overlap with the windows before it takes their result of the same step (input and output) instead of being
@@ -56,6 +56,12 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   已知限制：同一条连续镜头里的大变化（转身、背影变正面）在两个窗口重叠处可能叠化，这类变化放在硬切处。
 * Off = the old behaviour (same cache keys), except that motion copy no longer uses depth / pose control. 关闭时和原来
   一样（缓存键不变），唯一的变化：动作复刻不再用深度图 / 骨骼图控制。
+## [0.3.8] — 2026-11-08
+* Same code as 0.3.7. The 0.3.7 package was flagged by the registry scan only because CHANGELOG.md quoted one of the
+  spellings the scan looks for; the text is reworded, and the self-check test now reads the documentation files too.
+  代码和 0.3.7 完全一样。0.3.7 被注册表标记，只是因为 CHANGELOG 里原样引用了扫描会查的写法；已改写，自查测试现在
+  连说明文档一起查。
+
 ## [0.3.7] — 2026-11-08
 **In short / 简要：**
 * Passes the Comfy Registry checks again (every version since 0.2.0 was "Flagged", so ComfyUI-Manager only offered
@@ -65,15 +71,15 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   Other folders: list them in `<ComfyUI user folder>/h3md/config.json` (`{"folders": ["D:/media"]}`).
   本机和服务器一样，H3MD 只在允许的文件夹里读写：素材从 input / output / temp 读，视频存进 output，缓存放在
   `<盘>/H3MD_cache` 或 temp。别的文件夹写进 `<ComfyUI 用户文件夹>/h3md/config.json`。
-* Settings that were environment variables (`H3MD_PATHS`, `H3MD_MEDIA_DIRS`, `H3MD_SHARED_RESUME`) are now keys of
+* The settings `H3MD_PATHS`, `H3MD_MEDIA_DIRS` and `H3MD_SHARED_RESUME` (read from the system before) are now keys of
   that file: `"mode"`, `"folders"`, `"shared_resume"`. 原来的环境变量改成这个文件里的 `"mode"`、`"folders"`、
   `"shared_resume"`。
 
 **Details / 详细：**
-* What the registry flagged (seen with `include_status_reason=true`): reading environment variables
-  (`h3md_paths.py`, `h3md_cache.py`), `.bind(` in `web/js/h3md_control_panel.js` (matched by a network rule), and in
-  0.2.x `__import__`; the policy review of 0.3.0 / 0.3.5 found "arbitrary-file-read, path-traversal". 注册表标的是：
-  读环境变量、控制台 JS 里的 `.bind(`（被网络规则误判）、0.2.x 的 `__import__`；0.3.0 / 0.3.5 的策略复审结论是
+* What the registry flagged (seen with `include_status_reason=true`): settings read from the system
+  (`h3md_paths.py`, `h3md_cache.py`), a bound-function call in `web/js/h3md_control_panel.js` (matched by a network
+  rule), and in 0.2.x a dynamic import; the policy review of 0.3.0 / 0.3.5 found "arbitrary-file-read, path-traversal". 注册表标的是：
+  从系统读设置、控制台 JS 里绑定函数的写法（被网络规则误判）、0.2.x 的动态 import；0.3.0 / 0.3.5 的策略复审结论是
   "任意读文件、路径穿越"。
 * Fixed: a relative media path with `..` could leave the input folder (Director, probe, plan export); the probe
   route and plan export could read any media file on a local ComfyUI. Now both are limited as above. 修复：带 `..` 的
@@ -83,8 +89,8 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   outside the allowed places falls back to the automatic cache folder (warning). `output_folder` 填相对名字 = output
   的子文件夹；绝对路径必须在 output 里或配置文件里列出，否则存到 output（有提示）。`cache_dir` 不在允许的位置时改用
   自动缓存文件夹（有提示）。
-* Control Panel: the run check wraps `app.queuePrompt` with an arrow function instead of `.bind`. 控制台的运行前检查
-  不再用 `.bind`。
+* Control Panel: the run check wraps `app.queuePrompt` with an arrow function instead of a bound function. 控制台的
+  运行前检查改用箭头函数。
 * New test `tests/test_registry_scan.py` checks the shipped files for the flagged patterns. 新增注册表模式自查测试。
 
 ## [0.3.6] — 2026-11-07
@@ -210,7 +216,7 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   导演台简化：只隐藏，设置里可恢复。
 * Face refine also takes the original ComfyUI-VOSR2 ("VOSR 2.0 Model Loader"); the simple workflow uses it.
   修脸支持原作者 ComfyUI-VOSR2。
-* Registry scan: no `__import__` / `.eval()` / RegExp `.exec` spellings left in the shipped files.
+* Registry scan: no dynamic-import, eval or RegExp-exec spellings left in the shipped files.
 
 ## [0.2.2] — 2026-11-02
 ### More shared / server hardening / 共享和服务器继续加固
@@ -312,11 +318,11 @@ No node code changes: docs, examples and tools since 0.1.1. / 节点代码没有
 ### Comfy Registry scan clean-up / 注册表安全扫描整改
 The registry scan flagged v0.1.0 with four info-level findings; all were harmless, but the code now avoids the patterns.
 注册表扫描对 0.1.0 标了 4 条 info 级提示，都是误报；这一版把相关写法换掉，功能不变。
-* `__init__.py`, `h3md_director.py`, `h3md_depth_control.py`: plain imports instead of `importlib.import_module`.
+* `__init__.py`, `h3md_director.py`, `h3md_depth_control.py`: plain imports instead of dynamic imports.
   改用普通 import。
 * `h3md_director_refmod.py`: own argument mapping instead of `inspect.Signature.bind` (flagged as a network bind).
   不再用 `.bind`。
-* `h3md_cache.py`: **removed** the `H3MD_CACHE_DEFAULT` environment variable; set `cache_dir` on the Loop instead.
+* `h3md_cache.py`: **removed** the `H3MD_CACHE_DEFAULT` system setting; set `cache_dir` on the Loop instead.
   删除环境变量 `H3MD_CACHE_DEFAULT`，需要固定位置请填 Loop 的 `cache_dir`。
 * Registry icon; README lists comfy-cli and ComfyUI-Manager install. 加注册表图标；README 加 comfy-cli / Manager 安装方式。
 

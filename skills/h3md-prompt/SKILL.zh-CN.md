@@ -57,7 +57,7 @@ non_diegetic_music:
   - 没有参考视频的长 shot：不要写按时间先后发生的事件（“先走到海边，再坐下，最后回头”）或 `[Shot 2] At 00:20` 这类镜头切换，否则后面的段会把开头重演一遍。写成**持续、可循环的状态**（“she walks slowly along the water's edge, the camera tracks beside her at walking pace”）。需要剧情先后时，手动分成几个 shot，各写各的提示词。
   - 一个 shot 只写一个连续镜头（`[Shot 1]`），不再加子镜头。
 
-### 窗口模式（0.3.8 测试版：导演台的“无接缝长视频”开关）
+### 窗口模式（0.3.9 测试版：导演台的“无接缝长视频”开关）
 - 计划照常写：多个镜头、续接镜头（`overlapIn` 22/39）、硬切（`overlapIn` 0）。打开开关后（计划里是
   `"windowMode": {"length": 243, "overlap": 56, "highLength": 175, "highOverlap": 22}`），续接的镜头会被接成一条时间线、
   一次采样出来，没有接缝；硬切保持干净的硬切。一组最长约 60 秒（内存小于 40 GB 时 30 秒），在放得下的最后一个硬切处分组；
