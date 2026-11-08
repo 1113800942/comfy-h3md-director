@@ -657,6 +657,48 @@ class GroupGuideHold(unittest.TestCase):
         self.assertGreater(n, 0)
 
 
+class GroupGuideTrailHold(unittest.TestCase):
+    def test_guide_then_shot_without_it(self):
+        """A guide shot continued by a shot without the guide: every window of the guide shot gets a guide of the
+        window's own length (native-temporal nodes require it), last frame held."""
+        import torch
+        raw = json.loads(multi_plan({"length": 243, "overlap": 56, "highLength": 175, "highOverlap": 22,
+                                     "groupLength": 1450}, segs=((362, 0), (396, 39))))
+        raw["media"]["videos"] = [{"id": "g", "file": "g.mp4", "duration": 60.0, "hasAudio": False}]
+        raw["segments"][0]["videos"] = [{"id": "g", "trimStart": 0.0, "useSoundtrack": False,
+                                         "useDuration": 362 / 24}]
+        p = D.parse_plan(json.dumps(raw))
+        seg = p["segments"][0]
+        calls = []
+
+        class FakeCore:
+            class MiniMaxH3ReferenceToVideo:
+                @staticmethod
+                def execute(**kw):
+                    calls.append(kw)
+                    return ([[torch.zeros(1), {}]], {"samples": torch.zeros(1)})
+
+        def media(plan, s, size="match", extra=0):
+            vids = [torch.arange(0, s["length"]).float().view(-1, 1, 1, 1).expand(-1, 2, 2, 3).clone()
+                    for _ in s["videos"]]
+            return {"images": [], "videos": vids, "video_audios": [None] * len(vids), "audios": [],
+                    "locked_audio": None}
+        orig = D.pick_media_for
+        try:
+            D.pick_media_for = media
+            pos, lat, text = D.encode_group_windows(FakeCore, p, seg, None, None, None, None, "match")
+        finally:
+            D.pick_media_for = orig
+        n = 0
+        for c, kw in zip(pos, calls):
+            a, b = c[1][WIN.RANGE_KEY]
+            if kw["ref_videos"]:
+                got = kw["ref_videos"]["ref_video_0"][:, 0, 0, 0].tolist()
+                self.assertEqual(got, [float(min(x, 361)) for x in range(a, b)], (a, b))
+                n += 1
+        self.assertGreater(n, 2)
+
+
 class DepthOff(unittest.TestCase):
     def _raw(self, window, prompt="shot"):
         raw = json.loads(plan(window, length=345))

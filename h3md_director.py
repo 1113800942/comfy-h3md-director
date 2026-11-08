@@ -1930,6 +1930,16 @@ def _window_video(plan, parts, media, k, j, frames, snd, a, b, ref_image_size):
             sl.append(trail[0])
             aud.append(trail[1] if snd is not None else None)
             note.append(f"last {b - s1} frames from shot {k + 2}")
+        elif n >= int(parts[k]["seg"]["length"]) - 1:
+            # a timeline video that covers its whole shot (a guide) and the window runs on into a shot without it:
+            # hold the last frame, so the guide keeps the window's length (a native-temporal guide must match it)
+            sl.append(sl[-1][-1:].expand(b - s1, *sl[-1].shape[1:]))
+            if snd is not None:
+                sr = int(snd["sample_rate"])
+                w = snd["waveform"]
+                aud.append({"waveform": w.new_zeros(*w.shape[:-1], int(round((b - s1) / FPS * sr))),
+                            "sample_rate": sr})
+            note.append(f"last frame held for {b - s1} frames")
     out = sl[0] if len(sl) == 1 else torch.cat(sl, 0)
     return out, (_cat_audio(aud) if snd is not None else None), ", ".join(note)
 
