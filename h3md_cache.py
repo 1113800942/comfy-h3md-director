@@ -223,6 +223,16 @@ def segment_uses_cont_settings(seg: dict, continued: bool, tiling: bool) -> bool
     return bool(continued) or (bool(tiling) and seg.get("audioMode") == "locked")
 
 
+def allowed_cache_root(root: str) -> bool:
+    """v0.3.7: where a cache_dir may point. Own machine: inside a <drive>/H3MD_cache folder, ComfyUI's output / temp
+    folder or a folder listed in the H3MD config file. Shared ComfyUI: ComfyUI's output / temp folder or a config
+    folder only (h3md_paths)."""
+    roots = D.PATHS.write_roots()
+    if not D.PATHS.shared():
+        roots = roots + [os.path.join(b, FOLDER) for b in _candidates()]
+    return D.PATHS.inside(root, roots)
+
+
 def segment_key(settings_hash: str, plan: dict, k: int, seed: int, continued: bool, prev_key: str | None) -> str:
     """Chain key: a continuation also depends on the previous segment's key (its tail is our prefix)."""
     return _sha({"settings": settings_hash, "segment": segment_signature(plan, k), "seed": int(seed),
@@ -231,14 +241,16 @@ def segment_key(settings_hash: str, plan: dict, k: int, seed: int, continued: bo
 
 class SegmentCache:
     def __init__(self, root: str | None, settings_hash: str, resume: bool, dtype: str = "fp16"):
-        if root and D.PATHS.shared() and not D.PATHS.inside(root, D.PATHS.read_roots()):
-            LOG.warning("%s cache_dir '%s' is outside ComfyUI's folders on a shared ComfyUI; using the default", _TAG, root)
+        if root and not allowed_cache_root(root):
+            LOG.warning("%s cache_dir '%s' is not inside a <drive>/%s folder, ComfyUI's output / temp folder or a folder "
+                        "listed in %s; using the default", _TAG, root, FOLDER, D.PATHS.config_path() or "h3md/config.json")
             root = None
         root = os.path.abspath(root or default_root())
-        if resume and D.PATHS.shared() and os.environ.get("H3MD_SHARED_RESUME", "") != "1":
+        if resume and D.PATHS.shared() and not D.PATHS.shared_resume():
             # resume_<settings hash> is shared by every run with the same settings: on a shared ComfyUI another
-            # person's segments could be picked up. Fresh run folder instead (H3MD_SHARED_RESUME=1 to allow).
-            LOG.warning("%s shared ComfyUI: resume_from_cache off for this run (set H3MD_SHARED_RESUME=1 to allow)", _TAG)
+            # person's segments could be picked up. Fresh run folder instead ("shared_resume": true allows it).
+            LOG.warning("%s shared ComfyUI: resume_from_cache off for this run (\"shared_resume\": true in %s allows it)",
+                        _TAG, D.PATHS.config_path() or "h3md/config.json")
             resume = False
         if resume:
             name = "resume_" + settings_hash[:16]

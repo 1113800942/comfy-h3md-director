@@ -295,7 +295,8 @@ app.registerExtension({
   name: "H3MD.ControlPanel",
   setup() {
     setInterval(() => { for (const n of app.graph?._nodes || []) if (n.type === NODE) n.__h3mdPanel?.updateHint(); }, 1000);
-    const queue = app.queuePrompt?.bind(app);
+    const original = app.queuePrompt;
+    const queue = typeof original === "function" ? (...args) => original.apply(app, args) : null;
     if (queue) {
       app.queuePrompt = async function (...args) {
         const bad = panelProblems();

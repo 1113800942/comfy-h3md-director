@@ -63,10 +63,14 @@ generate them segment by segment, keep every finished segment on disk, and repai
    (one 12 s shot: picture, music and all settings). On the H3MD Director click **Import plan…** → pick the zip →
    **Plan + all settings** → Run. Only the two-stage sampling (low-res + latent upscale) runs inside the Loop node;
    there is nothing else to set.
-7. **Shared or server ComfyUI** (started with `--listen`, a LAN address or a cloud platform): H3MD then only reads
-   media inside ComfyUI's input / output / temp folders, only saves videos inside the output folder and keeps its
-   cache in ComfyUI's temp folder (each run its own; plan imports capped at 1 GB). Local use (the default `127.0.0.1`) is unchanged. Override with
-   `H3MD_PATHS=local` / `H3MD_PATHS=shared`; allow extra media folders with `H3MD_MEDIA_DIRS`.
+7. **Where H3MD reads and writes files** (v0.3.7, on every ComfyUI): media only from ComfyUI's input / output / temp
+   folders (paths in a plan are relative to the input folder), videos only into the output folder (`output_folder`
+   = a subfolder), the cache into a `<drive>/H3MD_cache` folder (chosen automatically) or ComfyUI's temp folder.
+   Other folders: list them in `<ComfyUI user folder>/h3md/config.json`, e.g.
+   `{"folders": ["D:/media", "E:/songs"]}`. **Shared or server ComfyUI** (started with `--listen`, a LAN address or a
+   cloud platform): the cache always stays in ComfyUI's temp folder (each run its own; plan imports capped at 1 GB);
+   force the mode with `"mode": "local"` / `"shared"` and allow reuse of cached segments with `"shared_resume": true`
+   in the same file.
 
 ## Quick start
 1. Put your photos, reference video and music into the Director, write the prompt per shot (use the
@@ -317,7 +321,8 @@ the first one using [`tools/drift_report.py`](tools/drift_report.py) (run it on 
 **Disk cache**
 * Folders: `resume_<hash>` (stable with `resume_from_cache` on) or `run_<time>_<pid>`.
 * Location: with `cache_dir` empty it is chosen automatically (an existing `H3MD_cache` → the local drive with the
-  most free space).
+  most free space). A set `cache_dir` must be inside a `<drive>/H3MD_cache` folder, ComfyUI's output / temp folder or
+  a folder listed in `h3md/config.json` (v0.3.7).
 * The Loop never deletes its cache before the video is saved; use `delete_cache_after_save` in
   `H3MD Save Video Interp`. A 243-frame 1088x1920 segment takes about 3 GB (fp16).
 

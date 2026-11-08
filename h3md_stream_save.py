@@ -1108,7 +1108,7 @@ class H3MDSaveVideoInterp:
                 "filename_prefix": ("STRING", {"default": "video/H3MD", "tooltip":
                                     "Like SaveVideo: <prefix>_00001_.mp4 (subfolders allowed, %date% vars)."}),
                 "output_folder": ("STRING", {"default": "", "tooltip":
-                                  "Empty = ComfyUI's output folder. Otherwise an absolute folder (on a shared ComfyUI started with --listen: only a subfolder of the output folder)."}),
+                                  "Empty = ComfyUI's output folder. A relative name = a subfolder of it. An absolute folder only if it is inside the output folder or listed under \"folders\" in <ComfyUI user folder>/h3md/config.json (v0.3.7)."}),
                 "interpolate": ("BOOLEAN", {"default": False, "tooltip":
                                 "On: RIFE frame interpolation (ComfyUI-VFI's model) 24 fps -> target_fps. Off: the "
                                 "H3MD frames are written unchanged (the RIFE options below are greyed out)."}),

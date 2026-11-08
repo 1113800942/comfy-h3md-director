@@ -523,7 +523,7 @@ class H3MDLoopSampler:
             "cache_dtype": (["fp16", "uint8"], {"default": "fp16",
                             "tooltip": "Cached frame format. fp16 ~= lossless (2 B/value); uint8 = half the disk, "
                                        "8-bit like the saved video."}),
-            "cache_dir": ("STRING", {"default": "", "tooltip": "Empty = auto: <drive>/H3MD_cache on the local fixed drive with the most free space (an existing H3MD_cache holding resume_* runs is reused first, so resume survives restarts). Falls back to ComfyUI temp/h3md_cache with a warning if nothing is writable."}),
+            "cache_dir": ("STRING", {"default": "", "tooltip": "Empty = auto: <drive>/H3MD_cache on the local fixed drive with the most free space (an existing H3MD_cache holding resume_* runs is reused first, so resume survives restarts). Falls back to ComfyUI temp/h3md_cache with a warning if nothing is writable. A set folder must be inside a <drive>/H3MD_cache folder, ComfyUI's output / temp folder or a folder listed under \"folders\" in <ComfyUI user folder>/h3md/config.json (v0.3.7); otherwise the automatic folder is used."}),
             "delete_cache": ("BOOLEAN", {"default": True,  # hidden in the UI (web/js/h3md_hide_widgets.js); slot kept
                              "tooltip": "Hidden / no effect since 2026-10-18: the Loop never deletes its cache before the "
                                         "video is saved. Use H3MD Save Video Interp -> delete_cache_after_save."}),
