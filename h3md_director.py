@@ -792,7 +792,9 @@ def group_window_segments(segments: list, window_mode: dict, notes: list, contin
                            "images": [images.index(im) for im in p["images"]], "seg": p})
         g = dict(parts[0])
         g.update({"length": length, "images": images, "videos": [], "audios": [], "groupParts": gparts,
-                  "windowCuts": [17 * round(gp["origin"] / 17) for gp in gparts if gp["cut"]],
+                  "windowCuts": sorted({17 * round(gp["origin"] / 17) for gp in gparts if gp["cut"]} |
+                                       {17 * round((gp["origin"] + c) / 17) for gp in gparts
+                                        for c in gp["seg"].get("windowCuts") or () if 0 < c < gp["end"] - gp["origin"]}),
                   "windowPrompts": [{"start": gp["start"], "end": gp["end"], "prompt": gp["prompt"],
                                      "images": gp["images"]} for gp in gparts]})
         g["windowPrompts"][0]["start"] = 0
@@ -1879,7 +1881,8 @@ def encode_group_windows(core, plan, seg, picked, clip, vae, audio_vae, ref_imag
         if i and gp.get("cut"):
             eff[i - 1][1] = st
     media = {}
-    positive, latent, texts = [], None, []
+    spans = WIN.window_span_map(int(seg["length"]), wm, cuts)
+    positive, latent, texts, timed = [], None, [], 0
     for a, b in ranges:
         mid = (a + b) / 2.0
         k = next((i for i, gp in enumerate(parts) if gp["start"] <= mid < gp["end"]), len(parts) - 1)
@@ -1891,9 +1894,17 @@ def encode_group_windows(core, plan, seg, picked, clip, vae, audio_vae, ref_imag
         # the shots this window covers (a window never crosses a hard cut, so these are continued shots)
         cover = [i for i, p in enumerate(parts) if eff[i][0] < b and eff[i][1] > a]
         same_pics = all(list(parts[i]["seg"]["images"]) == list(gp["seg"]["images"]) for i in cover)
+        # 11-08: each shot's time marks ('[12s]' / 'At 00:12.7') resolved for THIS window: a line or action goes to
+        # the one window whose own span holds it, timed inside the window (before: every window of a long shot got
+        # all of the shot's lines with the shot's own times)
+        lo, hi = spans.get((a, b), (a, b))
+        own = {}
+        for i in set(cover) | {k}:
+            own[i], ev = WIN.timed_window_prompt(parts[i]["prompt"], a, b, lo, hi, parts[i]["origin"])
+            timed += ev is not None
         combined = None
         if len(cover) > 1 and same_pics:
-            combined = WIN.combine_part_prompts([((parts[i]["start"] - a) / FPS, parts[i]["prompt"]) for i in cover])
+            combined = WIN.combine_part_prompts([((parts[i]["start"] - a) / FPS, own[i]) for i in cover])
         elif len(cover) > 1:
             LOG.warning("[H3MD Encode] window %d-%d covers shots %s with different pictures - prompt of shot %d only",
                         a, b, [i + 1 for i in cover], k + 1)
@@ -1913,7 +1924,7 @@ def encode_group_windows(core, plan, seg, picked, clip, vae, audio_vae, ref_imag
                 auds[f"ref_video_audio_{j}"] = slice_audio(snd, o / FPS, sl.shape[0] / FPS)
         kw["ref_videos"] = vids or None
         kw["ref_video_audios"] = auds or None
-        text = fix_duration_line(combined or gp["prompt"], b - a, 0)
+        text = fix_duration_line(combined or own[k], b - a, 0)
         out = core.MiniMaxH3ReferenceToVideo.execute(
             clip=clip, prompt=text, width=plan["width"], height=plan["height"], length=seg["length"],
             ref_image_size=ref_image_size, vae=vae, audio_vae=audio_vae, **kw)
@@ -1924,8 +1935,9 @@ def encode_group_windows(core, plan, seg, picked, clip, vae, audio_vae, ref_imag
             tag[WIN.CUT_KEY] = cuts
         positive += [[c[0], dict(c[1], **tag)] for c in pos]
         texts.append(f"[window frames {a}-{b}: shot(s) {[i + 1 for i in cover]}]\n{text}")
-    LOG.info("[H3MD Encode] segment %d: %d shots on one timeline (3e), %d window conditionings %s, cuts %s",
-             seg["index"], len(parts), len(ranges), ranges, list(cuts))
+    LOG.info("[H3MD Encode] segment %d: %d shots on one timeline (3e), %d window conditionings %s, cuts %s%s",
+             seg["index"], len(parts), len(ranges), ranges, list(cuts),
+             ", time marks resolved per window" if timed else "")
     return positive, latent, "\n\n".join(texts)
 
 

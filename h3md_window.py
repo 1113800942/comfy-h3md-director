@@ -113,6 +113,14 @@ def normalize_window_prompts(value, length: int, resolve):
 # ------------------------------------------------------------------------------------------- 3a: timed prompts
 FRAME_PER_TOKEN = (1, 4, 4, 4, 4)
 TIME_MARK = re.compile(r"\[\s*(\d+(?:\.\d+)?)\s*s(\s+cut)?\s*\]", re.I)
+# 11-08: the skill's own lyric / line timing 'At 00:12.7 she sings: ...' (minutes:seconds WITH a decimal, so a clock
+# time in the story such as 'at 10:30' is never taken) counts as a '[12.7s]' mark in window mode
+CLOCK_MARK = re.compile(r"\bAt (\d{1,2}):(\d{2}\.\d{1,3})(?=[\s,:;])\s*,?\s*")
+
+
+def clock_marks(prompt: str) -> str:
+    """'At 00:12.7 she sings: ...' -> '[12.7s] she sings: ...' (the time is from the shot's own start)."""
+    return CLOCK_MARK.sub(lambda m: f"[{int(m.group(1)) * 60 + float(m.group(2)):g}s] ", prompt or "")
 SECTION = re.compile(r"(?m)^\s*(subject_definitions|summary|retention_analysis|detailed_description|"
                      r"overall_soundscape|non_diegetic_music|dialogue|sound_effects)\s*:")
 NO_NEW_ACTION = ("No new action starts in this part; whatever is moving keeps moving the same way as the moment "
@@ -294,6 +302,7 @@ def split_timed_prompt(prompt: str):
       '[8s cut] <text>'           a hard cut at 8 s; all text up to the next mark describes that shot
     Returns (before, common, shots, acts, after) or None without marks: before/after = text before / after the
     detailed_description body, common = shared description, shots = [(sec, text)], acts = [(sec, text)] (time order)."""
+    prompt = clock_marks(prompt)
     if not prompt or not TIME_MARK.search(prompt):
         return None
     heads = list(SECTION.finditer(prompt))
@@ -366,21 +375,51 @@ def auto_window_prompts(prompt: str, total_frames: int, length: int, overlap: in
     wins, spans = window_spans(total_frames, length, overlap, cuts)
     if len(wins) < 2:
         return None
-    before, removed = strip_sequence(before)
-    shots = [(sec * fps, t) for sec, t in shots]
     out = []
     for (a, b), (lo, hi) in zip(wins, spans):
-        mid = (a + b) / 2.0
-        shot = [t for (f, t) in shots if f <= mid]
-        mine = [(sec, t) for (sec, t) in acts if lo <= sec * fps < hi]
-        # the time inside this window, so H3 places the action near the right second (11-07: about one window off)
-        action = " ".join(f"At about {max(0.0, sec - a / fps):.0f} s into this part, {t[0].lower() + t[1:]}"
-                          if t else "" for sec, t in mine) if mine else NO_NEW_ACTION
-        own = " ".join(x for x in (shot[-1] if shot else "", " ".join(t for _, t in mine)) if x)
-        body = " ".join(x for x in (common, shot[-1] if shot else "", action) if x)
-        out.append({"start": lo, "end": hi, "prompt": f"{before}\n{body}\n\n{after.lstrip()}" if after else
-                    f"{before}\n{body}", "events": len(mine), "own": own if shots else None,
-                    "removed": removed})
+        r = resolve_window(parts, a, b, lo, hi, 0, fps)
+        out.append({"start": lo, "end": hi, "prompt": r["prompt"], "events": r["events"], "own": r["own"],
+                    "removed": r["removed"]})
+    return out
+
+
+def resolve_window(parts, a, b, lo, hi, origin=0, fps: int = FPS):
+    """One window's prompt from a parsed timed prompt (split_timed_prompt): the shot text in force at the window
+    centre, the actions whose time falls in the window's OWN span [lo, hi) (each action in exactly one window) with
+    their time inside the window, else NO_NEW_ACTION.  a, b, lo, hi are frames on the timeline; the marks count from
+    `origin` (the shot's own frame 0 on that timeline: 0 for a single shot, the shot start inside a group)."""
+    before, common, shots, acts, after = parts
+    before, removed = strip_sequence(before)
+    mid = (a + b) / 2.0
+    shot = [t for sec, t in shots if origin + sec * fps <= mid]
+    mine = [(sec, t) for sec, t in acts if lo <= origin + sec * fps < hi]
+    # the time inside this window, so H3 places the action near the right second (11-07: about one window off)
+    action = " ".join(f"At about {max(0.0, (origin + sec * fps - a) / fps):.0f} s into this part, "
+                      f"{t[0].lower() + t[1:]}" for sec, t in mine if t) if mine else NO_NEW_ACTION
+    own = " ".join(x for x in (shot[-1] if shot else "", " ".join(t for _, t in mine)) if x)
+    body = " ".join(x for x in (common, shot[-1] if shot else "", action) if x)
+    return {"prompt": f"{before}\n{body}\n\n{after.lstrip()}" if after else f"{before}\n{body}",
+            "events": len(mine), "own": own if shots else None, "removed": removed}
+
+
+def timed_window_prompt(prompt: str, a: int, b: int, lo: int, hi: int, origin: int = 0, fps: int = FPS):
+    """3e (11-08): a group part's prompt for one window: its time marks resolved for this window (resolve_window),
+    or the prompt unchanged when it has no marks.  (prompt, events or None)"""
+    parts = split_timed_prompt(prompt)
+    if parts is None:
+        return prompt, None
+    r = resolve_window(parts, a, b, lo, hi, origin, fps)
+    return r["prompt"], r["events"]
+
+
+def window_span_map(total_frames: int, window_mode: dict, cuts=()):
+    """{(a, b): (lo, hi)} for the windows of both passes: each window's own span (the first pass wins a tie)."""
+    out = {}
+    for ln, ov in ((window_mode["length"], window_mode["overlap"]),
+                   (window_mode["highLength"], window_mode["highOverlap"])):
+        wins, spans = window_spans(total_frames, ln, ov, cuts)
+        for w, s in zip(wins, spans):
+            out.setdefault(w, s)
     return out
 
 

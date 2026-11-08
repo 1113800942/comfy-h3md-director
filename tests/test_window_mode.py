@@ -490,6 +490,62 @@ class GroupWindowPrompts(unittest.TestCase):
             self.assertFalse(a < cut < b)
 
 
+class TimedGroupParts(unittest.TestCase):
+    """11-08: lyric / line timing inside group parts and the skill's 'At 00:12.7' format."""
+
+    def test_clock_marks(self):
+        self.assertEqual(WIN.clock_marks("At 00:12.7 she sings: <d>x</d>."), "[12.7s] she sings: <d>x</d>.")
+        self.assertEqual(WIN.clock_marks("At 01:05.5, he waves."), "[65.5s] he waves.")
+        self.assertEqual(WIN.clock_marks("They meet at 10:30 in the morning."), "They meet at 10:30 in the morning.")
+        wps = WIN.auto_window_prompts(TIMED.replace("[2s]", "At 00:02.0").replace("[20s]", "At 00:20.0"), 1445, 243, 56)
+        self.assertEqual(sum(w["events"] for w in wps), 4)
+        self.assertEqual(sum("spins once" in w["prompt"] for w in wps), 1)
+
+    def test_lines_go_to_one_window_each(self):
+        import torch
+        raw = json.loads(multi_plan({"length": 243, "overlap": 56, "highLength": 175, "highOverlap": 22, "groupLength": 1450},
+                                    segs=((362, 0), (396, 39))))
+        lines = {0: ("LINEA", "LINEB", "LINEC"), 1: ("LINED", "LINEE", "LINEF")}
+        for i, s in enumerate(raw["segments"]):
+            a, b, c = lines[i]
+            s["prompt"] = ("Duration: 1 s.\n\nsummary:\nshe sings.\n\ndetailed_description:\nShe stands on a roof. "
+                           f"At 00:02.0 she sings: <d>[English] {a}</d>. At 00:07.5 she sings: <d>[English] {b}</d>. "
+                           f"At 00:12.0 she sings: <d>[English] {c}</d>.\n\noverall_soundscape:\nsong.")
+            s["images"] = ["a"]
+        p = D.parse_plan(json.dumps(raw))
+        seg = p["segments"][0]
+        calls = []
+
+        class FakeCore:
+            class MiniMaxH3ReferenceToVideo:
+                @staticmethod
+                def execute(**kw):
+                    calls.append(kw)
+                    return ([[torch.zeros(1), {}]], {"samples": torch.zeros(1)})
+        orig = D.pick_media_for
+        try:
+            D.pick_media_for = lambda plan, s, size="match", extra=0: {"images": [], "videos": [], "video_audios": [],
+                                                                         "audios": [], "locked_audio": None}
+            pos, lat, text = D.encode_group_windows(FakeCore, p, seg, None, None, None, None, "match")
+        finally:
+            D.pick_media_for = orig
+        ranges = [c[1][WIN.RANGE_KEY] for c in pos]
+        wm = p["windowMode"]
+        for ln, ov in ((wm["length"], wm["overlap"]), (wm["highLength"], wm["highOverlap"])):
+            wins = WIN.window_spans(seg["length"], ln, ov, tuple(seg.get("windowCuts") or ()))[0]
+            prompts = [calls[ranges.index(w)]["prompt"] for w in wins]
+            for word in lines[0] + lines[1]:      # every line once per pass, never the raw mark
+                self.assertEqual(sum(word in pr for pr in prompts), 1, (ln, word))
+            for pr in prompts:
+                self.assertNotIn("At 00:", pr)
+                self.assertNotIn("s]", pr)
+        # line D is 2 s into shot 2, which starts at frame 362 - 39 = 323 on the timeline: ~15.5 s
+        win = next(w for w in WIN.window_spans(seg["length"], wm["length"], wm["overlap"])[0]
+                   if "LINED" in calls[ranges.index(w)]["prompt"])
+        self.assertLessEqual(win[0], 323 + 48)
+        self.assertGreater(win[1], 323 + 48)
+
+
 class DepthOff(unittest.TestCase):
     def _raw(self, window, prompt="shot"):
         raw = json.loads(plan(window, length=345))

@@ -22,7 +22,7 @@
 - **坏了只修那几段**：`rerun_segments` 只重跑有问题的段，两头锁住前后段。
 - **动作复刻**：参考视频只提供动作（深度图 + SAM3 + Fun ControlNet），长相来自你的照片。
 - **长视频不漂色**：`lowres_anchor` 让单场景长镜头从头到尾颜色和人脸都稳定。
-- **按你的显卡来**：按显存自动拆段、高清条带分块、硬盘缓存和断点续跑；4B + ClipProj 编码器能省十几 GB。
+- **按你的显卡来**：按显存自动拆段、高清条带分块、硬盘缓存和断点续跑；默认的 4B + ClipProj 文本编码器比 32B 省约 20 GB 内存、十几 GB 显存。
 
 ## 安装
 
@@ -114,7 +114,7 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
 
 **示例工作流**
 * `H3MD Director simple.json`（清爽版，**推荐从这里开始**）：总控台 + 导演台 + 预览，模型 / 采样 / 保存收在子图里；不用
-  rgthree、Crystools、easy-use、LayerStyle、TE-Speed 这些节点。小显存：模型子图里有 4B 编码器 + ClipProj（默认旁路），旁边写了切换方法。
+  rgthree、Crystools、easy-use、LayerStyle、TE-Speed 这些节点。文本编码器默认 4B + ClipProj（在模型子图里），换 32B 的方法写在笔记里。
 * `H3MD Director.json`（完整版）——样片用的完整设置，多了修脸、RIFE 补帧到 48 fps、多 1 步精修和几个方便的小工具。
 
 | 节点包 | 在工作流里做什么 | 要不要装 | 不装会怎样 |
@@ -122,7 +122,7 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
 | ComfyUI 0.43+（自带 MiniMax H3 节点） | 模型、采样器、VAE | **必需** | — |
 | H3MD Director（本包） | 导演台、循环采样、保存、深度 / SAM3 动作复刻 | **必需** | — |
 | [ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) | SageAttention 和 FeedForward 分块补丁（省显存） | 推荐（清爽版和完整版都用） | 能跑，但显存占用更高；SageAttention 补丁还需要装 SageAttention 包，没装就把那个节点绕过 |
-| [ComfyUI-ClipProj](https://github.com/nicolab28/ComfyUI-ClipProj) | 4B 文本编码器投影，省 10 GB 以上显存 | 只有用 4B 编码器时需要 | 改用 32B 编码器 |
+| [ComfyUI-ClipProj](https://github.com/nicolab28/ComfyUI-ClipProj) | 4B 文本编码器投影（默认），省约 20 GB 内存、10 GB 以上显存 | **默认要装**（示例工作流默认用 4B 编码器） | Load CLIP 改选 32B 编码器（type 选 `minimax`），再旁路 ClipProj Apply |
 | [ComfyUI-VFI](https://github.com/GACLove/ComfyUI-VFI) | `H3MD Save Video Interp` 里的 RIFE 补帧 | 可选 | `interpolate` 保持关，输出 24 fps |
 | [ComfyUI-VOSR2](https://github.com/ylchen333/ComfyUI-VOSR2)（清爽版）/ TE-Speed-VOSR2（完整版） | `H3MD Save Video Interp` 里的修脸 | 可选 | `face_refine` 保持关（默认就是关） |
 | [ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler) | 修脸选 `refine_model = SeedVR2` 时用：它的 DiT / VAE 加载节点接保存节点的 `seedvr2_model` / `seedvr2_vae`（TE-Speed 加速版也能接） | 可选 | 用 VOSR2，或 `face_refine` 保持关 |
@@ -148,12 +148,12 @@ hybrid b25-49 int8 底模、32B int8 文本编码器、4 步加速 LoRA、两段
 | 1088×1920 / 1920×1088 | 约 8–12 分钟 | 约 1.5–2 小时（11 段） | 2–3 条 | 约 35 GB | 约 70 GB |
 
 * 每次开跑的第 1 段会多 1 分钟左右（加载模型）。
-* 模型文件：底模 19.5 GB；32B 编码器 25.3 GB（或 4B 编码器 5.3 GB + ClipProj 0.5 GB）；视频 VAE 4.9 GB；
+* 模型文件：底模 19.5 GB；4B 编码器 5.3 GB + ClipProj 0.5 GB（默认；或 32B 编码器 25.3 GB）；视频 VAE 4.9 GB；
   音频 VAE 0.6 GB；加速 LoRA 每个 0.3–1.8 GB。模型大约 55 GB，另外留出缓存空间。
 * **4B 编码器 + ClipProj 对比 32B**（704×1280，同一个种子）：画质一样，速度也一样（每段 203 秒对 199 秒）；
   只是省显存（10 GB 以上），对很细的提示词稍微没那么听话。
 * 1088×1920 下每 243 帧缓存约 3 GB（fp16）；出片后可以用 `delete_cache_after_save` 删掉。
-* **只在 RTX 5090 上测过。** 显卡小的话，先用 4B 编码器 + ClipProj、704×1280、每段 10 秒左右、参考图少而小
+* **只在 RTX 5090 上测过。** 显卡小的话，先用 704×1280、每段 10 秒左右、参考图少而小
   （见 **小显存**）。分块估算在第一次爆显存重试后会记住你的显卡。
 * 欢迎在 [Discussions](https://github.com/1113800942/comfy-h3md-director/discussions) 里报你的显卡、分辨率和每段用时，
   我们会补进这张表。
@@ -355,8 +355,9 @@ latent 重叠接续，704×1280，`lowres_anchor = 1`。每段都和第 1 段比
 * `video/h265-mp4` 和 10-bit（`yuv420p10le`）**还没测过**。
 * `resume_from_cache` 的缓存键不包括模型、LoRA 和放大器；换了这些请关掉 resume 或清掉缓存文件夹。
 * 这一版换了采样引擎，旧版留下的缓存不会被续跑使用；旧工作流里的 `H3MD Loop Options` 节点请删掉重新放一个（选项变了）。
-* **文本编码器怎么选**：32B（`qwen3vl_32b_minimax_h3_int8_convrot`）对提示词理解最准；显存不够就用 4B + ClipProj，能省十几 GB，
-  画质不受影响，只是理解稍弱、画面细节和 32B 略有不同。从零生成时完全可用。**同一部片子从头到尾用同一个编码器**，不要在
+* **文本编码器怎么选**：示例工作流默认 4B（`qwen3vl_4b_fp8_scaled`，Load CLIP 的 type 选 `krea2`）+ ClipProj，比 32B 省约
+  20 GB 内存、十几 GB 显存，画质看不出区别，只是对很细的提示词稍微没那么听话。想要最听话就换 32B
+  （`qwen3vl_32b_minimax_h3_int8_convrot`，type 选 `minimax`），再旁路 ClipProj Apply。**同一部片子从头到尾用同一个编码器**，不要在
   `rerun_segments` 重跑时中途换。
 * **快动作残影**：快速甩手、挥手时偶尔有一瞬间的残影（多只手）。原因是时间上 4 帧压成 1 帧，再加上少步数；可以用
   `rerun_segments` 换种子重跑那一段。
@@ -410,7 +411,7 @@ MiniMax H3 单次最多十几秒。要做两三分钟的长视频，难点不在
 - **走过的弯路**：一开始拿“上一段的保留帧”当标准去校正，没效果，因为那几帧本身已经漂了，等于拿漂过的对齐漂过的。**锚点必须选一个没漂的源头。**
 
 ### 8. 编码器：32B 和 4B + ClipProj
-- 4B + ClipProj 能省十几 GB 显存，画质不受影响，只是对提示词的理解稍弱。从零生成完全可用；同一部片子不要中途换编码器。
+- 4B + ClipProj 比 32B 省约 20 GB 内存、十几 GB 显存，画质看不出区别，只是对提示词的理解稍弱，所以 0.3.7 起设为默认。同一部片子不要中途换编码器。
 
 ### 9. 方法上的经验
 - **先查社区，再做测试**：一天只能跑几次测试，别人踩过的坑先看。
