@@ -39,7 +39,8 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   redraw / rerun restores the previous version; a guide video split into continued shots stays on the timeline clock.
   独立审查修复：短组照样按窗口生成（提示词不再被平均、硬切保留）；换种子重跑会重跑低清；一组只有一条音轨（锁定变了就另起一组）；
   重画 / 重跑失败时旧版本放回；拆成续接镜头的引导视频按时间线对齐。
-* Off = exactly the old behaviour (same cache keys). 关闭时和原来完全一样（缓存键不变）。
+* Off = the old behaviour (same cache keys), except that motion copy no longer uses depth / pose control. 关闭时和原来
+  一样（缓存键不变），唯一的变化：动作复刻不再用深度图 / 骨骼图控制。
 
 ## [0.3.6] — 2026-11-07
 **In short / 简要：**
