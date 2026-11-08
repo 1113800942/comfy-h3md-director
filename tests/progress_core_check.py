@@ -44,7 +44,7 @@ try:
     except KeyboardInterrupt:
         pass
     files = sorted(os.listdir(d))
-    assert files == ["meta.json", "step_low_res_003.pt", "step_low_res_004.pt"], files   # newest two kept
+    assert files == ["meta.json", "step_low_res_004.pt", "step_low_res_005.pt"], files   # newest two kept (euler: state AFTER step i saved as i+1)
     st2 = P.ProgressStore(d, "k1")
     got = run(st2)
     for a, b in zip(full.unbind(), got.unbind()):

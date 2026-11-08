@@ -175,6 +175,20 @@ def _vram_gib():
     return None, None
 
 
+def _euler_next(d, sigmas):
+    """State after Euler step d['i'] (k-diffusion sample_euler, s_churn 0): x + (x - denoised) / sigma * dt."""
+    x, den = d.get("x"), d.get("denoised")
+    if x is None or den is None:
+        return None
+    j = int(d["i"])
+    if j + 1 >= int(sigmas.shape[-1]):
+        return None
+    sigma = d.get("sigma_hat", sigmas[j])
+    dt = sigmas[j + 1] - sigma
+    from comfy.k_diffusion.sampling import to_d
+    return x + to_d(x, sigma, den) * dt
+
+
 def timed_sampler(sampler, stage: str, total: int, log: list | None = None, progress=None):
     """KSAMPLER that logs '[H3MD timing] <stage> step i/n <sec>s ...' per step (step 1 includes model loading and is
     tagged 'setup').  Samplers that are not KSAMPLERs are returned unchanged."""
@@ -182,6 +196,7 @@ def timed_sampler(sampler, stage: str, total: int, log: list | None = None, prog
     if not isinstance(sampler, comfy.samplers.KSAMPLER):
         return sampler
     inner = sampler.sampler_function
+    is_euler = getattr(inner, "__name__", "") == "sample_euler" and not sampler.extra_options.get("s_churn", 0)
 
     @functools.wraps(inner)
     def fn(model, x, sigmas, *a, callback=None, **kw):
@@ -206,7 +221,14 @@ def timed_sampler(sampler, stage: str, total: int, log: list | None = None, prog
             i = int(d.get("i", state["n"] - 1)) + offset
             if progress is not None and d.get("x") is not None:
                 try:
-                    progress.save_step(stage, i, d["x"], n_sig)
+                    # The callback fires after step i's model call with x = the state BEFORE step i.  For plain
+                    # Euler (H3MD default) the state AFTER step i is known now: save that as step i+1, so a stop
+                    # during step i+1 resumes there instead of one step earlier.  Other samplers: save x_i.
+                    nxt = _euler_next(d, sigmas) if is_euler else None
+                    if nxt is not None and i + 1 < n_sig - 1:
+                        progress.save_step(stage, i + 1, nxt, n_sig)
+                    elif nxt is None:
+                        progress.save_step(stage, i, d["x"], n_sig)
                 except Exception as exc:  # a full disk must not kill the run
                     LOG.warning("[H3MD Progress] could not save %s step %d (%s)", stage, i + 1, exc)
             sec = now - state["t"]
