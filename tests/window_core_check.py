@@ -79,3 +79,15 @@ for total_f, ln, ov in ((1445, 243, 56), (721, 243, 56), (685, 124, 56), (1445, 
         c = (a + b) // 2
         assert lo <= c < hi or c == hi == total_f
 print("3a window schedule matches core")
+
+# 3b: the installed handler schedules around hard cuts (real IndexListContextHandler)
+h = cw.IndexListContextHandler(cw.get_matching_context_schedule(cw.ContextSchedules.STATIC_STANDARD),
+                               cw.get_matching_fuse_method("pyramid"), context_length=37, context_overlap=17, dim=2)
+WIN.install(h, False)
+x = torch.zeros(1, 1, WIN.video_latent_t(345), 1, 1)
+core_w = [(w.index_list[0], w.index_list[-1]) for w in h.get_context_windows(None, x, {})]
+assert core_w == WIN.core_windows(345, 124, 56), core_w
+h._h3md_cuts = [170]
+cut_w = [(w.index_list[0], w.index_list[-1]) for w in h.get_context_windows(None, x, {})]
+assert cut_w == WIN.core_windows(345, 124, 56, [170]), cut_w
+print("3b handler windows OK", core_w, cut_w)

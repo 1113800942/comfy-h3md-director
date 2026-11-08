@@ -90,11 +90,12 @@ def normalize_window_prompts(value, length: int, resolve):
 
 # ------------------------------------------------------------------------------------------- 3a: timed prompts
 FRAME_PER_TOKEN = (1, 4, 4, 4, 4)
-TIME_MARK = re.compile(r"\[\s*(\d+(?:\.\d+)?)\s*s\s*\]")
+TIME_MARK = re.compile(r"\[\s*(\d+(?:\.\d+)?)\s*s(\s+cut)?\s*\]", re.I)
 SECTION = re.compile(r"(?m)^\s*(subject_definitions|summary|retention_analysis|detailed_description|"
                      r"overall_soundscape|non_diegetic_music|dialogue|sound_effects)\s*:")
 NO_NEW_ACTION = ("The subject continues the same movement from the moment before, without starting any new gesture or "
                  "action in this part.")
+CUT_KEY = "h3md_window_cuts"
 
 
 def video_latent_t(frames: int) -> int:
@@ -109,12 +110,7 @@ def latent_pixel_starts(latent_t: int):
     return starts
 
 
-def core_windows(total_frames: int, length: int, overlap: int):
-    """The core MiniMax H3 static window schedule as latent (first, last) pairs (same maths as
-    comfy.context_windows.create_windows_static_standard after MiniMaxH3ContextWindowsNode's frame -> latent)."""
-    n = video_latent_t(total_frames)
-    cl = video_latent_t(length)
-    co = min(video_latent_t(overlap), cl - 5)
+def _core_latent_windows(n: int, cl: int, co: int):
     if n <= cl:
         return [(0, n - 1)]
     out, delta = [], cl - co
@@ -127,13 +123,63 @@ def core_windows(total_frames: int, length: int, overlap: int):
     return out
 
 
-def window_spans(total_frames: int, length: int, overlap: int):
+def cut_latents(cut_frames, total_frames: int):
+    """Hard cuts (pixel frames) -> latent indices on the 5-latent chunk grid (pixel 17k), inside the shot, sorted."""
+    n = video_latent_t(total_frames)
+    out = set()
+    for f in cut_frames or ():
+        c = 5 * int(round(float(f) / 17.0))
+        if 0 < c < n:
+            out.add(c)
+    return sorted(out)
+
+
+def _block_windows(b0: int, b1: int, cl: int, co: int):
+    """Windows covering latents [b0, b1): starts on the 5-latent grid (each window opens on a 1-frame latent, as in a
+    real clip), the first starts at b0, the last ends at b1, evenly spaced, overlap >= co."""
+    L = b1 - b0
+    if L <= cl:
+        return [(b0, b1 - 1)]
+    n = 2
+    while True:
+        last = b0 + ((L - cl) // 5) * 5            # last start on the grid, its window ends at b1 (length cl..cl+4)
+        starts = [b0 + 5 * round((last - b0) / 5 * i / (n - 1)) for i in range(n)]
+        ok = all(starts[i] + cl - 1 - starts[i + 1] + 1 >= co for i in range(n - 1))
+        if ok or n > 64:
+            break
+        n += 1
+    wins = [(st, st + cl - 1) for st in starts[:-1]] + [(starts[-1], b1 - 1)]
+    return wins
+
+
+def core_windows(total_frames: int, length: int, overlap: int, cuts=()):
+    """Latent (first, last) windows.  No cuts: exactly the core MiniMax H3 static schedule (comfy.context_windows.
+    create_windows_static_standard after MiniMaxH3ContextWindowsNode's frame -> latent).  With hard cuts (pixel
+    frames, 3b): every cut is a window boundary with no overlap (nothing is fused across a cut) and each part between
+    cuts gets its own evenly spaced windows."""
+    n = video_latent_t(total_frames)
+    cl = video_latent_t(length)
+    co = min(video_latent_t(overlap), cl - 5)
+    return latent_schedule(n, cl, co, cut_latents(cuts, total_frames))
+
+
+def latent_schedule(n: int, cl: int, co: int, cut_lats=()):
+    """Windows over n latents (window cl, overlap co, both in latents); cut_lats = hard cuts on the 5-latent grid."""
+    if not cut_lats:
+        return _core_latent_windows(n, cl, co)
+    out, edges = [], [0] + list(cut_lats) + [n]
+    for b0, b1 in zip(edges, edges[1:]):
+        out += _block_windows(b0, b1, cl, co)
+    return out
+
+
+def window_spans(total_frames: int, length: int, overlap: int, cuts=()):
     """Pixel-frame ranges [a, b) of the windows and each window's own span: from the middle of its overlap with the
-    previous window to the middle of its overlap with the next.  The spans tile the shot, and each window's centre
-    lies in its own span, so per-window prompts tagged with these spans are picked once per window."""
+    previous window to the middle of its overlap with the next (at a hard cut: the cut).  The spans tile the shot, and
+    each window's centre lies in its own span, so per-window prompts tagged with these spans are picked once."""
     n = video_latent_t(total_frames)
     px = latent_pixel_starts(n)
-    wins = [(px[a], px[b + 1]) for a, b in core_windows(total_frames, length, overlap)]
+    wins = [(px[a], px[b + 1]) for a, b in core_windows(total_frames, length, overlap, cuts)]
     spans = []
     for i, (a, b) in enumerate(wins):
         lo = 0 if i == 0 else (a + wins[i - 1][1]) // 2
@@ -143,9 +189,9 @@ def window_spans(total_frames: int, length: int, overlap: int):
 
 
 def split_timed_prompt(prompt: str):
-    """(before, common, events, after) when detailed_description has time marks like '[12s] ...', else None.
-    before/after = the text before / after the detailed_description body; common = its text before the first mark;
-    events = [(seconds, text)] in time order."""
+    """(before, common, events, after) when detailed_description has time marks like '[12s] ...' / '[8s cut] ...',
+    else None.  before/after = the text before / after the detailed_description body; common = its text before the
+    first mark; events = [(seconds, text, is_cut)] in time order."""
     if not prompt or not TIME_MARK.search(prompt):
         return None
     heads = list(SECTION.finditer(prompt))
@@ -162,28 +208,43 @@ def split_timed_prompt(prompt: str):
     for i, m in enumerate(marks):
         end = marks[i + 1].start() if i + 1 < len(marks) else len(body)
         txt = body[m.end():end].strip()
-        if txt:
-            events.append((float(m.group(1)), txt))
+        if txt or m.group(2):
+            events.append((float(m.group(1)), txt, bool(m.group(2))))
     events.sort(key=lambda e: e[0])
     return prompt[:det.end()], common, events, prompt[nxt:]
 
 
-def auto_window_prompts(prompt: str, total_frames: int, length: int, overlap: int, fps: int = FPS):
-    """3a: one timed prompt -> per-window prompts [{"start", "end", "prompt", "events"}] (pixel frames), each action
-    given to exactly ONE window (the one whose own span holds its time).  None when the prompt has no time marks or
-    the shot fits one window."""
+def prompt_cuts(prompt: str, fps: int = FPS):
+    """Hard cuts written as '[8s cut] ...' -> pixel frames (a '[0s cut]' opens the first shot, not a cut)."""
+    parts = split_timed_prompt(prompt)
+    if parts is None:
+        return []
+    return sorted({int(round(sec * fps)) for sec, _, cut in parts[2] if cut and sec > 0})
+
+
+def auto_window_prompts(prompt: str, total_frames: int, length: int, overlap: int, fps: int = FPS, cuts=None):
+    """3a/3b: one timed prompt -> per-window prompts [{"start", "end", "prompt", "events"}] (pixel frames), each action
+    given to exactly ONE window (the one whose own span holds its time).  A '[Ns cut] text' mark starts a new shot:
+    its text describes every window after the cut (until the next cut), and windows never straddle it.  None when the
+    prompt has no time marks or the shot fits one window."""
     parts = split_timed_prompt(prompt)
     if parts is None:
         return None
     before, common, events, after = parts
-    wins, spans = window_spans(total_frames, length, overlap)
+    if cuts is None:
+        cuts = prompt_cuts(prompt, fps)
+    wins, spans = window_spans(total_frames, length, overlap, cuts)
     if len(wins) < 2:
         return None
+    shots = [(sec * fps, t) for (sec, t, cut) in events if cut]
+    acts = [(sec * fps, t) for (sec, t, cut) in events if not cut]
     out = []
-    for (lo, hi) in spans:
-        mine = [t for (sec, t) in events if lo <= sec * fps < hi]
+    for (a, b), (lo, hi) in zip(wins, spans):
+        mid = (a + b) / 2.0
+        shot = [t for (f, t) in shots if f <= mid]
+        mine = [t for (f, t) in acts if lo <= f < hi]
         action = " Then ".join(x.rstrip(".") + "." for x in mine) if mine else NO_NEW_ACTION
-        body = (common + " " if common else "") + action
+        body = " ".join(x for x in (common, shot[-1] if shot else "", action) if x)
         out.append({"start": lo, "end": hi, "prompt": f"{before}\n{body}\n\n{after.lstrip()}" if after else
                     f"{before}\n{body}", "events": len(mine)})
     return out
@@ -337,6 +398,29 @@ def install(handler, crop_guide: bool):
                                  k + 1, len(cond_in), s, e)
                     cond_in = [cond_in[k]]
             return super().get_resized_cond(cond_in, x_in, window, device)
+
+        def execute(self, calc_cond_batch, model, conds, x_in, timestep, model_options):
+            cuts = set()
+            for clist in conds or ():
+                for c in clist or ():
+                    cuts.update((c or {}).get(CUT_KEY) or ())
+            self._h3md_cuts = sorted(cuts)
+            return super().execute(calc_cond_batch, model, conds, x_in, timestep, model_options)
+
+        def get_context_windows(self, model, x_in, model_options):
+            cuts = getattr(self, "_h3md_cuts", None)
+            if not cuts:
+                return super().get_context_windows(model, x_in, model_options)
+            n = x_in.size(self.dim)
+            lats = sorted({5 * int(round(f / 17.0)) for f in cuts if 0 < 5 * int(round(f / 17.0)) < n})
+            wins = latent_schedule(n, self.context_length, self.context_overlap, lats)
+            key = (n, tuple(lats), self.context_length)
+            if key not in self._h3md_seen:
+                self._h3md_seen.add(key)
+                LOG.info("%s hard cuts at latents %s: %d windows %s (no fusion across a cut)", _TAG, lats, len(wins),
+                         wins)
+            return [cw.IndexListContextWindow(list(range(a, b + 1)), dim=self.dim, total_frames=n,
+                                              context_overlap=self.context_overlap) for a, b in wins]
 
     handler.__class__ = H3MDWindowHandler
     handler._h3md_seen = set()

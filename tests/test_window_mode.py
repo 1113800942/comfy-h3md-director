@@ -161,6 +161,56 @@ class Preview(unittest.TestCase):
         for wp in seg["windowPrompts"]:
             self.assertIn("Duration: 10.12 s (243 frames).", wp["prompt"])
 
+
+CUTP = ("summary: two shots.\ndetailed_description: Photoreal footage, one woman. [0s cut] Medium shot of her in a meadow, "
+        "swaying. [3s] she raises one hand. [7s cut] Close-up of her face by a lake at sunset. [10s] she smiles."
+        "\noverall_soundscape: wind.")
+
+
+class HardCuts(unittest.TestCase):
+    def test_schedule(self):
+        self.assertEqual(WIN.core_windows(345, 124, 56), WIN.core_windows(345, 124, 56, []))
+        for total, ln, ov, cuts in ((345, 124, 56, [168]), (719, 243, 56, [300]), (1445, 243, 56, [300, 900]),
+                                    (719, 175, 22, [300]), (345, 124, 56, [20, 330])):
+            n = WIN.video_latent_t(total)
+            cl, co = WIN.video_latent_t(ln), min(WIN.video_latent_t(ov), WIN.video_latent_t(ln) - 5)
+            lats = WIN.cut_latents(cuts, total)
+            wins = WIN.core_windows(total, ln, ov, cuts)
+            self.assertEqual(wins[0][0], 0)
+            self.assertEqual(wins[-1][1], n - 1)
+            for a, b in wins:
+                self.assertEqual(a % 5, 0)
+                self.assertFalse(any(a < c <= b for c in lats), (wins, lats))   # no window straddles a cut
+                self.assertLessEqual(b - a + 1, cl + 4)
+            for (a, b), (c, d) in zip(wins, wins[1:]):
+                if c in lats:
+                    self.assertEqual(c, b + 1)
+                else:
+                    self.assertGreaterEqual(b - c + 1, co)
+            ws, spans = WIN.window_spans(total, ln, ov, cuts)
+            for (a, b), (lo, hi) in zip(ws, spans):
+                self.assertTrue(lo <= (a + b) // 2 < hi)
+
+    def test_prompts_follow_shots(self):
+        self.assertEqual(WIN.prompt_cuts(CUTP), [168])
+        wps = WIN.auto_window_prompts(CUTP, 345, 124, 56)
+        _, spans = WIN.window_spans(345, 124, 56, [168])
+        self.assertEqual([(w["start"], w["end"]) for w in wps], spans)
+        for w in wps:
+            first = w["end"] <= 170
+            self.assertEqual("meadow" in w["prompt"], first)
+            self.assertEqual("lake at sunset" in w["prompt"], not first)
+            self.assertIn("Photoreal footage", w["prompt"])
+        self.assertEqual(sum("raises one hand" in w["prompt"] for w in wps), 1)
+        self.assertEqual(sum("she smiles" in w["prompt"] for w in wps), 1)
+
+    def test_plan_cuts(self):
+        p = D.parse_plan(timed_plan(True, CUTP, 345))
+        seg = p["segments"][0]
+        self.assertEqual(seg["windowCuts"], [170])
+        sig = C.segment_signature(p, 0)
+        self.assertEqual(sig["windowCuts"], [170])
+
 if __name__ == "__main__":
     unittest.main()
 

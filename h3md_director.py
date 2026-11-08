@@ -635,6 +635,10 @@ def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = Fa
             if auto:
                 seg["windowPrompts"] = [{k: a[k] for k in ("start", "end", "prompt")} for a in auto]
                 seg["windowPromptsAuto"] = True
+                cuts = WIN.prompt_cuts(seg["prompt"])
+                if cuts:   # 3b: '[Ns cut]' marks -> window boundaries without fusion (snapped to 17 frames)
+                    seg["windowCuts"] = [17 * round(c / 17) for c in cuts]
+                    notes.append(f"segment {n}: hard cuts at frames {seg['windowCuts']} (windows end / start there)")
                 notes.append(f"segment {n}: time marks -> {len(auto)} window prompts (actions per window: "
                              + ", ".join(str(a["events"]) for a in auto) + ")")
         seg["labels"] = compute_labels(seg, media)
@@ -1716,7 +1720,10 @@ class H3MDSegmentEncode:
                     ref_image_size=ref_image_size, vae=vae, audio_vae=audio_vae, **kwargs)
                 pos, lat = _unwrap_node_output(out)[:2]
                 latent = latent or lat
-                positive += [[c[0], dict(c[1], **{WIN.SPAN_KEY: (wp["start"], wp["end"])})] for c in pos]
+                tag = {WIN.SPAN_KEY: (wp["start"], wp["end"])}
+                if seg.get("windowCuts"):
+                    tag[WIN.CUT_KEY] = tuple(seg["windowCuts"])
+                positive += [[c[0], dict(c[1], **tag)] for c in pos]
             prompt = "\n\n".join(f"[frames {wp['start']}-{wp['end']}]\n{wp['prompt']}" for wp in wps)
             LOG.info("[H3MD Encode] segment %d: %d window prompts %s", seg["index"], len(wps),
                      [(wp["start"], wp["end"]) for wp in wps])
