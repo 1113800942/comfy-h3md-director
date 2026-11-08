@@ -203,10 +203,25 @@ def all_window_ranges(total_frames: int, window_mode: dict, cuts=()):
     return sorted(out)
 
 
+SEQ_WORDS = re.compile(r"\b(then|after(?:wards)?|later|finally|first|next|before|followed by|eventually)\b", re.I)
+
+
+def _first_sentence(text: str):
+    """(first sentence, rest) of a text."""
+    parts = _SENT_SPLIT.split(text.strip(), maxsplit=1)
+    return parts[0].strip(), (parts[1].strip() if len(parts) > 1 else "")
+
+
+_SENT_SPLIT = re.compile(r"(?<=[.!?])\s+")
+
+
 def split_timed_prompt(prompt: str):
-    """(before, common, events, after) when detailed_description has time marks like '[12s] ...' / '[8s cut] ...',
-    else None.  before/after = the text before / after the detailed_description body; common = its text before the
-    first mark; events = [(seconds, text, is_cut)] in time order."""
+    """Parse the time marks of detailed_description, written anywhere in it:
+      '[12s] <one sentence>'      an action at 12 s (only the sentence right after the mark; anything after it belongs
+                                  to the current shot, or to the shared description before any shot)
+      '[8s cut] <text>'           a hard cut at 8 s; all text up to the next mark describes that shot
+    Returns (before, common, shots, acts, after) or None without marks: before/after = text before / after the
+    detailed_description body, common = shared description, shots = [(sec, text)], acts = [(sec, text)] (time order)."""
     if not prompt or not TIME_MARK.search(prompt):
         return None
     heads = list(SECTION.finditer(prompt))
@@ -218,15 +233,43 @@ def split_timed_prompt(prompt: str):
     marks = list(TIME_MARK.finditer(body))
     if not marks:
         return None
-    common = body[:marks[0].start()].strip()
-    events = []
+    common = [body[:marks[0].start()].strip()]
+    shots, acts, cur = [], [], None
     for i, m in enumerate(marks):
         end = marks[i + 1].start() if i + 1 < len(marks) else len(body)
         txt = body[m.end():end].strip()
-        if txt or m.group(2):
-            events.append((float(m.group(1)), txt, bool(m.group(2))))
-    events.sort(key=lambda e: e[0])
-    return prompt[:det.end()], common, events, prompt[nxt:]
+        sec = float(m.group(1))
+        if m.group(2):
+            cur = [sec, txt]
+            shots.append(cur)
+            continue
+        first, rest = _first_sentence(txt)
+        if first:
+            acts.append((sec, first))
+        if rest:
+            if cur is not None:
+                cur[1] = (cur[1] + " " + rest).strip()
+            else:
+                common.append(rest)
+    shots = sorted((s, t) for s, t in shots)
+    acts.sort(key=lambda e: e[0])
+    return prompt[:det.end()], " ".join(x for x in common if x), shots, acts, prompt[nxt:]
+
+
+def strip_sequence(text: str):
+    """Window mode: drop summary sentences that tell an order of events ('... then ...'): every window gets the
+    summary, and such a sentence makes the windows after a cut replay the earlier part.  (text, removed sentences)"""
+    secs = _sections(text)
+    removed, out = [], []
+    for n, t in secs:
+        if n == "summary":
+            head, _, rest = t.partition(":")
+            keep = []
+            for x in _SENT_SPLIT.split(rest.strip()):
+                (removed if SEQ_WORDS.search(x) else keep).append(x)
+            t = head + ":\n" + " ".join(k for k in keep if k) + "\n\n"
+        out.append(t)
+    return ("".join(out), removed) if removed else (text, [])
 
 
 def prompt_cuts(prompt: str, fps: int = FPS):
@@ -234,7 +277,7 @@ def prompt_cuts(prompt: str, fps: int = FPS):
     parts = split_timed_prompt(prompt)
     if parts is None:
         return []
-    return sorted({int(round(sec * fps)) for sec, _, cut in parts[2] if cut and sec > 0})
+    return sorted({int(round(sec * fps)) for sec, _ in parts[2] if sec > 0})
 
 
 def auto_window_prompts(prompt: str, total_frames: int, length: int, overlap: int, fps: int = FPS, cuts=None):
@@ -245,23 +288,27 @@ def auto_window_prompts(prompt: str, total_frames: int, length: int, overlap: in
     parts = split_timed_prompt(prompt)
     if parts is None:
         return None
-    before, common, events, after = parts
+    before, common, shots, acts, after = parts
     if cuts is None:
         cuts = prompt_cuts(prompt, fps)
     wins, spans = window_spans(total_frames, length, overlap, cuts)
     if len(wins) < 2:
         return None
-    shots = [(sec * fps, t) for (sec, t, cut) in events if cut]
-    acts = [(sec * fps, t) for (sec, t, cut) in events if not cut]
+    before, removed = strip_sequence(before)
+    shots = [(sec * fps, t) for sec, t in shots]
     out = []
     for (a, b), (lo, hi) in zip(wins, spans):
         mid = (a + b) / 2.0
         shot = [t for (f, t) in shots if f <= mid]
-        mine = [t for (f, t) in acts if lo <= f < hi]
-        action = " Then ".join(x.rstrip(".") + "." for x in mine) if mine else NO_NEW_ACTION
+        mine = [(sec, t) for (sec, t) in acts if lo <= sec * fps < hi]
+        # the time inside this window, so H3 places the action near the right second (11-07: about one window off)
+        action = " ".join(f"At about {max(0.0, sec - a / fps):.0f} s into this part, {t[0].lower() + t[1:]}"
+                          if t else "" for sec, t in mine) if mine else NO_NEW_ACTION
+        own = " ".join(x for x in (shot[-1] if shot else "", " ".join(t for _, t in mine)) if x)
         body = " ".join(x for x in (common, shot[-1] if shot else "", action) if x)
         out.append({"start": lo, "end": hi, "prompt": f"{before}\n{body}\n\n{after.lstrip()}" if after else
-                    f"{before}\n{body}", "events": len(mine)})
+                    f"{before}\n{body}", "events": len(mine), "own": own if shots else None,
+                    "removed": removed})
     return out
 
 
@@ -281,7 +328,7 @@ def _sections(prompt: str):
     return out
 
 
-def window_refs(prompt: str, n_images: int):
+def window_refs(prompt: str, n_images: int, own: str = None):
     """3c: the reference pictures one window prompt really uses, and the prompt rewritten for them.
     Used = pictures named in detailed_description / dialogue / sound sections, plus the pictures that define a subject
     named there (subject_definitions line '<Subject k> ... <Picture j> ...').  Returns (kept, prompt): kept = 0-based
@@ -289,6 +336,8 @@ def window_refs(prompt: str, n_images: int):
     name only dropped subjects / pictures are removed.  (list(range(n)), prompt) when nothing would change."""
     secs = _sections(prompt)
     body = " ".join(t for n, t in secs if n not in (None, "subject_definitions", "summary", "retention_analysis"))
+    if own is not None:   # a shot of its own (hard cuts): only that shot's text decides, not the shared description
+        body = own + " " + " ".join(t for n, t in secs if n in ("dialogue",))
     subj_pics = {}
     for n, t in secs:
         if n == "subject_definitions":
@@ -314,7 +363,7 @@ def window_refs(prompt: str, n_images: int):
         if n in ("subject_definitions", "retention_analysis"):
             lines = t.splitlines(keepends=True)
             t = lines[0] + "".join(l for l in lines[1:] if not (PIC_TAG.search(l) or SUBJ_TAG.search(l)) or not unused(l))
-        elif n == "summary":
+        elif n in ("summary", "detailed_description"):
             head, _, rest = t.partition(":")
             sents = [x for x in _SENT.split(rest.strip()) if x and not unused(x)]
             t = head + ":\n" + " ".join(sents) + "\n\n"

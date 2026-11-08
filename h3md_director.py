@@ -634,10 +634,13 @@ def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = Fa
             auto = WIN.auto_window_prompts(seg["prompt"], length, window_mode["length"], window_mode["overlap"])
             if auto:
                 seg["windowPrompts"] = [{k: a[k] for k in ("start", "end", "prompt")} for a in auto]
+                if auto[0].get("removed"):
+                    notes.append(f"segment {n}: summary sentences about the order of events left out of the window "
+                                 f"prompts (each window gets the summary): {auto[0]['removed']}")
                 seg["windowPromptsAuto"] = True
                 if window_mode.get("refs", True) and seg["images"]:   # 3c: pictures follow the windows
-                    for wp in seg["windowPrompts"]:
-                        kept, wp["prompt"] = WIN.window_refs(wp["prompt"], len(seg["images"]))
+                    for wp, a in zip(seg["windowPrompts"], auto):
+                        kept, wp["prompt"] = WIN.window_refs(wp["prompt"], len(seg["images"]), a.get("own"))
                         if len(kept) < len(seg["images"]):
                             wp["images"] = kept
                     used = [len(wp.get("images", seg["images"])) for wp in seg["windowPrompts"]]
