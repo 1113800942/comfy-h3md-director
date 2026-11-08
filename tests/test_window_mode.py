@@ -756,6 +756,60 @@ class ReviewFixes(unittest.TestCase):
             self.assertEqual(open(cache._p(0, ".json")).read(), "old.json")
 
 
+class SongPerWindow(unittest.TestCase):
+    """11-08 speed: a locked song that is also <Audio N> gives each window only its own stretch."""
+
+    def _song(self, n_sec=60.0, sr=100):
+        import torch
+        return {"waveform": torch.arange(int(n_sec * sr)).float().view(1, 1, -1), "sample_rate": sr}
+
+    def test_single_shot_windows_hear_their_stretch(self):
+        import torch
+        raw = json.loads(plan({"length": 243, "overlap": 56, "highLength": 175, "highOverlap": 22}, length=719))
+        raw["media"]["audios"] = [{"id": "s", "file": "s.mp3", "duration": 60.0}]
+        raw["segments"][0]["audios"] = [{"id": "s", "mode": "locked", "offset": 10.0}]
+        raw["segments"][0]["audioMode"] = "locked"
+        p = D.parse_plan(json.dumps(raw))
+        seg = p["segments"][0]
+        song = self._song()
+        picked = {"images": [], "videos": [], "video_audios": [], "audios": [song], "locked_audio": None,
+                  "segment": seg}
+        self.assertTrue(D.song_per_window(p, seg, picked))
+        calls = []
+
+        class FakeCore:
+            class MiniMaxH3ReferenceToVideo:
+                @staticmethod
+                def execute(**kw):
+                    calls.append(kw)
+                    return ([[torch.zeros(1), {}]], {"samples": torch.zeros(1)})
+        pos, lat, text = D.encode_video_windows(FakeCore, p, seg, picked, D.build_core_kwargs(picked), None,
+                                                seg["prompt"], None, None, None, "match")
+        for c, kw in zip(pos, calls):
+            a, b = c[1][WIN.RANGE_KEY]
+            w = kw["ref_audios"]["ref_audio_0"]["waveform"][0, 0]
+            self.assertEqual(int(w.shape[0]), round((b - a) / 24 * 100))
+            self.assertEqual(float(w[0]), float(round((10.0 + a / 24) * 100)))
+
+    def test_song_end_and_start_keep_numbering(self):
+        seg = {"audios": ["s"], "audioMode": "locked", "locked": {"kind": "audio", "id": "s", "offset": -2.0}}
+        out = D.window_ref_audios(seg, {"audios": [self._song(60.0)]}, 0, 240)
+        w = out["ref_audio_0"]["waveform"][0, 0]
+        self.assertEqual(int(w.shape[0]), 1000)
+        self.assertEqual(float(w[:200].abs().sum()), 0.0)          # 2 s of silence before the song starts
+        seg["locked"]["offset"] = 30.0                              # song (5 s) already over: silence, still there
+        out = D.window_ref_audios(seg, {"audios": [self._song(5.0)]}, 0, 240)
+        self.assertIn("ref_audio_0", out)
+        self.assertEqual(float(out["ref_audio_0"]["waveform"].abs().sum()), 0.0)
+
+    def test_other_reference_audio_stays_whole(self):
+        seg = {"audios": ["v", "s"], "audioMode": "locked", "locked": {"kind": "audio", "id": "s", "offset": 0.0}}
+        voice, song = self._song(3.0), self._song(60.0)
+        out = D.window_ref_audios(seg, {"audios": [voice, song]}, 240, 480)
+        self.assertIs(out["ref_audio_0"], voice)
+        self.assertEqual(int(out["ref_audio_1"]["waveform"].shape[-1]), 1000)
+
+
 class DepthOff(unittest.TestCase):
     def _raw(self, window, prompt="shot"):
         raw = json.loads(plan(window, length=345))

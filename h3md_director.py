@@ -1844,6 +1844,46 @@ def slice_audio(audio, start_s: float, dur_s: float):
     return {"waveform": audio["waveform"][..., a:a + n], "sample_rate": sr}
 
 
+def _locked_ref_index(seg: dict):
+    """Index (in seg['audios'] / picked['audios']) of the reference audio that is also the shot's locked SONG, or None."""
+    lk = seg.get("locked") if seg.get("audioMode") == "locked" else None
+    if not lk or lk.get("kind") != "audio":
+        return None
+    return next((j for j, aid in enumerate(seg.get("audios") or []) if aid == lk.get("id")), None)
+
+
+def song_per_window(plan: dict, seg: dict, picked: dict) -> bool:
+    """window mode: the locked song is also a reference audio and the shot spans more than one window."""
+    wm = plan.get("windowMode")
+    return bool(wm) and _locked_ref_index(seg) is not None and bool(picked.get("audios")) and \
+        int(seg["length"]) > int(wm.get("length", 124))
+
+
+def window_ref_audios(seg: dict, picked: dict, a: int, b: int, origin: int = 0):
+    """11-08 speed: the reference audio that is the shot's locked song gets only this window's stretch of the song
+    (song time at timeline frame a = lock offset + (a - origin) / 24), like the guide videos - before, every window
+    carried the whole file (a 160 s song made the low-res steps ~38% slower).  Other reference audios (a voice
+    timbre, a sound effect) stay whole.  -> ref_audios dict or None."""
+    j0 = _locked_ref_index(seg)
+    out = {}
+    for j, audio in enumerate(picked.get("audios") or []):
+        if j == j0 and audio is not None:
+            aid = seg["audios"][j]
+            t0 = float(seg["locked"]["offset"]) + (a - origin) / FPS - float((seg.get("audioStarts") or {}).get(aid, 0.0))
+            dur = (b - a) / FPS
+            sr = int(audio["sample_rate"])
+            if t0 < 0:   # song starts inside the window: leading silence
+                part = slice_audio(audio, 0.0, max(0.0, dur + t0))
+                audio = _cat_audio([_silence(audio, int(round(-t0 * FPS))), part])
+            else:
+                audio = slice_audio(audio, t0, dur)
+            if audio is None or int(audio["waveform"].shape[-1]) < sr // 10:
+                # the song has ended before this window: silence keeps the <Audio N> numbering of the prompt
+                audio = _silence(picked["audios"][j], b - a)
+        out[f"ref_audio_{j}"] = audio
+    return out or None
+
+
 def encode_video_windows(core, plan, seg, picked, kwargs, wps, prompt, clip, vae, audio_vae, ref_image_size):
     """3d: one conditioning per window of BOTH passes (low-res and high-res windows differ), each with the window's
     own slice of every reference video (and its soundtrack), tagged with the exact window range (RANGE_KEY)."""
@@ -1873,6 +1913,8 @@ def encode_video_windows(core, plan, seg, picked, kwargs, wps, prompt, clip, vae
                 auds[f"ref_video_audio_{k}"] = slice_audio(snd, a / FPS, sl.shape[0] / FPS)
         kw["ref_videos"] = vids or None
         kw["ref_video_audios"] = auds or None
+        if song_per_window(plan, seg, picked):
+            kw["ref_audios"] = window_ref_audios(seg, picked, a, b)
         text = fix_duration_line(wp["prompt"], b - a, 0)
         out = core.MiniMaxH3ReferenceToVideo.execute(
             clip=clip, prompt=text, width=plan["width"], height=plan["height"], length=seg["length"],
@@ -2030,6 +2072,8 @@ def encode_group_windows(core, plan, seg, picked, clip, vae, audio_vae, ref_imag
                 auds[f"ref_video_audio_{j}"] = sa
         kw["ref_videos"] = vids or None
         kw["ref_video_audios"] = auds or None
+        if _locked_ref_index(gp["seg"]) is not None:
+            kw["ref_audios"] = window_ref_audios(gp["seg"], pm, a, b, gp["origin"])
         text = fix_duration_line(combined or own[k], b - a, 0)
         out = core.MiniMaxH3ReferenceToVideo.execute(
             clip=clip, prompt=text, width=plan["width"], height=plan["height"], length=seg["length"],
@@ -2080,7 +2124,7 @@ class H3MDSegmentEncode:
         if seg.get("groupParts") and not (prompt_override or "").strip():
             positive, latent, prompt = encode_group_windows(core, plan, seg, picked, clip, vae, audio_vae,
                                                             ref_image_size)
-        elif video_per_window(plan, seg, picked):
+        elif video_per_window(plan, seg, picked) or song_per_window(plan, seg, picked):
             positive, latent, prompt = encode_video_windows(core, plan, seg, picked, kwargs, wps, prompt, clip, vae,
                                                             audio_vae, ref_image_size)
         elif wps:
