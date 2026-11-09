@@ -1224,7 +1224,10 @@ class LocalRedraw(unittest.TestCase):
         self.assertEqual(float(vm[60]), 1.0)
         self.assertEqual(float(vm[0]), 0.0)
         self.assertEqual(float(vm[101]), 0.0)
-        self.assertTrue(0 < float(vm[active[0]]) < 1)        # soft ramp at the edge
+        self.assertEqual(sorted({float(x) for x in vm}), [0.0, 1.0])   # 0.3.9-beta: hard edges (no ramp)
+        self.assertEqual(float(vm[active[0]]), 1.0)
+        self.assertEqual(float(vm[active[0] - 1]), 0.0)
+        self.assertEqual(float(vm[active[1]]), 0.0)
         self.assertGreater(float(am.sum()), 0)
         self.assertEqual(WIN.redraw_ranges({"redraw": [[7, 10.5]]}, 0, 345), [(168, 252)])
         self.assertEqual(WIN.redraw_ranges({"redraw": [[7, 10.5]]}, 300, 345), [])

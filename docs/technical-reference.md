@@ -373,10 +373,14 @@ rendered in ONE sampling run with the core MiniMax H3 context windows (ComfyUI 0
   together (redraw works on a finished full run). Needs `resume_from_cache` on (the same `resume_...` folder as the
   finished run).
 * Local redraw (`windowMode.redraw`): needs the group finished in the cache with the same settings (else an error,
-  nothing is rendered). The group's cached final latent gets a noise mask: 1 inside the ranges, a 3-latent ramp on
-  each side, 0 elsewhere (a locked song stays locked); only the windows that touch the masked latents run, with a fresh
-  random seed (logged). Frames outside the ranges and ramps come back identical; only the changed ~10 s decode chunks
-  are decoded again. The previous version of the group is moved to `_replaced_<time>/` in the run folder (it keeps
+  nothing is rendered). The group's cached final latent gets a noise mask: 1 inside the ranges (snapped outwards to
+  whole latents), 0 elsewhere, hard edges (a locked song stays locked); only the windows that touch the masked latents
+  run, with a fresh random seed (logged). The kept rows of the low-res pass are the group's own cached low-res result
+  (`seg_XXX_lowres.pt`), not the downscaled final latent; the model sees the kept frames on both sides as known frames
+  and joins the new seconds to them, like a continuation prefix. (11-08 first test with a 3-latent soft ramp and the
+  downscaled final latent as context: double exposures at both edges and a washed-out, doubled picture inside; both
+  changed in 0.3.9-beta.) Frames outside the ranges come back identical (the VAE decoder also re-decodes about 10
+  frames on each side, with tiny differences); only the changed ~10 s decode chunks are decoded again. The previous version of the group is moved to `_replaced_<time>/` in the run folder (it keeps
   the whole group's files, so each redraw costs one more copy of that group on disk). Every run with `redraw` filled
   in tries a new seed; clear it (or bypass the node) and the latest version is used as the group's result. Groups the
   ranges do not touch are cache hits.

@@ -1115,6 +1115,13 @@ class H3MDLoopSampler:
             if redraw:   # local redraw: the cached segment is the starting point, only the ranges are re-rendered
                 latent, active, seg_seed = redraw_latent(cache, k, latent, redraw, where)
                 WIN.set_active([low_res_model, high_res_model], active)
+                old_low = cache.load_lowres(k)   # 0.3.9-beta: the kept rows of the low-res pass = its own result
+                if isinstance(old_low, torch.Tensor):
+                    extra["h3md_low_res_base"] = old_low
+                else:
+                    LOG.warning("%s %s: local redraw: no low-res result of this segment in the cache (written without "
+                                "the Beta low-res carry); the low-res pass uses the downscaled final picture around "
+                                "the redrawn seconds", _TAG, where)
             if preview:
                 extra["h3md_low_only"] = True
             nxt_ov = segs[indices[step + 1]]["overlapIn"] if step + 1 < len(indices) else 0

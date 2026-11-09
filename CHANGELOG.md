@@ -39,9 +39,13 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   both example workflows; Ctrl+B to use). `preview` = low-res pass only; `redraw` = seconds of a finished run to render
   again with a new seed, e.g. `20-24` or `1:12-1:15` (whole-video time). Kept off the Director's editor so the old
   interface stays as it is. Fixed with it: clearing `redraw` (or bypassing the node) now keeps the redrawn take; before,
-  the next run rendered the original take over it. 接在导演台和 Loop 之间（两个示例工作流里都接好、默认旁路，Ctrl+B 打开）。
+  the next run rendered the original take over it. The first full-size test (11-08, 2:20 video, seconds 20-24) showed
+  double exposures at both edges and a washed-out picture inside: the soft 3-latent edge and the downscaled final
+  latent used as low-res context are gone (hard edges, the group's own low-res result as context). 接在导演台和 Loop 之间（两个示例工作流里都接好、默认旁路，Ctrl+B 打开）。
   `preview` = 只跑低清；`redraw` = 已跑完的片子里要换种子重画的秒数，如 `20-24`、`1:12-1:15`（整条片子的时间）。不放进
   导演台编辑器，原来的界面不变。同时修好：清空 `redraw`（或旁路节点）后保留重画的那一版；以前下一次运行会用原来的那一版把它盖掉。
+  第一次整片实测（11-08，2 分 20 秒片子的第 20–24 秒）两个边缘有双重曝光、中间发白发虚：去掉了 3 个 latent 的渐变边，
+  低清阶段周围不再用缩小的最终 latent，改用这一组自己的低清结果。
 * **Interpolation at hard cuts / 插帧遇到硬切**: with interpolation on (48 / 60 fps), the frame between two shots is no
   longer a RIFE blend of both shots (one melted frame at every hard cut, in every version so far); it repeats the
   nearest original frame. Same frame count, timing and audio; also in H3MD Face Refine Save. 开插帧时，两个镜头之间的那
@@ -66,9 +70,11 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
 * Lyrics and lines timed the usual way (`At 00:07.9 she sings: ...`) count as time marks, also inside continued
   shots on one timeline: each line goes to exactly one window, timed inside it. 用平常写法标时间的歌词 / 台词
   （`At 00:07.9 she sings: ...`）也算时间标记，接成一条时间线的续接镜头里也一样：每句只给一个窗口，并写明在窗口里的第几秒。
-* Local redraw: `windowMode.redraw [[start_s, end_s]]` re-renders only those seconds of a finished run (new seed, soft
-  edges, only the windows touching them are computed); the rest stays frame-identical and the previous version is kept.
-  局部重绘：只重画已完成视频的指定秒数（换种子、边缘柔和过渡、只算碰到的窗口），其他部分一帧不变，旧版本保留。
+* Local redraw: `windowMode.redraw [[start_s, end_s]]` re-renders only those seconds of a finished run (new seed, hard
+  edges joined by the model like a continuation, the low-res pass keeps the group's own low-res result around them,
+  only the windows touching them are computed); the rest stays frame-identical and the previous version is kept.
+  局部重绘：只重画已完成视频的指定秒数（换种子；边缘不做渐变，由模型像续接一样接上；低清阶段周围用这一组自己的低清结果；
+  只算碰到的窗口），其他部分一帧不变，旧版本保留。
 * Depth / pose control is switched off in window mode and in motion copy (the video stays a normal reference video);
   RefMods are switched off in window mode. 窗口模式和动作复刻下自动关闭深度图 / 骨骼图控制（视频改作普通参考视频）；
   窗口模式下自动关闭 RefMod。

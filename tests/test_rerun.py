@@ -117,6 +117,30 @@ class TailLockTests(unittest.TestCase):
         self.assertTrue(torch.equal(node.last_lowres[:, :, -tt:], low_tail))
         self.assertFalse(torch.equal(v[:, :, tt:-tt], streams(lat)[0][:, :, tt:-tt].to(v)))   # middle generated
 
+    def test_sampler_redraw_low_res_base(self):
+        """0.3.9-beta local redraw: the low-res pass keeps the segment's own low-res result on every kept row (not the
+        downscaled final latent); the kept rows of the output are exact."""
+        import comfy.nested_tensor as NT
+        t = D.video_tokens(SEG_LEN)
+        old = av_latent(t=t, h=8, w=8, seed=4)
+        v0, a0 = streams(old)
+        vm = torch.zeros(1, 1, t, 1, 1)
+        vm[:, :, 10:20] = 1.0                                       # redraw rows 10-19, hard edges
+        lat = {"samples": NT.NestedTensor((v0, a0)),
+               "noise_mask": NT.NestedTensor((vm, torch.zeros(1, 1, 1, a0.shape[-1])))}
+        base = torch.full((1, 24, t, 4, 4), 0.125)
+        node = S.H3MDSampler()
+        out = node.sample(self.model, empty_cond(), empty_cond(), self.vae, lat, sampler("euler"), SIG, seed=7, cfg=1.0,
+                          transition_step=4, lowres_scale=0.5, rho=0.0, w_min=0.5, w_max=1.0, upscaler_model="none",
+                          highres_tiling=False, h3md_capture_lowres=True, h3md_low_res_base=base)[0]
+        v, _ = streams(out)
+        keep = (vm == 0).expand_as(v0)
+        self.assertTrue(torch.equal(v[keep], v0.to(v)[keep]))                      # kept rows exact
+        self.assertFalse(torch.equal(v[:, :, 10:20], v0[:, :, 10:20].to(v)))       # redrawn rows new
+        low = node.last_lowres
+        self.assertTrue(torch.equal(low[:, :, :10], base[:, :, :10].to(low)))     # low-res kept rows = the base
+        self.assertTrue(torch.equal(low[:, :, 20:], base[:, :, 20:].to(low)))
+
     def test_sampler_lowres_anchor_keeps_locked_rows(self):
         t = D.video_tokens(SEG_LEN)
         tt = D.video_tokens(OV)
@@ -204,7 +228,8 @@ class FakeSampler:
             low[:, :, -h3md_low_res_suffix.shape[2]:] = h3md_low_res_suffix
         self.last_lowres = low
         FakeSampler.calls.append({"seed": seed, "latent": latent_image, "suffix": h3md_low_res_suffix,
-                                  "prefix": h3md_low_res_prefix, "anchor": h3md_lowres_anchor})
+                                  "prefix": h3md_low_res_prefix, "anchor": h3md_lowres_anchor,
+                                  "base": kw.get("h3md_low_res_base")})
         self.last_anchor = {"strength": h3md_lowres_anchor["strength"]} if h3md_lowres_anchor else None
         return ({"samples": D._nested((v2, a2))},)
 
@@ -319,11 +344,16 @@ class LoopRerunTests(unittest.TestCase):
         self.run_loop(plan)
         self.assertEqual(len(FakeSampler.calls), 2)
         old0, old1 = self.latent(0), self.latent(1)
+        old_low0 = torch.load(os.path.join(self.cache_dir(), "seg_000_lowres.pt"), weights_only=True)["video"]
 
         FakeSampler.calls = []
         redraw = WIN.H3MDRedrawPreview().run(plan, False, "1-2")[0]   # seconds 1-2 = frames 24-48 of segment 1
         self.run_loop(redraw)
         self.assertEqual(len(FakeSampler.calls), 1)                 # only the touched group
+        call = FakeSampler.calls[0]
+        self.assertTrue(torch.equal(call["base"], old_low0))       # kept rows of the low-res pass = its own result
+        vm = call["latent"]["noise_mask"].unbind()[0].flatten()
+        self.assertEqual(sorted({float(x) for x in vm}), [0.0, 1.0])   # hard edges
         new0 = self.latent(0)
         self.assertFalse(torch.equal(new0[0], old0[0]))
         self.assertTrue(torch.equal(self.latent(1)[0], old1[0]))

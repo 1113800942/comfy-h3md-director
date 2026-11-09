@@ -113,5 +113,37 @@ class WorkflowTests(unittest.TestCase):
         self.check("H3MD Director.json", 227, 0)
 
 
+class LowResBaseTests(unittest.TestCase):
+    """0.3.9-beta: a local redraw's low-res pass keeps the segment's own low-res result on every kept row."""
+
+    def test_write_low_base(self):
+        import torch
+        from h3md_luna import luna_two_pass as LTP
+        low = torch.zeros(1, 4, 6, 2, 2)
+        base = torch.arange(1 * 4 * 6 * 2 * 2, dtype=torch.float32).view(1, 4, 6, 2, 2)
+        mask = torch.tensor([0, 0, 1, 1, 0, 0], dtype=torch.float32).view(1, 1, 6, 1, 1)
+        out = LTP._write_low_base(low, mask, {"samples": base})
+        self.assertTrue(torch.equal(out[:, :, :2], base[:, :, :2]))
+        self.assertTrue(torch.equal(out[:, :, 4:], base[:, :, 4:]))
+        self.assertTrue(torch.equal(out[:, :, 2:4], low[:, :, 2:4]))   # redrawn rows untouched (noise comes later)
+        with self.assertRaises(ValueError):
+            LTP._write_low_base(low, mask, {"samples": base[:, :, :5]})
+        with self.assertRaises(ValueError):
+            LTP._write_low_base(low, None, {"samples": base})
+
+    def test_check_low_res_base(self):
+        import torch
+        import comfy.nested_tensor as NT
+        import h3md_sampler as S
+        v = torch.zeros(1, 24, 6, 8, 8)
+        a = torch.zeros(1, 8, 1, 40)
+        lat = {"samples": NT.NestedTensor((v, a)),
+               "noise_mask": NT.NestedTensor((torch.zeros(1, 1, 6, 1, 1), torch.zeros(1, 1, 1, 40)))}
+        self.assertIsNone(S.check_low_res_base(torch.zeros(1, 24, 6, 4, 4), lat, 0.5))
+        self.assertIsNotNone(S.check_low_res_base(torch.zeros(1, 24, 5, 4, 4), lat, 0.5))
+        self.assertIsNotNone(S.check_low_res_base(torch.zeros(1, 24, 6, 8, 8), lat, 0.5))
+        self.assertIsNotNone(S.check_low_res_base(torch.zeros(1, 24, 6, 4, 4), {"samples": lat["samples"]}, 0.5))
+
+
 if __name__ == "__main__":
     unittest.main()

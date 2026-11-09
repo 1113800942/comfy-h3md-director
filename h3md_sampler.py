@@ -143,6 +143,20 @@ def check_low_res_head(prefix, latent: dict, lowres_scale: float):
     return None
 
 
+def check_low_res_base(base, latent: dict, lowres_scale: float):
+    """Local redraw (0.3.9-beta): None when `base` ([B,24,T,h,w], the whole segment on the low grid) can supply the
+    kept rows of the low-res pass, else the reason."""
+    if not isinstance(base, torch.Tensor) or base.ndim != 5:
+        return f"unexpected base {type(base).__name__}"
+    video = _unbind(latent["samples"])[0]
+    h, w = low_res_hw(video.shape[-2:], lowres_scale)
+    if tuple(base.shape) != (video.shape[0], video.shape[1], video.shape[2], h, w):
+        return f"base {tuple(base.shape)} does not match the low grid {(video.shape[0], video.shape[1], video.shape[2], h, w)}"
+    if latent.get("noise_mask") is None:
+        return "the latent has no noise mask"
+    return None
+
+
 def check_low_res_tail(suffix, latent: dict, lowres_scale: float):
     """H3MD rerun (2026-10-30): None when `suffix` ([B,24,vt,h,w] on the low grid) can pin the low-res pass's kept
     tail (tail lock to the next segment), else the reason."""
@@ -351,14 +365,16 @@ class H3MDSampler:
                release_upscaler=True, unload_idle_models=True,
                h3md_low_res_prefix=None, h3md_low_res_prefix_source="pixel_reencode", h3md_capture_lowres=False,
                h3md_on_lowres_end=None, h3md_low_res_suffix=None, h3md_lowres_anchor=None, h3md_progress=None, h3md_low_only=False,
-               unique_id=None, **unknown):
+               h3md_low_res_base=None, unique_id=None, **unknown):
         """Internal keyword inputs (set by the H3MD Loop):
         h3md_low_res_prefix: [1,24,vt,h,w] low-grid latent of the kept overlap prefix (engine low_res_head);
         h3md_capture_lowres: keep the low-res pass endpoint in self.last_lowres (next segment's native carry);
         h3md_on_lowres_end: callable(reason) run between the passes (depth ControlNet release);
         h3md_low_res_suffix: [1,24,vt,h,w] low-grid latent of the kept tail (rerun tail lock to the next segment);
         h3md_lowres_anchor: {"strength", "ref": {"mean", "std"}} - pull the new low-res rows back to the shot's first
-        segment before the lift (also applied to the captured carry)."""
+        segment before the lift (also applied to the captured carry);
+        h3md_low_res_base: [1,24,T,h,w] low-grid latent for EVERY kept row (local redraw: the segment's own low-res
+        result)."""
         if unknown:
             LOG.warning("%s ignoring unknown inputs %s (removed options?)", _TAG, sorted(unknown))
         self.last_lowres, self.last_tiling, self.last_steps, self.last_anchor = None, None, [], None
@@ -395,6 +411,15 @@ class H3MDSampler:
                          tuple(h3md_low_res_suffix.shape))
             else:
                 LOG.warning("%s low-res tail not used (%s); the engine resizes the full-res tail", _TAG, why)
+        base = None
+        if h3md_low_res_base is not None:  # H3MD local redraw: kept rows = the segment's own low-res result
+            why = check_low_res_base(h3md_low_res_base, latent_in, lowres_scale)
+            if why is None:
+                base = {"samples": h3md_low_res_base}
+                LOG.info("%s low-res pass: kept rows = the segment's own low-res result %s (local redraw)", _TAG,
+                         tuple(h3md_low_res_base.shape))
+            else:
+                LOG.warning("%s low-res base not used (%s); the kept rows are the downscaled final latent", _TAG, why)
         lifter = None
         if upscaler_model and upscaler_model != "none":
             lifter = lambda z, hw: luna_upscaler.learned_latent_lift(z, hw, upscaler_model)  # noqa: E731
@@ -436,7 +461,7 @@ class H3MDSampler:
                 "simple", n_low + n_high, n_low, int(seed), float(cfg), float(cfg), float(lowres_scale),
                 float(rho), float(w_min), float(w_max), latent_lifter=lifter, high_res_model=high,
                 low_res_head=head, sigmas_low=sig_low, sigmas_high=sig_high, lift=lift, low_res_tail=tail,
-                pass1_store=h3md_progress, low_only=bool(h3md_low_only))
+                pass1_store=h3md_progress, low_only=bool(h3md_low_only), low_res_base=base)
         except BaseException as exc:
             if not TILED.is_oom(exc) or isinstance(exc, TILED.HighResOutOfMemory):
                 raise

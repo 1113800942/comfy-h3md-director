@@ -257,7 +257,10 @@ def window_spans(total_frames: int, length: int, overlap: int, cuts=(), chain: b
 
 
 # ------------------------------------------------------------------------------------------- local redraw
-REDRAW_RAMP = 3   # latents of soft mask on each side of a redrawn range (blends into the kept picture)
+REDRAW_RAMP = 0   # latents of soft mask on each side of a redrawn range.  0.3.9-beta: 0 (hard edges).  The 11-08
+                  # 2:20 test with 3 showed double exposures in the ramp: a fractional noise mask mixes the new take
+                  # and the kept one at every step.  With hard edges the model sees the kept frames on both sides as
+                  # known frames (like a continuation prefix / rerun tail lock) and joins the new seconds to them.
 
 
 def redraw_ranges(window_mode, seg_start: int, seg_len: int, fps: int = FPS):

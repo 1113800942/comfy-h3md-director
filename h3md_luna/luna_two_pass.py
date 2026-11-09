@@ -135,6 +135,19 @@ def _write_low_head(low_video, low_mask, head_latent):
     return low_video
 
 
+def _write_low_base(low_video, low_mask, base_latent):
+    """H3MD local redraw (0.3.9-beta): every KEPT row (mask 0) of the low-res pass comes from the segment's own native
+    low-res result instead of the downscaled final latent (a trilinear downscale of the final latent is not what the
+    low-res pass makes; as context it gave a washed-out, doubled redraw in the 11-08 test)."""
+    base = _split(base_latent["samples"])[0][0]
+    if base.shape != low_video.shape:
+        raise ValueError(f"Luna-H3-Sampler: low_res_base {tuple(base.shape)} must match the low-res video "
+                         f"{tuple(low_video.shape)}")
+    if low_mask is None:
+        raise ValueError("Luna-H3-Sampler: low_res_base needs a noise mask (0 = kept rows)")
+    return torch.where(low_mask == 0, base.to(low_video), low_video)
+
+
 def _write_low_tail(low_video, low_mask, tail_latent):
     """H3MD rerun (2026-10-30): the kept video SUFFIX of the low-res pass (tail lock to the next segment's head)."""
     tail = _split(tail_latent["samples"])[0][0]
@@ -174,7 +187,7 @@ def two_pass_sample(low_res_model, positive, negative, vae, latent_image, sample
                     total_steps, transition, noise_seed, cfg_low, cfg_high, lowres_scale, rho, w_min, w_max,
                     latent_lifter=None, high_res_model=None, low_res_head=None, highres_denoise=None,
                     sigmas_low=None, sigmas_high=None, lift=None, low_res_tail=None, pass1_store=None,
-                    low_only=False):
+                    low_only=False, low_res_base=None):
     """Return (latent, low_res_latent), both ComfyUI LATENT dicts in VAE space.
 
     `sigmas_low` / `sigmas_high` override the computed schedules. `lift` defaults to `luna_lift.lift_video`.
@@ -228,6 +241,8 @@ def two_pass_sample(low_res_model, positive, negative, vae, latent_image, sample
     low_masks = None
     if masks is not None:
         low_masks = [_resize_video(masks[0], (T, h, w), "nearest")] + masks[1:]
+    if low_res_base is not None:   # H3MD local redraw: the kept rows are the segment's own low-res result
+        low_video = _write_low_base(low_video, low_masks[0] if low_masks else None, low_res_base)
     if low_res_head is not None:
         low_video = _write_low_head(low_video, low_masks[0] if low_masks else None, low_res_head)
     if low_res_tail is not None:  # H3MD rerun: tail lock on the low grid
