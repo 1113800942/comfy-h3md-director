@@ -39,7 +39,10 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   both example workflows; Ctrl+B to use). `preview` = low-res pass only; `redraw` = seconds of a finished run to render
   again with a new seed, e.g. `20-24` or `1:12-1:15` (whole-video time). Kept off the Director's editor so the old
   interface stays as it is. Fixed with it: clearing `redraw` (or bypassing the node) now keeps the redrawn take; before,
-  the next run rendered the original take over it. The first full-size test (11-08, 2:20 video, seconds 20-24) showed
+  the next run rendered the original take over it. A redraw may also use a changed prompt, added / replaced pictures
+  and reference media (only the redrawn seconds use them); size, length, hard-cut positions and the locked song can not
+  change (a moved cut is refused). 重画前可以改提示词、加或换参考图和参考音视频，只有重画的那几秒用新的；分辨率、长度、
+  硬切位置、锁定的歌不能改（移动了硬切会报错）。 The first full-size test (11-08, 2:20 video, seconds 20-24) showed
   double exposures at both edges and a washed-out picture inside: the soft 3-latent edge and the downscaled final
   latent used as low-res context are gone (hard edges, the group's own low-res result as context). 接在导演台和 Loop 之间（两个示例工作流里都接好、默认旁路，Ctrl+B 打开）。
   `preview` = 只跑低清；`redraw` = 已跑完的片子里要换种子重画的秒数，如 `20-24`、`1:12-1:15`（整条片子的时间）。不放进

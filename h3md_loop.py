@@ -571,6 +571,25 @@ def _to_cpu(latent: dict) -> dict:
 # node
 # ---------------------------------------------------------------------------
 
+def check_redraw_base(cache, k, man: dict, seg: dict, where=""):
+    """Local redraw needs this segment finished in the cache with the same length and hard cuts (0.3.9-beta: the
+    prompt, pictures and reference media may differ - only the redrawn seconds use the new ones).  The frame size is
+    checked by redraw_latent."""
+    if not man.get("key") or not cache.has(k, man["key"]):
+        raise ValueError(f"{_TAG} {where}: local redraw needs this segment finished in the cache (run it once without "
+                         f"'redraw', with resume_from_cache on); cache {cache.dir}. 局部重绘需要先把这一段完整跑过一次"
+                         f"（打开 resume_from_cache），缓存里没有。")
+    if int(man.get("frames", -1)) != int(seg["length"]):
+        raise ValueError(f"{_TAG} {where}: local redraw: the segment is {seg['length']} frames now, the cached one "
+                         f"{man.get('frames')} - redraw can not change lengths; run the segment again instead. "
+                         f"局部重绘不能改长度（现在 {seg['length']} 帧，缓存里 {man.get('frames')} 帧），请整段重跑。")
+    now = [int(c) for c in seg.get("windowCuts") or []]
+    if "cuts" in man and [int(c) for c in man.get("cuts") or []] != now:
+        raise ValueError(f"{_TAG} {where}: local redraw: the hard cuts moved (cached {man.get('cuts')}, now {now}) - "
+                         f"redraw can not move cuts; run the segment again instead. 局部重绘不能移动硬切位置"
+                         f"（缓存里 {man.get('cuts')}，现在 {now}），请整段重跑。")
+
+
 def redraw_latent(cache, k, latent: dict, ranges, where=""):
     """window-exp local redraw: the segment's cached final latent with a soft noise mask over `ranges` (frames inside
     the segment; 1 = redraw, 0 = keep).  A locked song (audio mask already 0 in `latent`) stays locked.  Returns
@@ -973,16 +992,19 @@ class H3MDLoopSampler:
             if key is not None and preview:
                 key = C._sha({"key": key, "preview": True})
             # window-exp local redraw: windowMode.redraw [[start_s, end_s], ...] re-renders only those seconds of the
-            # cached segment (needs the finished segment of the same settings in the cache)
+            # cached segment.  0.3.9-beta: the prompt, the pictures and the reference media may have changed since the
+            # segment was rendered (only the redrawn seconds use the new ones); length, size and hard cuts may not.
             redraw = WIN.redraw_ranges(plan.get("windowMode") if isinstance(plan, dict) else None,
                                        int(seg["startFrame"]), int(seg["length"]))
             base_key = key
             if redraw and cache is not None and key is not None:
                 man = cache.manifest(k) or {}
+                check_redraw_base(cache, k, man, seg, where)
                 if base_key not in (man.get("key"), man.get("base_key")):
-                    raise ValueError(f"{_TAG} {where}: local redraw needs this segment finished in the cache with the "
-                                     f"same settings (run it once without 'redraw'); cache {cache.dir}. 局部重绘需要先"
-                                     f"用同样设置把这一段完整跑过一次（缓存里没有）。")
+                    LOG.info("%s %s: local redraw: the prompt / pictures / reference media of this segment changed since "
+                             "it was rendered - the redrawn seconds %s use the new ones, the rest keeps the cached take. "
+                             "局部重绘：这一段的提示词 / 参考素材改过，只有重画的秒数用新的，其余保持原样。", _TAG, where,
+                             redraw)
                 key = C._sha({"key": base_key, "redraw": redraw})
             elif redraw:
                 raise ValueError(f"{_TAG} {where}: local redraw needs the disk cache (cache_mode=disk)")
@@ -1239,7 +1261,8 @@ class H3MDLoopSampler:
                     cache.archive(k, moved_to)
                 try:
                     cache.write(k, key, final, imgs, aud,
-                                dict({"trim": trims[-1], "report": report[-1]},
+                                dict({"trim": trims[-1], "report": report[-1],
+                                      "cuts": [int(c) for c in seg.get("windowCuts") or []]},   # redraw check
                                      **({"base_key": base_key, "redraw": redraw} if redraw else {})),
                                 lowres=prev_low if beta else None)
                 except BaseException:

@@ -130,6 +130,11 @@ changes:
    `1:12-1:15`, several ranges separated by commas. Run: only the windows that touch those seconds are rendered again,
    with a new seed; every other frame stays identical and the groups not touched come from the cache. Not happy? Run
    again (a new seed each time). Happy? Clear `redraw` (or bypass the node): the redrawn take is kept.
+   You may also edit the shot first: change its prompt, add or replace a picture (for example a still of the outfit
+   from a shot where it came out right), or change its reference video or audio. Only the redrawn seconds use the
+   change; the rest keeps the take you have. Not possible with a redraw: another size or length, moving a hard cut,
+   another locked song. A redraw that starts at a hard cut is the safest place for bigger changes (nothing to match on
+   the left side).
 4. *A whole group is wrong:* type its number in `rerun_segments` (groups are numbered as the Director's notes list
    them).
 5. *Stopped, crashed, or the PC restarted:* run again. Finished groups come from the cache; the interrupted group

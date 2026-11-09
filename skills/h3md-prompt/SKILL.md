@@ -135,7 +135,13 @@ non_diegetic_music:
   `"redraw": [[4, 8]]` re-renders only seconds 4–8 of a finished run with a new seed; everything else stays identical.
   In the workflow the node H3MD Redraw / Preview (between the Director and the Loop, Ctrl+B to un-bypass) sets both:
   `preview` on/off, `redraw` as seconds on the whole video (`20-24`, `1:12-1:15`). A few bad seconds: redraw them
-  instead of re-running the group or rewriting the prompt; clear `redraw` to keep the take you like.
+  instead of re-running the group; clear `redraw` to keep the take you like. Before a redraw you may edit the shot's
+  prompt or add a picture (e.g. a still of the outfit from a shot where it came out right, "only the dress, not the pose
+  or background"); only the redrawn seconds use the edit. Not with a redraw: size, length, hard-cut positions, the
+  locked song.
+- An outfit only in text gets re-imagined after every hard cut (buttons, straps, fabric change). Describe it in full in
+  every shot, say what it does NOT have ("no buttons, no zipper"), and keep another person's clothing words (e.g.
+  "button-up shirt") out of sentences about her.
 - With interpolation on (48 / 60 fps) hard cuts stay clean (no blended frame between two shots).
 - A hard cut inside one shot (`[7s cut] [Shot 2] ...`) also works, but a separate shot with `overlapIn` 0 is simpler.
 

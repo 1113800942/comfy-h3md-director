@@ -372,8 +372,12 @@ rendered in ONE sampling run with the core MiniMax H3 context windows (ComfyUI 0
   passes unchanged (hand-written plan keys still apply). Errors: no window mode in the plan; preview and redraw
   together (redraw works on a finished full run). Needs `resume_from_cache` on (the same `resume_...` folder as the
   finished run).
-* Local redraw (`windowMode.redraw`): needs the group finished in the cache with the same settings (else an error,
-  nothing is rendered). The group's cached final latent gets a noise mask: 1 inside the ranges (snapped outwards to
+* Local redraw (`windowMode.redraw`): needs the group finished in the cache (else an error, nothing is rendered) with
+  the same length, frame size and hard cuts (the manifest records the group's `cuts`; a moved cut is refused). The
+  prompt, pictures and reference video / audio may have changed since (0.3.9-beta): the windows of the redrawn seconds
+  are conditioned on the current plan, everything else keeps the cached take, and the log says so. A locked song is
+  taken from the current plan for the redrawn seconds, so changing the song is not supported. The redrawn take is
+  recorded under the current plan's key (cleared `redraw` = cache hit). The group's cached final latent gets a noise mask: 1 inside the ranges (snapped outwards to
   whole latents), 0 elsewhere, hard edges (a locked song stays locked); only the windows that touch the masked latents
   run, with a fresh random seed (logged). The kept rows of the low-res pass are the group's own cached low-res result
   (`seg_XXX_lowres.pt`), not the downscaled final latent; the model sees the kept frames on both sides as known frames

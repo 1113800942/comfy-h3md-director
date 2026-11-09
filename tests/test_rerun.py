@@ -365,6 +365,40 @@ class LoopRerunTests(unittest.TestCase):
         self.assertEqual(len(FakeSampler.calls), 0)                 # nothing re-rendered ...
         self.assertTrue(torch.equal(self.latent(0)[0], new0[0]))   # ... and the redrawn take is kept
 
+    def test_redraw_with_a_changed_prompt(self):
+        """0.3.9-beta: a local redraw may use a changed prompt / pictures (only the redrawn seconds use them); clearing
+        'redraw' afterwards keeps the new take; moved hard cuts are refused."""
+        import copy
+        import h3md_window as WIN
+        plan = make_plan(2)
+        plan["segments"][1]["overlapIn"] = 0
+        plan["segments"][0]["windowCuts"] = [51]
+        plan["windowMode"] = WIN.normalize_window_mode(True)
+        self.run_loop(plan)
+        old0, old1 = self.latent(0), self.latent(1)
+
+        edited = copy.deepcopy(plan)
+        edited["segments"][0]["prompt"] = "segment 0, now with a plain dress without buttons"
+        FakeSampler.calls = []
+        with self.assertLogs("H3MD", level="INFO") as logs:
+            self.run_loop(WIN.H3MDRedrawPreview().run(edited, False, "1-2")[0])
+        self.assertEqual(len(FakeSampler.calls), 1)                 # only segment 1, from its cached take
+        self.assertTrue(any("changed since it was rendered" in m for m in logs.output))
+        new0 = self.latent(0)
+        self.assertFalse(torch.equal(new0[0], old0[0]))
+        self.assertTrue(torch.equal(self.latent(1)[0], old1[0]))
+
+        FakeSampler.calls = []
+        self.run_loop(copy.deepcopy(edited))                        # redraw cleared, the edited prompt stays
+        self.assertEqual(len(FakeSampler.calls), 0)
+        self.assertTrue(torch.equal(self.latent(0)[0], new0[0]))
+
+        moved = copy.deepcopy(edited)
+        moved["segments"][0]["windowCuts"] = [68]
+        with self.assertRaises(ValueError) as err:
+            self.run_loop(WIN.H3MDRedrawPreview().run(moved, False, "1-2")[0])
+        self.assertIn("hard cuts moved", str(err.exception))
+
     def test_lowres_anchor_option(self):
         plan = make_plan(3)
         self.run_loop(plan)
