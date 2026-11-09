@@ -2,6 +2,13 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.4.3] — 2026-11-08
+* **Lighter Control Panel / 总控台更轻**: each LoRA dropdown now holds only its own LoRA until it is opened; the full
+  `models/loras` list is filled in then. Before, every row carried the whole list (with ~450 LoRAs, 16-18 rows made
+  7,000-8,000 hidden entries - most of the page), so every click in the panel rebuilt them (~76 ms). Nothing changes in
+  how the panel is used. 每个 LoRA 下拉框在点开之前只放这一行的 LoRA，点开时才填完整列表。以前每一行都带着整个列表
+  （450 个左右的 LoRA × 16-18 行 = 7000-8000 个隐藏选项，占了整页的大半），总控台每点一下都要重建（约 76 毫秒）。用法不变。
+
 ## [0.4.2] — 2026-11-08
 * **Window mode is no longer marked beta / 窗口模式不再标"测试版"**: 0.4.0 is the finished version. README headings and the
   manual node's name (`H3MD Context Windows (window mode)`, class name unchanged - saved workflows keep working) drop

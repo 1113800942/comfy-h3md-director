@@ -113,6 +113,20 @@ def test_simple_workflow_bridge_wired_and_bypassed():
     assert not [o for o in panel["outputs"] if o["name"] == "semantic_bridge"][0]["links"]
 
 
+
+def test_lora_dropdowns_filled_on_open():
+    """0.4.3: each LoRA dropdown starts with only its own row's LoRA; the full models/loras list (hundreds of files x
+    16-18 rows = thousands of <option>s, ~76 ms per panel re-render) is filled in when that dropdown is opened."""
+    js = open(os.path.join(os.path.dirname(HERE), "web", "js", "h3md_control_panel.js"), encoding="utf-8").read()
+    table = js[js.index("  table(which) {"):js.index("  hintEl(h) {")]
+    assert "for (const n of names) sel.append" not in table           # no longer every LoRA up front
+    assert "sel.append(loraOption(r.lora));" in table                   # only the current one
+    fill = table[table.index("const fill = () => {"):]
+    assert "if (sel.dataset.full) return;" in fill                       # filled once per dropdown
+    assert "P.loras" in fill and "sel.value = r.lora;" in fill          # full list, current value kept
+    assert 'sel.addEventListener("pointerdown", fill);' in table and 'sel.addEventListener("focus", fill);' in table
+    assert "onchange: (e) => upd({ lora: e.target.value, key: null })" in table   # choosing still updates the row
+
 if __name__ == "__main__":
     for n, f in list(globals().items()):
         if n.startswith("test_"):

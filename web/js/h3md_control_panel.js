@@ -147,6 +147,8 @@ export function panelProblems() {
   return out;
 }
 
+const loraOption = (n) => el("option", { value: n }, n.replace(/\.safetensors$/i, ""));
+
 function el(tag, attrs = {}, ...kids) {
   const e = document.createElement(tag);
   for (const [k, v] of Object.entries(attrs)) {
@@ -225,9 +227,18 @@ class Panel {
       const missing = P.loras?.length && !installed.has(r.lora);
       const upd = (patch) => { const rs = rowsOf(this.node, which); rs[i] = { ...rs[i], ...patch }; setRows(this.node, which, rs); this.render(); };
       const sel = el("select", { title: r.lora + (missing ? "\n(not found in models/loras)" : ""), onchange: (e) => upd({ lora: e.target.value, key: null }) });
-      const names = [...new Set([r.lora, ...(P.loras || [])])];
-      for (const n of names) sel.append(el("option", { value: n }, n.replace(/\.safetensors$/i, "")));
+      // 0.4.3: only this row's LoRA at first; the full list (every file in models/loras - hundreds, times 16-18 rows =
+      // thousands of <option>s, ~76 ms per panel re-render) is filled in when this dropdown is opened or focused
+      sel.append(loraOption(r.lora));
       sel.value = r.lora;
+      const fill = () => {
+        if (sel.dataset.full) return;
+        sel.dataset.full = "1";
+        sel.replaceChildren(...[...new Set([r.lora, ...(P.loras || [])])].map(loraOption));
+        sel.value = r.lora;
+      };
+      sel.addEventListener("pointerdown", fill);
+      sel.addEventListener("focus", fill);
       box.append(el("div", { class: `row${r.on ? "" : " off"}${missing ? " missing" : ""}` },
         el("span", { class: "rec", title: r.key ? "recommended (follows the style buttons)" : "your own LoRA" }, r.key ? "★" : ""),
         el("input", { type: "checkbox", checked: !!r.on, onchange: (e) => upd({ on: e.target.checked }) }),
