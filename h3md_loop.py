@@ -986,11 +986,13 @@ class H3MDLoopSampler:
                 key = C._sha({"key": base_key, "redraw": redraw})
             elif redraw:
                 raise ValueError(f"{_TAG} {where}: local redraw needs the disk cache (cache_mode=disk)")
-            if not redraw and isinstance(plan, dict) and (plan.get("windowMode") or {}).get("redraw") \
-                    and cache is not None and key is not None:
+            if not redraw and cache is not None and key is not None:
+                # a segment redrawn earlier keeps its latest version: also once 'redraw' is cleared or the Redraw /
+                # Preview node is bypassed (0.3.9-beta fix: before, clearing 'redraw' re-rendered the original take
+                # over the redrawn one)
                 man = cache.manifest(k) or {}
-                if man.get("base_key") == key:
-                    key = man["key"]   # untouched segment, redrawn earlier: its latest version in the cache is used
+                if man.get("base_key") == key and man.get("key"):
+                    key = man["key"]
             if rerun:  # H3MD rerun: not selected = cached (validated above), selected = re-rendered
                 hit = k not in rerun
                 if hit and not cache.has(k, key) and not preview:

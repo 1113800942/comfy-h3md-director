@@ -35,6 +35,22 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   124 帧窗口）；手动节点 H3MD Context Windows 加了 `chain` 开关（默认开），默认 243 / 22。文档：README / CHANGELOG 去掉
   "大变化会叠化"的限制（接续窗口已解决），技术参考加了窗口模式一节，速度说明重新实测（约慢 25%：低清每帧约 11%，高清约 34%）。
 
+* **New node: H3MD Redraw / Preview / 新节点：局部重绘 / 低清预览**: between the Director and the Loop (bypassed in
+  both example workflows; Ctrl+B to use). `preview` = low-res pass only; `redraw` = seconds of a finished run to render
+  again with a new seed, e.g. `20-24` or `1:12-1:15` (whole-video time). Kept off the Director's editor so the old
+  interface stays as it is. Fixed with it: clearing `redraw` (or bypassing the node) now keeps the redrawn take; before,
+  the next run rendered the original take over it. 接在导演台和 Loop 之间（两个示例工作流里都接好、默认旁路，Ctrl+B 打开）。
+  `preview` = 只跑低清；`redraw` = 已跑完的片子里要换种子重画的秒数，如 `20-24`、`1:12-1:15`（整条片子的时间）。不放进
+  导演台编辑器，原来的界面不变。同时修好：清空 `redraw`（或旁路节点）后保留重画的那一版；以前下一次运行会用原来的那一版把它盖掉。
+* **Interpolation at hard cuts / 插帧遇到硬切**: with interpolation on (48 / 60 fps), the frame between two shots is no
+  longer a RIFE blend of both shots (one melted frame at every hard cut, in every version so far); it repeats the
+  nearest original frame. Same frame count, timing and audio; also in H3MD Face Refine Save. 开插帧时，两个镜头之间的那
+  一帧不再由 RIFE 把两个镜头混在一起（以前每个硬切都有一帧糊帧，所有版本都有），改用最近的原帧；帧数、时长、声音不变；修脸保存节点同样。
+* **Docs / 文档**: README step by step for seamless long video (preview → full → redraw → rerun → resume), what the
+  cache keeps and how big it is (about 18 GB per minute at 1920×1088 in fp16; a 2:20 run left 41 GB; every redraw keeps
+  the previous take of its group). README 加无接缝长视频的操作步骤（预览 → 完整版 → 局部重绘 → 重跑 → 续跑）和缓存说明
+  （1920×1088 fp16 约每分钟 18 GB；2 分 20 秒的片子 41 GB；每次局部重绘保留这一组的旧版本）。
+
 **Details / 详细：**
 * Core MiniMax H3 context windows (ComfyUI 0.44+) with H3MD additions: low-res windows 243 / overlap 22 (chained),
   high-res 175 / 22. 核心上下文窗口 + H3MD 扩展：低清 243 / 重叠 22（接续窗口）、高清 175 / 22。

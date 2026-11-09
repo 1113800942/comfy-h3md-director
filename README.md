@@ -105,9 +105,10 @@ changes:
   spin, back-to-front turn, a 22 s take with two hand-overs, a 12 s run along the sea). With `"chain": false` they can.
 * Switched off automatically: depth / pose control (the video stays a normal reference video; also off in motion copy)
   and RefMods (identity comes from the reference pictures).
-* `"preview": true` renders the low-res pass only (about half the time; the full run reuses it).
-  `"redraw": [[4, 8]]` re-renders only seconds 4–8 of a finished run with a new seed: everything else stays
-  frame-identical, the previous version is kept in the cache folder.
+* Low-res preview and local redraw: see the steps below (node **H3MD Redraw / Preview**; the plan keys `"preview"` /
+  `"redraw"` do the same when written by hand).
+* Frame interpolation (48 / 60 fps) never blends two shots at a hard cut: the frame between them repeats the nearest
+  original frame (0.3.9-beta; before, every hard cut got one frame of the two shots melted together).
 * Memory: the result is decoded and written in ~10 s chunks, and the high-res pass plans its strips per window, so
   2K works on 64 GB RAM (measured: 21 s at 2560×1408 in 41 min on an RTX 5090).
 * A locked song that is also `<Audio N>` gives each window only its own stretch of the song (not the whole file), and
@@ -115,7 +116,36 @@ changes:
 * Segment numbers (`segments_to_run`, `rerun_segments`, `stop_after`) count **groups** in window mode, as the
   Director's notes list them (one group = the shots rendered together).
 * About 25% slower than the old chain (11-08, 1920×1088: low-res about +11 %, high-res about +34 % per frame). Turn
-  it off to get the old behaviour back exactly.
+  it off to get the old behaviour back exactly. Measured on an RTX 5090: a 2 min 20 s music video at 1920×1088
+  (3 groups, 48 fps) took 2 h 18 min, compute VRAM peak 11.1 GB.
+
+### Step by step
+1. Tick **Seamless long video** on the Director. Keep `resume_from_cache` **on** on the Loop node (it is on in the
+   example workflows; preview, redraw and resume all work from the cache).
+2. *Optional, low-res preview:* in the example workflow, the **H3MD Redraw / Preview** node sits between the Director
+   and the Loop, bypassed. Select it, press Ctrl+B, tick `preview` and run: only the low-res pass (about half the
+   time). Happy with motion and framing? Untick `preview` and run again: the full version starts from the cached
+   low-res pass.
+3. *Fix a few seconds:* write them into `redraw` on the same node, on the whole video's timeline: `20-24`,
+   `1:12-1:15`, several ranges separated by commas. Run: only the windows that touch those seconds are rendered again,
+   with a new seed; every other frame stays identical and the groups not touched come from the cache. Not happy? Run
+   again (a new seed each time). Happy? Clear `redraw` (or bypass the node): the redrawn take is kept.
+4. *A whole group is wrong:* type its number in `rerun_segments` (groups are numbered as the Director's notes list
+   them).
+5. *Stopped, crashed, or the PC restarted:* run again. Finished groups come from the cache; the interrupted group
+   continues from the sampling step it was in (tested: the result is frame-identical to an uninterrupted run).
+
+### Cache: what is kept and how big
+* Where: `<drive>/H3MD_cache/resume_<id>/` (the drive with the most free space, or the `cache_dir` you set).
+* Per group: the decoded frames (`seg_XXX_frames.npy`, 12.5 MB per 1920×1088 frame = about **18 GB per minute** of
+  video; `cache_dtype = uint8` halves it), the final latent (about 0.2 GB per minute), and in `seg_XXX_progress/` the
+  low-res result `pass1.pt` (about 130 MB per 50 s group, kept so a preview, a redraw or a high-res-only change skips
+  the low-res pass). Resume files of the current step exist only while a group runs.
+* Example: the 2 min 20 s video above left a 41 GB cache folder.
+* Every redraw moves the previous take of that group to `_replaced_<time>/` in the same folder (a full copy of the
+  group: about 15 GB for a 53 s group at 1920×1088). Delete those folders when you have chosen.
+* H3MD never deletes the cache on its own: turn on `delete_cache_after_save` on H3MD Save Video Interp, or delete the
+  `resume_...` folder by hand when the video is final.
 
 ## More (click to open)
 

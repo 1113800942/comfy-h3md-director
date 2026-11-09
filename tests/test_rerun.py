@@ -308,6 +308,33 @@ class LoopRerunTests(unittest.TestCase):
         self.assertEqual(src.hard_cuts(), [51])
         src.close()
 
+    def test_redraw_kept_after_clearing(self):
+        """0.3.9-beta: a local redraw stays the group's result once 'redraw' is cleared (node bypassed); before, the
+        next run re-rendered the original take over it."""
+        import copy
+        import h3md_window as WIN
+        plan = make_plan(2)
+        plan["segments"][1]["overlapIn"] = 0                       # two independent groups (hard cut)
+        plan["windowMode"] = WIN.normalize_window_mode(True)
+        self.run_loop(plan)
+        self.assertEqual(len(FakeSampler.calls), 2)
+        old0, old1 = self.latent(0), self.latent(1)
+
+        FakeSampler.calls = []
+        redraw = WIN.H3MDRedrawPreview().run(plan, False, "1-2")[0]   # seconds 1-2 = frames 24-48 of segment 1
+        self.run_loop(redraw)
+        self.assertEqual(len(FakeSampler.calls), 1)                 # only the touched group
+        new0 = self.latent(0)
+        self.assertFalse(torch.equal(new0[0], old0[0]))
+        self.assertTrue(torch.equal(self.latent(1)[0], old1[0]))
+        arch = [d for d in os.listdir(self.cache_dir()) if d.startswith("_replaced_")]
+        self.assertEqual(len(arch), 1)                              # the previous version is kept
+
+        FakeSampler.calls = []
+        self.run_loop(copy.deepcopy(plan))                          # redraw cleared / node bypassed
+        self.assertEqual(len(FakeSampler.calls), 0)                 # nothing re-rendered ...
+        self.assertTrue(torch.equal(self.latent(0)[0], new0[0]))   # ... and the redrawn take is kept
+
     def test_lowres_anchor_option(self):
         plan = make_plan(3)
         self.run_loop(plan)

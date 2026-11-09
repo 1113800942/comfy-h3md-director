@@ -17,6 +17,7 @@ Multi-segment MiniMax H3 pipeline nodes (category `MiniMax H3/H3MD`):
 | H3MDLoopSampler | H3MD Loop Sampler (legacy) | the original single node, inputs unchanged, kept so saved workflows load exactly; same computation |
 | H3MDSemanticBridge | H3MD Semantic Bridge | chainable Semantic Bridge (six-tensor MLP / trainer MLP / T8 transformer) -> Loop Sampler `semantic_bridge` |
 | H3MDContextWindows | H3MD Context Windows (window mode, exp) | the window-mode patch on one MODEL for hand-built graphs (243 / 22, 接续窗口 on); the Loop applies it itself when the plan has `windowMode` |
+| H3MDRedrawPreview | H3MD Redraw / Preview 局部重绘 / 低清预览 | between the Director's `plan` and the Loop's `plan`: low-res preview on/off and local redraw seconds (writes `windowMode.preview` / `windowMode.redraw`); bypassed = plan unchanged (0.3.9-beta) |
 | H3MDLowVRAMLoraLoader | H3MD LowVRAM LoRA Loader | token-sliced bypass LoRA loader (same behaviour as H3LowVRAMBypassLoraLoader) |
 
 ### Director editor (Phase 2 UI)
@@ -361,7 +362,30 @@ rendered in ONE sampling run with the core MiniMax H3 context windows (ComfyUI 0
 * Progress cache (`seg_XXX_progress/` in the segment cache folder): `pass1.pt` (low-res result, kept: a rerun or the
   full run after a preview skips the low-res pass) and the sampler state at the start of the two newest steps of each
   pass (resume after a crash re-runs from that step; deleted when the segment finishes). Loaded with
-  `weights_only=True`; a different cache key wipes the folder.
+  `weights_only=True`; a different cache key wipes the folder. Resume needs `resume_from_cache` on (the run folder is
+  then `resume_<settings hash>`): finished groups are read from the cache, the interrupted group restarts at the step
+  it was in (11-07 test: the result is frame-identical to an uninterrupted run).
+* **Node `H3MD Redraw / Preview`** (`H3MDRedrawPreview`, 0.3.9-beta; between the Director's `plan` and the Loop's
+  `plan`, bypassed in both example workflows): `preview` (BOOLEAN) and `redraw` (STRING, seconds on the whole video:
+  `20-24`, `1:12-1:15`, several ranges separated by commas; overlapping ranges merge, the end is clipped to the video)
+  write `windowMode.preview` / `windowMode.redraw` into a copy of the plan. Both off / empty or bypassed = the plan
+  passes unchanged (hand-written plan keys still apply). Errors: no window mode in the plan; preview and redraw
+  together (redraw works on a finished full run). Needs `resume_from_cache` on (the same `resume_...` folder as the
+  finished run).
+* Local redraw (`windowMode.redraw`): needs the group finished in the cache with the same settings (else an error,
+  nothing is rendered). The group's cached final latent gets a noise mask: 1 inside the ranges, a 3-latent ramp on
+  each side, 0 elsewhere (a locked song stays locked); only the windows that touch the masked latents run, with a fresh
+  random seed (logged). Frames outside the ranges and ramps come back identical; only the changed ~10 s decode chunks
+  are decoded again. The previous version of the group is moved to `_replaced_<time>/` in the run folder (it keeps
+  the whole group's files, so each redraw costs one more copy of that group on disk). Every run with `redraw` filled
+  in tries a new seed; clear it (or bypass the node) and the latest version is used as the group's result. Groups the
+  ranges do not touch are cache hits.
+* Cache size (measured 11-08, 2:20 at 1920x1088, 3 groups): `seg_XXX_frames.npy` 12.5 MB per frame in fp16 (about
+  18 GB per minute; `cache_dtype = uint8` halves it), `seg_XXX_latent.pt` about 0.2 GB per minute, `_lowres.pt` about
+  50 MB per minute, `pass1.pt` about 130 MB per 50 s group; step files only while a group runs (two newest, a few
+  hundred MB). The whole 2:20 run folder: about 41 GB. The Loop never deletes it; H3MD Save Video Interp
+  `delete_cache_after_save` does after the file is complete, otherwise delete the run folder (and old
+  `_replaced_*` folders) by hand.
 * Decode: a group is decoded and written ~10 s at a time straight into the disk cache (RAM no longer grows with the
   group); the high-res pass plans its strips per window.
 * Speed (RTX 5090, 1920x1088, per latent and step vs one pass): low-res chained 243 / 22 about +11 %, high-res 175 / 22
@@ -412,6 +436,10 @@ Save Video 的话出来的不是视频，运行时日志会警告一次，请改
 （`cache_mode=ram` 例外：仍在内存里拼好从 `images` 出，`long video` 为空。）`crf` 新建节点默认 19（和 Video Combine 一样）。
 * 第一个开关 `interpolate`：关 = 不插帧；开 = 用 RIFE 插帧。插帧选项（`scale`、`model_name`、`batch_size`、
   `use_fp16`）在关的时候变灰。`source_fps` 只是一行只读显示“24 (fixed)”（H3MD 永远是 24 fps，不是输入）。
+* 硬切处不插帧（0.3.9-beta）：两个镜头之间的那一帧不再用 RIFE 混出来（以前会糊成两个镜头扭在一起），改用离它最近的原帧
+  （正好在中间时用前一帧）；帧数、时长、声音不变。硬切位置来自 Loop：段与段之间的硬切，加上无接缝长视频一组里面的硬切
+  （`long video` 里的 `cuts`）。日志一行 `hard cut(s) at source frames [...]`，结束报告里有 `hard_cuts` /
+  `cut_frames_copied`。修脸保存节点同样处理。
 * `target_fps`（默认 24）永远可改，**就是写出文件的帧率**。注意：`interpolate` 关、`target_fps` 又不是 24 时，
   帧不变只是播放快/慢了，**声音会对不上**（日志警告，写明快/慢多少倍）。
 * `format`：`video/h264-mp4`（默认）、`video/h265-mp4`、`image/gif`、`image/webp`、`image/png-sequence`。
@@ -480,6 +508,14 @@ H3MD Loop Sampler --long video--> H3MD Save Video Interp
   (frame, frame, timestep) of every output frame equal a one-pass RIFE run (`int(duration * target_fps)`, the
   wrapper's own `_calculate_target_frame_positions`); each chunk carries its last source frame into the next.
   `target_fps` 24 = no interpolation (like RIFE).
+* **No interpolation across a hard cut** (0.3.9-beta, `skip_cuts`): an output frame that falls between frames c-1 and c
+  of two different shots is a plain copy of the nearer source frame (the earlier one at exactly half way) instead of a
+  RIFE blend of the two shots; frame count, timing and audio are unchanged. The cuts come from the Loop: every
+  segment after the first with trim 0, plus the cuts inside a segment that the `long video` value lists per segment
+  (`cuts`: a window-mode group's `windowCuts`, frames from the segment's first frame; values from older versions have
+  no `cuts`, then only the cuts between segments are known). Log: `N hard cut(s) at source frames [...]: M
+  interpolated frame(s) across them use the nearest source frame`; report keys `hard_cuts`, `cut_frames_copied`.
+  H3MD Face Refine Save does the same.
 * `format` (all streamed chunk by chunk; options that do not apply are greyed out):
 
   | format | codec / container | audio | `crf`, `pix_fmt` | `loop_count` | `trim_to_audio` | metadata |

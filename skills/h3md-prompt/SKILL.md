@@ -133,6 +133,10 @@ non_diegetic_music:
 - The `Duration:` line is rewritten by H3MD (each window gets its own length).
 - `"preview": true` renders the low-res pass only (motion and framing; a later full run reuses it).
   `"redraw": [[4, 8]]` re-renders only seconds 4–8 of a finished run with a new seed; everything else stays identical.
+  In the workflow the node H3MD Redraw / Preview (between the Director and the Loop, Ctrl+B to un-bypass) sets both:
+  `preview` on/off, `redraw` as seconds on the whole video (`20-24`, `1:12-1:15`). A few bad seconds: redraw them
+  instead of re-running the group or rewriting the prompt; clear `redraw` to keep the take you like.
+- With interpolation on (48 / 60 fps) hard cuts stay clean (no blended frame between two shots).
 - A hard cut inside one shot (`[7s cut] [Shot 2] ...`) also works, but a separate shot with `overlapIn` 0 is simpler.
 
 ## 3. Seams: hard cut or continuation

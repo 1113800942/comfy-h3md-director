@@ -52,4 +52,6 @@ Problems are listed and nothing is changed for you: a length that is not 5 + 17n
 * Window mode (0.3.9-beta, the Director's "Seamless long video" switch): add `"windowMode": true` (same as
   `{"length": 243, "overlap": 22, "highLength": 175, "highOverlap": 22}`: low-res windows chained, 接续窗口). Continued
   shots are rendered on one timeline, hard cuts stay cuts; inside a long shot time each action from the shot's start
-  (`[8s] ...` or `At 00:07.9 ...`). `"preview": true` = low-res only. Details: [technical reference](technical-reference.md).
+  (`[8s] ...` or `At 00:07.9 ...`). `"preview": true` = low-res only; `"redraw": [[20, 24]]` = render seconds 20–24 of
+  a finished run again with a new seed (the node H3MD Redraw / Preview writes both for you, between the Director and the
+  Loop). Details: [technical reference](technical-reference.md).
