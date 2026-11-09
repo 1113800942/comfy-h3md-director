@@ -2,8 +2,9 @@
 
 **English** | [中文](README.zh-CN.md)
 
-Long, multi-shot MiniMax H3 video in ComfyUI — **2+ minutes at 1080p in one run**. Plan shots in a visual Director,
-generate them segment by segment, keep every finished segment on disk, and repair only what went wrong.
+Long, multi-shot MiniMax H3 video in ComfyUI — **2+ minutes at 1080p in one run**. Plan shots in a visual Director;
+continued shots are rendered together on one seamless timeline (**0.4.0: CCW, Chained Context Windows**), every finished
+part is kept on disk, and you repair only what went wrong — down to a few seconds.
 
 > H3MD does **not** include any MiniMax H3 weights; the model has its own license (see [NOTICE.md](NOTICE.md)).
 
@@ -18,8 +19,11 @@ generate them segment by segment, keep every finished segment on disk, and repai
 | <img src="docs/media/mv_1080p_singing.gif" width="420"> | <img src="docs/media/mv_1080p_everest.gif" width="420"> |
 
 ## Highlights
-- **Long video in one run**: 2–3 minutes at 1088×1920, split automatically into seamlessly continued segments.
-- **Repair instead of re-render**: `rerun_segments` re-renders only the bad segments, locked to their neighbours at both ends.
+- **Seamless long video (0.4.0, CCW)**: tick one switch on the Director and continued shots are rendered together on one
+  timeline with Chained Context Windows — no continuation seams, no drift, no double images; hard cuts stay clean.
+- **Long video in one run**: 2–3 minutes at 1080p (measured: a 2 min 20 s music video at 1920×1088 in 2 h 18 min on an RTX 5090).
+- **Repair instead of re-render**: the **Redraw / Preview** node redraws just a few seconds of a finished video (you may
+  change that shot's prompt or pictures first); `rerun_segments` re-renders whole segments, locked to their neighbours.
 - **Motion copy**: a reference video drives the motion (depth + SAM3 + Fun ControlNet); the look comes from your photos.
 - **No long-video drift**: `lowres_anchor` keeps colors and faces stable over a whole single-scene take.
 - **Fits your GPU**: automatic splitting by VRAM, high-res strip tiling, disk cache and resume; the optional 4B + ClipProj text encoder saves 10+ GB.
@@ -570,7 +574,27 @@ how we solved them — feel free to build on them.
 - 4B + ClipProj saves 10+ GB of VRAM with no loss in image quality, only slightly weaker prompt understanding. Fine for
   generating from scratch; don't switch encoders in the middle of one piece.
 
-### 9. Method
+### 9. CCW: Chained Context Windows (0.4.0)
+- **Problem**: joining segments (1.) leaves a small seam at every join and lets drift build up. ComfyUI's core Context
+  Windows sample a whole take at once in overlapping windows, but they **average the overlaps**: where the picture
+  changes a lot (a spin, a back view turning to the front), two different pictures averaged become double images — our
+  2 min 20 s test showed five such spots.
+- **Approach**: in the low-res pass the windows run in time order, and a window's overlap with the windows before it
+  takes their result of the same step (input and output) instead of averaging. Same amount of computation. The high-res
+  pass keeps averaged windows (the picture is already set there).
+- Hard cuts are window boundaries (nothing is blended across a cut), and long plans are grouped (about 60 s) only at
+  hard cuts. Each window gets its own share of the prompt: lines with a time (`At 00:07.9 ...`, `[8s] ...`) go to the one
+  window that draws that second, and reference pictures follow the windows that mention them.
+- **Result**: the five double-image spots of the 2:20 test are gone; about 25 % slower than joining segments.
+
+### 10. Local redraw: a noise mask over the finished take
+- Only the windows that touch the chosen seconds are sampled; everything else is held by a noise mask, the low-res pass
+  keeps the take's **own** low-res result on the kept rows, and only the changed decode chunks are decoded. The previous
+  take is moved to `_replaced_<time>/`, so nothing is lost.
+- **Lessons from testing**: soft, blended edges gave double exposure → hard edges; using a shrunk final latent as the
+  low-res base washed the picture out → the take's own low-res result.
+
+### 11. Method
 - **Search the community before testing**: a GPU runs only a few tests a day.
 - **Measure**: per-segment saturation and Laplacian sharpness plus face crops, not "it feels like".
 - **Analyze the cache offline**: it holds every segment's low-res and final latent, so you can find the guilty stage
@@ -581,6 +605,7 @@ H3MD stands on many shoulders. Their code, models or openly shared findings gave
 
 **Engine, models and nodes**
 - 👍 [MiniMax](https://huggingface.co/MiniMaxAI) for open-sourcing H3, and [Comfy-Org](https://huggingface.co/Comfy-Org/MiniMax-H3) for native ComfyUI support
+- 👍 [Comfy-Org](https://github.com/comfyanonymous/ComfyUI): the core Context Windows for MiniMax H3 that CCW builds on (the context-window idea goes back to Kosinkadink's [AnimateDiff-Evolved](https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved) context options)
 - 👍 [Luna-H3-Sampler](https://github.com/lunaaispace-eng/Luna-H3-Sampler): two-pass sampling engine (bundled, GPL-3.0)
 - 👍 [LBH-123-AI](https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler): learned latent upscaler (MIT)
 - 👍 [Alissonerdx](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI): sharpness upscaler and lms LoRA

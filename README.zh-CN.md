@@ -2,8 +2,9 @@
 
 [English](README.md) | **中文**
 
-在 ComfyUI 里用 MiniMax H3 做长视频、多镜头视频——**一次生成 2 分钟以上的 1080p**。在可视化导演台里排镜头，逐段生成，
-每段做完就存进硬盘，哪段坏了只修哪段。
+在 ComfyUI 里用 MiniMax H3 做长视频、多镜头视频——**一次生成 2 分钟以上的 1080p**。在可视化导演台里排镜头；续接的镜头
+在同一条时间线上一起生成，没有接缝（**0.4.0：CCW，Chained Context Windows，接续窗口**）；做完的部分存进硬盘，哪里坏了只修哪里，
+小到几秒。
 
 > H3MD **不包含**任何 MiniMax H3 权重；模型有它自己的许可证（见 [NOTICE.md](NOTICE.md)）。
 
@@ -18,8 +19,11 @@
 | <img src="docs/media/mv_1080p_singing.gif" width="420"> | <img src="docs/media/mv_1080p_everest.gif" width="420"> |
 
 ## 亮点
-- **一次生成长视频**：2–3 分钟、1088×1920，自动拆成无缝续接的段。
-- **坏了只修那几段**：`rerun_segments` 只重跑有问题的段，两头锁住前后段。
+- **无接缝长视频（0.4.0，CCW）**：导演台上勾一个开关，续接的镜头用接续窗口（Chained Context Windows）在同一条时间线上
+  一起生成——没有续接接缝、不漂移、不重影；硬切照常是干净的硬切。
+- **一次生成长视频**：1080p 2–3 分钟（实测：2 分 20 秒 MV，1920×1088，RTX 5090 用时 2 小时 18 分）。
+- **坏了只修那几秒**：**局部重绘 / 低清预览**节点只重画成片里的几秒（可以先改这个镜头的提示词、参考图）；`rerun_segments`
+  重跑整段，两头锁住前后段。
 - **动作复刻**：参考视频只提供动作（深度图 + SAM3 + Fun ControlNet），长相来自你的照片。
 - **长视频不漂色**：`lowres_anchor` 让单场景长镜头从头到尾颜色和人脸都稳定。
 - **按你的显卡来**：按显存自动拆段、高清条带分块、硬盘缓存和断点续跑；可选的 4B + ClipProj 编码器能省十几 GB。
@@ -445,7 +449,22 @@ MiniMax H3 单次最多十几秒。要做两三分钟的长视频，难点不在
 ### 8. 编码器：32B 和 4B + ClipProj
 - 4B + ClipProj 能省十几 GB 显存，画质不受影响，只是对提示词的理解稍弱。从零生成完全可用；同一部片子不要中途换编码器。
 
-### 9. 方法上的经验
+### 9. CCW：接续窗口（Chained Context Windows，0.4.0）
+- **问题**：一段段接（第 1 条）每个接口都有一点接缝，漂移也会越积越多。ComfyUI 核心的 Context Windows 把整条镜头分成
+  互相重叠的窗口一次采样，但**重叠部分两边平均**：画面变化大的地方（转圈、背影转正面），两份不同的画面一平均就是重影——
+  我们 2 分 20 秒的测试片里有 5 处。
+- **做法**：低清阶段按时间顺序跑窗口，后一个窗口和前面窗口的重叠部分，直接用前面窗口这一步的结果（输入和输出），不再
+  平均。计算量不变。高清阶段仍用平均窗口（画面在那时已经定了）。
+- 硬切是窗口的边界（不会跨切点混画面），长计划只在硬切处分组（约 60 秒一组）。每个窗口拿到自己那部分提示词：带时间的
+  句子（`At 00:07.9 ...`、`[8s] ...`）只交给画那一秒的窗口；参考照片跟着提到它的窗口走。
+- **结果**：2 分 20 秒测试片里的 5 处重影全部消失；比一段段接慢约 25%。
+
+### 10. 局部重绘：在成片上加一层噪声遮罩
+- 只采样碰到所选秒数的那几个窗口，其余部分用噪声遮罩锁住；低清阶段被锁住的部分用这条成片**自己的**低清结果；只解码
+  改过的那几块。旧版本挪到 `_replaced_<时间>/`，不会丢。
+- **测试里学到的**：软过渡的边会出双重曝光 → 改成硬边；拿缩小的最终 latent 当低清底子会发白 → 改用成片自己的低清结果。
+
+### 11. 方法上的经验
 - **先查社区，再做测试**：一天只能跑几次测试，别人踩过的坑先看。
 - **用数字说话**：每段测饱和度、拉普拉斯锐度，再截脸对比，不靠“感觉好像”。
 - **离线分析缓存**：缓存里存着每段的低清和最终 latent，不占显卡就能定位问题出在哪一步。
@@ -455,6 +474,7 @@ H3MD 站在很多人的肩膀上。下面这些作者的代码、模型或公开
 
 **引擎、模型与节点**
 - 👍 [MiniMax](https://huggingface.co/MiniMaxAI) 开源 H3，[Comfy-Org](https://huggingface.co/Comfy-Org/MiniMax-H3) 做了 ComfyUI 原生支持
+- 👍 [Comfy-Org](https://github.com/comfyanonymous/ComfyUI)：ComfyUI 核心里给 MiniMax H3 用的 Context Windows，CCW 就是在它上面改的（上下文窗口的思路最早来自 Kosinkadink 的 [AnimateDiff-Evolved](https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved) context options）
 - 👍 [Luna-H3-Sampler](https://github.com/lunaaispace-eng/Luna-H3-Sampler)：两段式采样引擎（H3MD 内置，GPL-3.0）
 - 👍 [LBH-123-AI](https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler)：学习型潜空间放大器（MIT）
 - 👍 [Alissonerdx](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI)：sharpness 放大器和 lms LoRA
