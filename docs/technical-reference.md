@@ -389,7 +389,10 @@ rendered in ONE sampling run with the core MiniMax H3 context windows (ComfyUI 0
   in tries a new seed; clear it (or bypass the node) and the latest version is used as the group's result. Groups the
   ranges do not touch are cache hits.
 * Cache size (measured 11-08, 2:20 at 1920x1088, 3 groups): `seg_XXX_frames.npy` 12.5 MB per frame in fp16 (about
-  18 GB per minute; `cache_dtype = uint8` halves it), `seg_XXX_latent.pt` about 0.2 GB per minute, `_lowres.pt` about
+  18 GB per minute) or 6.3 MB in uint8 (about 9 GB per minute; the example workflows' setting since 11-08: the saved
+  8-bit video differs by at most 1/255 per value - the save node truncates, the uint8 cache rounds - and 10 s encoded
+  from either is 40.7 dB from its input; keep fp16 for 10-bit output and for runs started with fp16, `dtype` is part of
+  the settings hash), `seg_XXX_latent.pt` about 0.2 GB per minute, `_lowres.pt` about
   50 MB per minute, `pass1.pt` about 130 MB per 50 s group; step files only while a group runs (two newest, a few
   hundred MB). The whole 2:20 run folder: about 41 GB. The Loop never deletes it; H3MD Save Video Interp
   `delete_cache_after_save` does after the file is complete, otherwise delete the run folder (and old

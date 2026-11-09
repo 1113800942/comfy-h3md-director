@@ -142,11 +142,16 @@ changes:
 
 ### Cache: what is kept and how big
 * Where: `<drive>/H3MD_cache/resume_<id>/` (the drive with the most free space, or the `cache_dir` you set).
-* Per group: the decoded frames (`seg_XXX_frames.npy`, 12.5 MB per 1920×1088 frame = about **18 GB per minute** of
-  video; `cache_dtype = uint8` halves it), the final latent (about 0.2 GB per minute), and in `seg_XXX_progress/` the
+* Per group: the decoded frames (`seg_XXX_frames.npy`), the final latent (about 0.2 GB per minute), and in `seg_XXX_progress/` the
   low-res result `pass1.pt` (about 130 MB per 50 s group, kept so a preview, a redraw or a high-res-only change skips
   the low-res pass). Resume files of the current step exist only while a group runs.
-* Example: the 2 min 20 s video above left a 41 GB cache folder.
+* Frame size: the example workflows store them as 8-bit (`cache_dtype = uint8` in Loop Options): 6.3 MB per
+  1920×1088 frame, about **9 GB per minute** of video (the 2 min 20 s video above: about 21 GB). Compared on that
+  video: the saved video differs by at most 1/255 in a pixel value and an H.264 file of either is equally close to it
+  (40.7 dB) - no visible difference. Use `fp16` (12.5 MB per frame, about 18 GB per minute; the node's own default)
+  when you save 10-bit video (`yuv420p10le`), and keep `fp16` for a video you started with it: the cache format is
+  part of the resume settings, so switching mid-way re-renders every group.
+* Example: the 2 min 20 s video above left a 41 GB cache folder (fp16).
 * Every redraw moves the previous take of that group to `_replaced_<time>/` in the same folder (a full copy of the
   group: about 15 GB for a 53 s group at 1920×1088). Delete those folders when you have chosen.
 * H3MD never deletes the cache on its own: turn on `delete_cache_after_save` on H3MD Save Video Interp, or delete the

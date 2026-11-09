@@ -53,6 +53,16 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   longer a RIFE blend of both shots (one melted frame at every hard cut, in every version so far); it repeats the
   nearest original frame. Same frame count, timing and audio; also in H3MD Face Refine Save. 开插帧时，两个镜头之间的那
   一帧不再由 RIFE 把两个镜头混在一起（以前每个硬切都有一帧糊帧，所有版本都有），改用最近的原帧；帧数、时长、声音不变；修脸保存节点同样。
+* **8-bit frame cache in the example workflows / 示例工作流默认 8 位缓存**: Loop Options `cache_dtype = uint8` in both
+  example workflows (the node's own default stays fp16, so old workflows keep their caches). Half the disk: about 9 GB
+  per minute of 1920x1088 video instead of 18 GB (the 2:20 test: about 21 GB instead of 41 GB). Compared on that video:
+  the saved video differs by at most 1/255 per value and 10 s encoded from either cache is equally close to its input
+  (40.7 dB) - no visible difference. Keep fp16 for 10-bit output and for a video already started with fp16 (the cache
+  format is part of the resume settings). 两个示例工作流的 Loop Options 改成 `cache_dtype = uint8`（节点自己的默认值仍是
+  fp16，旧工作流的缓存照常能用）。缓存减半：1920x1088 每分钟约 9 GB（原来 18 GB；2 分 20 秒的测试片约 21 GB，原来 41 GB）。
+  在这条片子上对比：存出来的视频像素值最多差 1/255，两种缓存各编 10 秒，和原画面一样接近（40.7 dB），看不出区别。存 10 位
+  视频、或接着做一条用 fp16 开始的视频时，用 fp16（缓存格式算在续跑设置里）。
+
 * **Docs / 文档**: README step by step for seamless long video (preview → full → redraw → rerun → resume), what the
   cache keeps and how big it is (about 18 GB per minute at 1920×1088 in fp16; a 2:20 run left 41 GB; every redraw keeps
   the previous take of its group). README 加无接缝长视频的操作步骤（预览 → 完整版 → 局部重绘 → 重跑 → 续跑）和缓存说明
