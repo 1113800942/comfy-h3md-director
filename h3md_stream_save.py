@@ -66,6 +66,7 @@ REMOVED_INPUTS = ("source_fps", "preset", "cache_folder", "folder_overlap_source
                   "pingpong")   # pingpong: v2 layout of 2026-10-19 only, removed again the same day
 _RUN_DIR = re.compile(r"^(resume|run)_[0-9A-Za-z_]+$")
 _SEG_JSON = re.compile(r"^seg_(\d{3,})\.json$")
+_RUN_FILES = ("run.json", "run.json.tmp")   # the run's base seed (h3md_cache.SegmentCache.save_run_seed)
 
 
 # ---------------------------------------------------------------------------
@@ -906,7 +907,7 @@ def delete_cache_dir(path):
     if not _RUN_DIR.match(os.path.basename(path)) or not any(_SEG_JSON.match(n) for n in names):
         LOG.warning("%s %s does not look like a H3MD run cache; NOT deleted", _TAG, path)
         return False
-    if any(not n.startswith("seg_") for n in names):
+    if any(not n.startswith("seg_") and n not in _RUN_FILES for n in names):   # 11-09: run.json is ours too
         LOG.warning("%s %s holds non-H3MD files; NOT deleted", _TAG, path)
         return False
     gc.collect()

@@ -2,6 +2,12 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [Unreleased]
+* **Fix / 修复: `delete_cache_after_save` now really deletes the run cache.** The save nodes refused every run folder
+  ("holds non-H3MD files") because of the run's own `run.json` (its base seed), so the cache was always kept. Folders
+  with any other foreign file are still never deleted. 保存后删缓存现在真的会删：以前每个运行文件夹里都有自己的
+  `run.json`（记录种子），保存节点把它当成外来文件，一律不删。有其他外来文件的文件夹仍然不删。
+
 ## [0.4.3] — 2026-11-08
 * **Lighter Control Panel / 总控台更轻**: each LoRA dropdown now holds only its own LoRA until it is opened; the full
   `models/loras` list is filled in then. Before, every row carried the whole list (with ~450 LoRAs, 16-18 rows made
