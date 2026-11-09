@@ -83,7 +83,11 @@ generate them segment by segment, keep every finished segment on disk, and repai
 H3MD Director --plan--> H3MD Loop Sampler (+ H3MD Loop Options) --long video--> H3MD Save Video Interp
 ```
 
-## Seamless long video (window mode, beta)
+## Seamless long video — CCW: Chained Context Windows (window mode, beta)
+0.4.0's main feature. ComfyUI's core Context Windows render a long video as overlapping windows and average the
+overlaps; CCW runs the windows in time order and lets each window take over the overlap from the one before it, so
+nothing is averaged and nothing doubles.
+
 Tick **Seamless long video** at the top of the Director. Your plan stays exactly as it is; only how it is rendered
 changes:
 * Shots that continue each other are rendered **together on one timeline** with overlapping context windows, so there
@@ -108,7 +112,7 @@ changes:
 * Low-res preview and local redraw: see the steps below (node **H3MD Redraw / Preview**; the plan keys `"preview"` /
   `"redraw"` do the same when written by hand).
 * Frame interpolation (48 / 60 fps) never blends two shots at a hard cut: the frame between them repeats the nearest
-  original frame (0.3.9-beta; before, every hard cut got one frame of the two shots melted together).
+  original frame (0.4.0; before, every hard cut got one frame of the two shots melted together).
 * Memory: the result is decoded and written in ~10 s chunks, and the high-res pass plans its strips per window, so
   2K works on 64 GB RAM (measured: 21 s at 2560×1408 in 41 min on an RTX 5090).
 * A locked song that is also `<Audio N>` gives each window only its own stretch of the song (not the whole file), and

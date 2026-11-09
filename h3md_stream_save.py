@@ -75,7 +75,7 @@ _SEG_JSON = re.compile(r"^seg_(\d{3,})\.json$")
 def segments_info(cache_dir: str, indices, trims, overlap_source: str = "next", audio_crossfade_ms: int = 0,
                   hires_mode: str = "per_segment", cuts=None) -> dict:
     """The H3MD_SEGMENTS value: everything needed to rebuild the merge from disk (no tensors).
-    cuts (0.3.9-beta): per segment, the hard cuts INSIDE it (frames from the segment's own first frame, e.g. a
+    cuts (0.4.0): per segment, the hard cuts INSIDE it (frames from the segment's own first frame, e.g. a
     window-mode group's windowCuts); hard cuts between segments come from trims (0 = cut).  Older values have no
     'cuts' key: only the cuts between segments are known then."""
     out = {"version": INFO_VERSION, "cache_dir": os.path.abspath(cache_dir), "indices": [int(k) for k in indices],
@@ -185,7 +185,7 @@ class SegmentSource:
         return blocks, cut
 
     def hard_cuts(self):
-        """Merged-clip frame numbers where a new shot starts (0.3.9-beta): every segment after the first that is not a
+        """Merged-clip frame numbers where a new shot starts (0.4.0): every segment after the first that is not a
         continuation (trim 0), plus the cuts inside a segment (info 'cuts', e.g. a window-mode group) that fall in
         the frames this segment contributes.  Frame c = first frame of the new shot, so frames c-1 and c must never
         be blended by the interpolation."""
@@ -238,7 +238,7 @@ def target_positions(source_fps: float, target_fps: float, total_source_frames: 
 
 
 def skip_cuts(positions, cuts):
-    """0.3.9-beta: never interpolate across a hard cut.  positions [(src1, src2, factor)]; cuts = frames where a new
+    """0.4.0: never interpolate across a hard cut.  positions [(src1, src2, factor)]; cuts = frames where a new
     shot starts.  An output frame between frames c-1 and c (a blend of two different shots) becomes a plain copy of the
     nearer source frame (the earlier one at exactly half way); timing, frame count and audio stay the same.
     -> (new positions, number of output frames changed)."""

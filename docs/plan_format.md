@@ -49,7 +49,7 @@ Problems are listed and nothing is changed for you: a length that is not 5 + 17n
 * A locked song: `{"id", "mode": "locked", "offset"}` where `offset` (seconds) = where this shot starts in the song = the previous shot's offset + (its length − this shot's overlapIn) / 24.
 * Each shot lists the media **ids** it uses; tags are numbered per shot in order (pictures, then videos — a video's own sound takes the next `<Audio>` number — then audios).
 * File names are looked up in ComfyUI's `input/` folder; upload the files there (or with the library's Upload…) after importing.
-* Window mode (0.3.9-beta, the Director's "Seamless long video" switch): add `"windowMode": true` (same as
+* Window mode (0.4.0, the Director's "Seamless long video" switch): add `"windowMode": true` (same as
   `{"length": 243, "overlap": 22, "highLength": 175, "highOverlap": 22}`: low-res windows chained, 接续窗口). Continued
   shots are rendered on one timeline, hard cuts stay cuts; inside a long shot time each action from the shot's start
   (`[8s] ...` or `At 00:07.9 ...`). `"preview": true` = low-res only; `"redraw": [[20, 24]]` = render seconds 20–24 of

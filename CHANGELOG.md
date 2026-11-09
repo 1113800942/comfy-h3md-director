@@ -2,8 +2,14 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
-## [0.3.9-beta] — 2026-11-08 (window mode, includes 0.3.8)
+## [0.4.0] — 2026-11-08 — CCW: Chained Context Windows (seamless long video, includes 0.3.8)
 **In short / 简要：**
+* **CCW = Chained Context Windows (接续窗口)**: the name of this release. ComfyUI's core Context Windows render a long
+  video as overlapping windows and average the overlaps; CCW runs the windows in time order and each window takes
+  over the overlap from the one before it - no averaging, so no double images. With it, continued shots are rendered
+  on one timeline without seams (below). 本版名字。ComfyUI 核心的 Context Windows 把长视频分成互相重叠的窗口，
+  重叠部分两边平均；CCW 按时间顺序跑窗口，重叠部分接手前一个窗口的结果，不平均，所以没有重影。续接的镜头因此在一条
+  时间线上生成，没有接缝（见下）。
 * **接续窗口 (default on, `"chain": false` turns it off)**: in the low-res pass the windows run in time order and a
   window's overlap with the windows before it takes their result of the same step (input and output) instead of being
   averaged - averaging two different pictures was the ghosting / double layers of the 2:20 test video. Same amount of

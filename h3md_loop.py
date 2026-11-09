@@ -572,7 +572,7 @@ def _to_cpu(latent: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 def check_redraw_base(cache, k, man: dict, seg: dict, where=""):
-    """Local redraw needs this segment finished in the cache with the same length and hard cuts (0.3.9-beta: the
+    """Local redraw needs this segment finished in the cache with the same length and hard cuts (0.4.0: the
     prompt, pictures and reference media may differ - only the redrawn seconds use the new ones).  The frame size is
     checked by redraw_latent."""
     if not man.get("key") or not cache.has(k, man["key"]):
@@ -992,7 +992,7 @@ class H3MDLoopSampler:
             if key is not None and preview:
                 key = C._sha({"key": key, "preview": True})
             # window-exp local redraw: windowMode.redraw [[start_s, end_s], ...] re-renders only those seconds of the
-            # cached segment.  0.3.9-beta: the prompt, the pictures and the reference media may have changed since the
+            # cached segment.  0.4.0: the prompt, the pictures and the reference media may have changed since the
             # segment was rendered (only the redrawn seconds use the new ones); length, size and hard cuts may not.
             redraw = WIN.redraw_ranges(plan.get("windowMode") if isinstance(plan, dict) else None,
                                        int(seg["startFrame"]), int(seg["length"]))
@@ -1010,7 +1010,7 @@ class H3MDLoopSampler:
                 raise ValueError(f"{_TAG} {where}: local redraw needs the disk cache (cache_mode=disk)")
             if not redraw and cache is not None and key is not None:
                 # a segment redrawn earlier keeps its latest version: also once 'redraw' is cleared or the Redraw /
-                # Preview node is bypassed (0.3.9-beta fix: before, clearing 'redraw' re-rendered the original take
+                # Preview node is bypassed (0.4.0 fix: before, clearing 'redraw' re-rendered the original take
                 # over the redrawn one)
                 man = cache.manifest(k) or {}
                 if man.get("base_key") == key and man.get("key"):
@@ -1137,7 +1137,7 @@ class H3MDLoopSampler:
             if redraw:   # local redraw: the cached segment is the starting point, only the ranges are re-rendered
                 latent, active, seg_seed = redraw_latent(cache, k, latent, redraw, where)
                 WIN.set_active([low_res_model, high_res_model], active)
-                old_low = cache.load_lowres(k)   # 0.3.9-beta: the kept rows of the low-res pass = its own result
+                old_low = cache.load_lowres(k)   # 0.4.0: the kept rows of the low-res pass = its own result
                 if isinstance(old_low, torch.Tensor):
                     extra["h3md_low_res_base"] = old_low
                 else:
@@ -1306,7 +1306,7 @@ class H3MDLoopSampler:
             self._segments_info = SS.segments_info(cache.dir, indices, trims, self._post["merge_overlap_source"],
                                                    audio_crossfade_ms,
                                                    "per_segment",
-                                                   # 0.3.9-beta: hard cuts inside a segment (window-mode groups) so
+                                                   # 0.4.0: hard cuts inside a segment (window-mode groups) so
                                                    # the save node never interpolates across them
                                                    [segs[k].get("windowCuts") or [] for k in indices])
             # never concatenated in RAM: audio only (small); the frames stay on disk for H3MD Save Video Interp

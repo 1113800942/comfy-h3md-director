@@ -1057,7 +1057,7 @@ def refined_stream_save(info, path, refiner, interpolate=False, target_fps=S.SOU
     drift_rows = S.attach_drift(base_src, drift_correct, drift_strength)   # v0.2.0: corrected before the face refine
     src = RefinedSource(base_src, refiner)
     n = src.total
-    _hc = getattr(base_src, "hard_cuts", None)   # 0.3.9-beta: no interpolated frame across a hard cut
+    _hc = getattr(base_src, "hard_cuts", None)   # 0.4.0: no interpolated frame across a hard cut
     cuts, cut_copies = (list(_hc()) if callable(_hc) else []), 0
     source_fps = float(src.fps)
     out_fps = float(target_fps)

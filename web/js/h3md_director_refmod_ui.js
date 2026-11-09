@@ -947,7 +947,7 @@ class DirectorEditor {
     const p = this.plan;
     const box = h("input", { type: "checkbox", "data-key": "window-mode",
       onchange: (e) => {
-        if (e.target.checked) p.windowMode = { length: 243, overlap: 22, highLength: 175, highOverlap: 22 };   // 0.3.9: low-res windows chained (接续窗口), overlap 22
+        if (e.target.checked) p.windowMode = { length: 243, overlap: 22, highLength: 175, highOverlap: 22 };   // 0.4.0 CCW: low-res windows chained (接续窗口), overlap 22
         else delete p.windowMode;
         this.commit();
       } });

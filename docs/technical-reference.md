@@ -17,7 +17,7 @@ Multi-segment MiniMax H3 pipeline nodes (category `MiniMax H3/H3MD`):
 | H3MDLoopSampler | H3MD Loop Sampler (legacy) | the original single node, inputs unchanged, kept so saved workflows load exactly; same computation |
 | H3MDSemanticBridge | H3MD Semantic Bridge | chainable Semantic Bridge (six-tensor MLP / trainer MLP / T8 transformer) -> Loop Sampler `semantic_bridge` |
 | H3MDContextWindows | H3MD Context Windows (window mode, exp) | the window-mode patch on one MODEL for hand-built graphs (243 / 22, 接续窗口 on); the Loop applies it itself when the plan has `windowMode` |
-| H3MDRedrawPreview | H3MD Redraw / Preview 局部重绘 / 低清预览 | between the Director's `plan` and the Loop's `plan`: low-res preview on/off and local redraw seconds (writes `windowMode.preview` / `windowMode.redraw`); bypassed = plan unchanged (0.3.9-beta) |
+| H3MDRedrawPreview | H3MD Redraw / Preview 局部重绘 / 低清预览 | between the Director's `plan` and the Loop's `plan`: low-res preview on/off and local redraw seconds (writes `windowMode.preview` / `windowMode.redraw`); bypassed = plan unchanged (0.4.0) |
 | H3MDLowVRAMLoraLoader | H3MD LowVRAM LoRA Loader | token-sliced bypass LoRA loader (same behaviour as H3LowVRAMBypassLoraLoader) |
 
 ### Director editor (Phase 2 UI)
@@ -327,11 +327,11 @@ Not connected = off: behaviour and segment-cache key unchanged.
   `[H3MD SemanticBridge] ON (2 bridges, CPU): ...` once and per segment
   `[H3MD SemanticBridge] segment N/M: 2 bridge(s) applied to 1 tensor(s), T token(s); cos(native, bridged) 0.97..`;
   summary `semantic_bridge` per segment; `... NOT applied ...` = no 5120-dim tensor found.
-* 0.3.9-beta: the Control Panel's style buttons no longer switch a bridge on (its `semantic_bridge` output is always
+* 0.4.0: the Control Panel's style buttons no longer switch a bridge on (its `semantic_bridge` output is always
   off; kept so old links stay). The example workflows have the bridge nodes wired and bypassed: un-bypass (Ctrl+B) to
   use one. The bridge's author does not support reference-conditioned use (Ref2VA, reference audio / lip-sync).
 
-### Window mode (`h3md_window.py`, `h3md_progress.py`; plan key `windowMode`; 0.3.9-beta)
+### Window mode (`h3md_window.py`, `h3md_progress.py`; plan key `windowMode`; 0.4.0)
 One continuous take (continued shots up to the next hard cut, or a group of shots split only at hard cuts) is
 rendered in ONE sampling run with the core MiniMax H3 context windows (ComfyUI 0.44+), instead of segment by segment.
 * Plan: `"windowMode": true` or `{"length": 243, "overlap": 22, "highLength": 175, "highOverlap": 22, "chain": true}`
@@ -365,7 +365,7 @@ rendered in ONE sampling run with the core MiniMax H3 context windows (ComfyUI 0
   `weights_only=True`; a different cache key wipes the folder. Resume needs `resume_from_cache` on (the run folder is
   then `resume_<settings hash>`): finished groups are read from the cache, the interrupted group restarts at the step
   it was in (11-07 test: the result is frame-identical to an uninterrupted run).
-* **Node `H3MD Redraw / Preview`** (`H3MDRedrawPreview`, 0.3.9-beta; between the Director's `plan` and the Loop's
+* **Node `H3MD Redraw / Preview`** (`H3MDRedrawPreview`, 0.4.0; between the Director's `plan` and the Loop's
   `plan`, bypassed in both example workflows): `preview` (BOOLEAN) and `redraw` (STRING, seconds on the whole video:
   `20-24`, `1:12-1:15`, several ranges separated by commas; overlapping ranges merge, the end is clipped to the video)
   write `windowMode.preview` / `windowMode.redraw` into a copy of the plan. Both off / empty or bypassed = the plan
@@ -374,7 +374,7 @@ rendered in ONE sampling run with the core MiniMax H3 context windows (ComfyUI 0
   finished run).
 * Local redraw (`windowMode.redraw`): needs the group finished in the cache (else an error, nothing is rendered) with
   the same length, frame size and hard cuts (the manifest records the group's `cuts`; a moved cut is refused). The
-  prompt, pictures and reference video / audio may have changed since (0.3.9-beta): the windows of the redrawn seconds
+  prompt, pictures and reference video / audio may have changed since (0.4.0): the windows of the redrawn seconds
   are conditioned on the current plan, everything else keeps the cached take, and the log says so. A locked song is
   taken from the current plan for the redrawn seconds, so changing the song is not supported. The redrawn take is
   recorded under the current plan's key (cleared `redraw` = cache hit). The group's cached final latent gets a noise mask: 1 inside the ranges (snapped outwards to
@@ -383,7 +383,7 @@ rendered in ONE sampling run with the core MiniMax H3 context windows (ComfyUI 0
   (`seg_XXX_lowres.pt`), not the downscaled final latent; the model sees the kept frames on both sides as known frames
   and joins the new seconds to them, like a continuation prefix. (11-08 first test with a 3-latent soft ramp and the
   downscaled final latent as context: double exposures at both edges and a washed-out, doubled picture inside; both
-  changed in 0.3.9-beta.) Frames outside the ranges come back identical (the VAE decoder also re-decodes about 10
+  changed in 0.4.0.) Frames outside the ranges come back identical (the VAE decoder also re-decodes about 10
   frames on each side, with tiny differences); only the changed ~10 s decode chunks are decoded again. The previous version of the group is moved to `_replaced_<time>/` in the run folder (it keeps
   the whole group's files, so each redraw costs one more copy of that group on disk). Every run with `redraw` filled
   in tries a new seed; clear it (or bypass the node) and the latest version is used as the group's result. Groups the
@@ -447,7 +447,7 @@ Save Video 的话出来的不是视频，运行时日志会警告一次，请改
 （`cache_mode=ram` 例外：仍在内存里拼好从 `images` 出，`long video` 为空。）`crf` 新建节点默认 19（和 Video Combine 一样）。
 * 第一个开关 `interpolate`：关 = 不插帧；开 = 用 RIFE 插帧。插帧选项（`scale`、`model_name`、`batch_size`、
   `use_fp16`）在关的时候变灰。`source_fps` 只是一行只读显示“24 (fixed)”（H3MD 永远是 24 fps，不是输入）。
-* 硬切处不插帧（0.3.9-beta）：两个镜头之间的那一帧不再用 RIFE 混出来（以前会糊成两个镜头扭在一起），改用离它最近的原帧
+* 硬切处不插帧（0.4.0）：两个镜头之间的那一帧不再用 RIFE 混出来（以前会糊成两个镜头扭在一起），改用离它最近的原帧
   （正好在中间时用前一帧）；帧数、时长、声音不变。硬切位置来自 Loop：段与段之间的硬切，加上无接缝长视频一组里面的硬切
   （`long video` 里的 `cuts`）。日志一行 `hard cut(s) at source frames [...]`，结束报告里有 `hard_cuts` /
   `cut_frames_copied`。修脸保存节点同样处理。
@@ -519,7 +519,7 @@ H3MD Loop Sampler --long video--> H3MD Save Video Interp
   (frame, frame, timestep) of every output frame equal a one-pass RIFE run (`int(duration * target_fps)`, the
   wrapper's own `_calculate_target_frame_positions`); each chunk carries its last source frame into the next.
   `target_fps` 24 = no interpolation (like RIFE).
-* **No interpolation across a hard cut** (0.3.9-beta, `skip_cuts`): an output frame that falls between frames c-1 and c
+* **No interpolation across a hard cut** (0.4.0, `skip_cuts`): an output frame that falls between frames c-1 and c
   of two different shots is a plain copy of the nearer source frame (the earlier one at exactly half way) instead of a
   RIFE blend of the two shots; frame count, timing and audio are unchanged. The cuts come from the Loop: every
   segment after the first with trim 0, plus the cuts inside a segment that the `long video` value lists per segment

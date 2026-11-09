@@ -98,7 +98,7 @@ non_diegetic_music:
     several shots, each with its own prompt.
   - One continuous camera take per shot (`[Shot 1]` only), no sub-shots.
 
-### Window mode (0.3.9 beta: the Director's "Seamless long video" switch)
+### Window mode (0.4.0 CCW: the Director's "Seamless long video" switch)
 - Write the plan as usual: shots, continued shots (`overlapIn` 22/39) and hard cuts (`overlapIn` 0). With the switch on
   (plan `"windowMode": {"length": 243, "overlap": 22, "highLength": 175, "highOverlap": 22}`) H3MD joins continued
   shots into one timeline sampled in one run (no seams) and keeps hard cuts as clean cuts. A group runs up to about

@@ -1,4 +1,4 @@
-"""0.3.9-beta: frame interpolation never blends two shots at a hard cut (save node + face-refine save)."""
+"""0.4.0: frame interpolation never blends two shots at a hard cut (save node + face-refine save)."""
 import os
 import sys
 import tempfile

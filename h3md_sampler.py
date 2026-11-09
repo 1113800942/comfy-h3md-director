@@ -144,7 +144,7 @@ def check_low_res_head(prefix, latent: dict, lowres_scale: float):
 
 
 def check_low_res_base(base, latent: dict, lowres_scale: float):
-    """Local redraw (0.3.9-beta): None when `base` ([B,24,T,h,w], the whole segment on the low grid) can supply the
+    """Local redraw (0.4.0): None when `base` ([B,24,T,h,w], the whole segment on the low grid) can supply the
     kept rows of the low-res pass, else the reason."""
     if not isinstance(base, torch.Tensor) or base.ndim != 5:
         return f"unexpected base {type(base).__name__}"

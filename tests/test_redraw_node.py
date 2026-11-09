@@ -1,4 +1,4 @@
-"""0.3.9-beta: H3MD Redraw / Preview node (low-res preview + local redraw outside the Director's editor)."""
+"""0.4.0: H3MD Redraw / Preview node (low-res preview + local redraw outside the Director's editor)."""
 import json
 import sys
 import unittest
@@ -114,7 +114,7 @@ class WorkflowTests(unittest.TestCase):
 
 
 class LowResBaseTests(unittest.TestCase):
-    """0.3.9-beta: a local redraw's low-res pass keeps the segment's own low-res result on every kept row."""
+    """0.4.0: a local redraw's low-res pass keeps the segment's own low-res result on every kept row."""
 
     def test_write_low_base(self):
         import torch

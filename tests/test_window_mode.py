@@ -30,7 +30,7 @@ class Normalize(unittest.TestCase):
     def test_defaults_and_snap(self):
         self.assertIsNone(WIN.normalize_window_mode(None))
         self.assertIsNone(WIN.normalize_window_mode(False))
-        wm = WIN.normalize_window_mode(True)     # 0.3.9-beta: = the Director switch, low 243 / 22 chained, high 175 / 22
+        wm = WIN.normalize_window_mode(True)     # 0.4.0: = the Director switch, low 243 / 22 chained, high 175 / 22
         self.assertEqual((wm["length"], wm["overlap"], wm["chain"]), (243, 22, True))
         self.assertEqual((wm["highLength"], wm["highOverlap"]), (175, 22))
         self.assertEqual(WIN.normalize_window_mode({}), wm)
@@ -46,7 +46,7 @@ class Normalize(unittest.TestCase):
         self.assertEqual((wm["length"], wm["highLength"], wm["highOverlap"]), (294, 175, 56))
 
     def test_manual_node_defaults_chain(self):
-        """0.3.9-beta: the manual Context Windows node defaults to the Loop's low-res pass (243 / 22, chain on)."""
+        """0.4.0: the manual Context Windows node defaults to the Loop's low-res pass (243 / 22, chain on)."""
         req = WIN.H3MDContextWindows.INPUT_TYPES()["required"]
         self.assertEqual((req["context_length"][1]["default"], req["context_overlap"][1]["default"]), (243, 22))
         self.assertTrue(req["chain"][1]["default"])
@@ -1043,12 +1043,12 @@ class ChainWindows(unittest.TestCase):
         self.assertTrue(wm["chain"])
         self.assertEqual(wm["chainPin"], 1.0)
         self.assertEqual(wm["overlap"], 22)
-        self.assertTrue(WIN.normalize_window_mode({})["chain"])            # default on since 0.3.9-beta
+        self.assertTrue(WIN.normalize_window_mode({})["chain"])            # default on since 0.4.0
         self.assertFalse(WIN.normalize_window_mode({"chain": False})["chain"])
 
 
 class ChainSpans(unittest.TestCase):
-    """0.3.9-beta: with 接续窗口 a timed action belongs to the window that generates its frames (previous window's end
+    """0.4.0: with 接续窗口 a timed action belongs to the window that generates its frames (previous window's end
     .. its end); without it, to the window owning the middle of the overlap."""
 
     def test_spans(self):
@@ -1224,7 +1224,7 @@ class LocalRedraw(unittest.TestCase):
         self.assertEqual(float(vm[60]), 1.0)
         self.assertEqual(float(vm[0]), 0.0)
         self.assertEqual(float(vm[101]), 0.0)
-        self.assertEqual(sorted({float(x) for x in vm}), [0.0, 1.0])   # 0.3.9-beta: hard edges (no ramp)
+        self.assertEqual(sorted({float(x) for x in vm}), [0.0, 1.0])   # 0.4.0: hard edges (no ramp)
         self.assertEqual(float(vm[active[0]]), 1.0)
         self.assertEqual(float(vm[active[0] - 1]), 0.0)
         self.assertEqual(float(vm[active[1]]), 0.0)

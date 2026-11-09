@@ -118,7 +118,7 @@ class TailLockTests(unittest.TestCase):
         self.assertFalse(torch.equal(v[:, :, tt:-tt], streams(lat)[0][:, :, tt:-tt].to(v)))   # middle generated
 
     def test_sampler_redraw_low_res_base(self):
-        """0.3.9-beta local redraw: the low-res pass keeps the segment's own low-res result on every kept row (not the
+        """0.4.0 local redraw: the low-res pass keeps the segment's own low-res result on every kept row (not the
         downscaled final latent); the kept rows of the output are exact."""
         import comfy.nested_tensor as NT
         t = D.video_tokens(SEG_LEN)
@@ -322,7 +322,7 @@ class LoopRerunTests(unittest.TestCase):
         self.assertEqual(len(FakeSampler.calls), 0)
 
     def test_long_video_carries_inner_cuts(self):
-        """0.3.9-beta: the Loop hands each segment's windowCuts to the save node (no interpolation across them)."""
+        """0.4.0: the Loop hands each segment's windowCuts to the save node (no interpolation across them)."""
         import h3md_stream_save as SS
         plan = make_plan(3)
         plan["segments"][0]["windowCuts"] = [51]
@@ -334,7 +334,7 @@ class LoopRerunTests(unittest.TestCase):
         src.close()
 
     def test_redraw_kept_after_clearing(self):
-        """0.3.9-beta: a local redraw stays the group's result once 'redraw' is cleared (node bypassed); before, the
+        """0.4.0: a local redraw stays the group's result once 'redraw' is cleared (node bypassed); before, the
         next run re-rendered the original take over it."""
         import copy
         import h3md_window as WIN
@@ -366,7 +366,7 @@ class LoopRerunTests(unittest.TestCase):
         self.assertTrue(torch.equal(self.latent(0)[0], new0[0]))   # ... and the redrawn take is kept
 
     def test_redraw_with_a_changed_prompt(self):
-        """0.3.9-beta: a local redraw may use a changed prompt / pictures (only the redrawn seconds use them); clearing
+        """0.4.0: a local redraw may use a changed prompt / pictures (only the redrawn seconds use them); clearing
         'redraw' afterwards keeps the new take; moved hard cuts are refused."""
         import copy
         import h3md_window as WIN

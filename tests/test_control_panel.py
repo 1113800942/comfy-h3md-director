@@ -88,7 +88,7 @@ def test_outputs_and_fps_lock():
 
 
 def test_styles_switch_no_semantic_bridge():
-    """0.3.9-beta: no style turns a semantic bridge on (the output stays, always off)."""
+    """0.4.0: no style turns a semantic bridge on (the output stays, always off)."""
     node = CP.H3MDControlPanel()
     for style in CP.STYLES:
         assert CP.BRIDGES[style] is None and CP.bridge_for(style) is None

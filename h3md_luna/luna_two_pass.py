@@ -136,7 +136,7 @@ def _write_low_head(low_video, low_mask, head_latent):
 
 
 def _write_low_base(low_video, low_mask, base_latent):
-    """H3MD local redraw (0.3.9-beta): every KEPT row (mask 0) of the low-res pass comes from the segment's own native
+    """H3MD local redraw (0.4.0): every KEPT row (mask 0) of the low-res pass comes from the segment's own native
     low-res result instead of the downscaled final latent (a trilinear downscale of the final latent is not what the
     low-res pass makes; as context it gave a washed-out, doubled redraw in the 11-08 test)."""
     base = _split(base_latent["samples"])[0][0]

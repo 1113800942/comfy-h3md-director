@@ -1,4 +1,4 @@
-"""0.3.9-beta (YJ 11-08 21:18): the example workflows cache frames as uint8 (half the disk, no visible difference in
+"""0.4.0 (YJ 11-08 21:18): the example workflows cache frames as uint8 (half the disk, no visible difference in
 the saved video - E:\\test\\20261108_uint8缓存对比).  The node's own default stays fp16 for old workflows."""
 import json
 import sys

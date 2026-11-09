@@ -1,7 +1,7 @@
-"""H3MD window mode (window-exp, 2026-11-07; 0.3.9-beta: 接续窗口 default).
+"""H3MD window mode (window-exp, 2026-11-07; 0.4.0: 接续窗口 default).
 
 Window mode renders one whole shot in a single sampling run with the core MiniMax H3 context windows: every
-denoising step goes over all windows, so there is no continuation seam.  Low-res pass (0.3.9-beta): 接续窗口 - the
+denoising step goes over all windows, so there is no continuation seam.  Low-res pass (0.4.0): 接续窗口 - the
 windows run in time order and a window's overlap with the windows before it is pinned to their result of the same
 step (no averaging, so no double images; overlap 22).  High-res pass: the core's averaged windows (175 / 22; it only
 refines the upscaled low-res result, 11-08 tests showed no double images there).
@@ -15,7 +15,7 @@ H3MD adds these things on top of the core MiniMaxH3ContextWindows patch:
    model function, e.g. BFS / TARA temporal alignment, read payload["layout"] first).
 3. Window prompts.  A segment may carry several prompts with start times (plan segment "windowPrompts").  The
    encoder tags each conditioning with its frame span (key SPAN_KEY); each window uses the prompt whose span holds
-   the window's centre (chained low-res windows: the window's last frame, 0.3.9-beta), instead of the core's even
+   the window's centre (chained low-res windows: the window's last frame, 0.4.0), instead of the core's even
    split by count.  Without it every window re-plays the whole
    action list of the one prompt (11-07 test: the hair-brush gesture came back every window).
 
@@ -92,7 +92,7 @@ def normalize_window_mode(value):
     out["length"] = _round_17(out["length"], 22)
     out["overlap"] = min(_round_17(out["overlap"], 5), out["length"] - 17)
     # 11-07: the high-res pass may need a smaller window than low-res (243 filled a 32 GB card at 1088x1664).
-    # 0.3.9-beta: not given -> 175 / 22 (what the Director writes), unless the plan set the low-res value itself
+    # 0.4.0: not given -> 175 / 22 (what the Director writes), unless the plan set the low-res value itself
     given = value if isinstance(value, dict) else {}
     hl = out["highLength"] or (out["length"] if given.get("length") is not None else HIGH_LENGTH)
     out["highLength"] = _round_17(hl, 22)
@@ -257,7 +257,7 @@ def window_spans(total_frames: int, length: int, overlap: int, cuts=(), chain: b
 
 
 # ------------------------------------------------------------------------------------------- local redraw
-REDRAW_RAMP = 0   # latents of soft mask on each side of a redrawn range.  0.3.9-beta: 0 (hard edges).  The 11-08
+REDRAW_RAMP = 0   # latents of soft mask on each side of a redrawn range.  0.4.0: 0 (hard edges).  The 11-08
                   # 2:20 test with 3 showed double exposures in the ramp: a fractional noise mask mixes the new take
                   # and the kept one at every step.  With hard edges the model sees the kept frames on both sides as
                   # known frames (like a continuation prefix / rerun tail lock) and joins the new seconds to them.
@@ -929,7 +929,7 @@ def wrap_models(window_mode: dict, low, high):
 
 class H3MDContextWindows:
     """Manual node: the same patch on one MODEL (for hand-built graphs; the Loop applies it itself in window mode).
-    0.3.9-beta: defaults = the Loop's low-res pass (243 / 22, 接续窗口 on); `chain` is the last input, so graphs saved
+    0.4.0: defaults = the Loop's low-res pass (243 / 22, 接续窗口 on); `chain` is the last input, so graphs saved
     before keep their values and get chain on."""
 
     @classmethod
@@ -1018,7 +1018,7 @@ def plan_seconds(plan) -> float | None:
 
 
 class H3MDRedrawPreview:
-    """0.3.9-beta: low-res preview and local redraw as their own node (YJ 11-08: not on the Director's editor, so the
+    """0.4.0: low-res preview and local redraw as their own node (YJ 11-08: not on the Director's editor, so the
     old interface stays as it is).  Put it between the Director's 'plan' and the Loop's 'plan'.  Bypassed or both
     switches off = the plan goes through unchanged."""
 
