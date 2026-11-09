@@ -18,7 +18,7 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   images, same speed per window. 低清阶段按时间顺序跑窗口，重叠区直接用前一个窗口这一步的结果，不再两边平均（平均两份
   不同的画面就是 2 分 20 秒测试片里的重影）；计算量不变；低清默认重叠 22（关掉时 56）；带时间的动作交给真正画那几帧的
   窗口。11-08 实测：2 分 20 秒片子里的 27 秒和两次转身（转圈、背影转面对面）都没有重影，每个窗口速度不变。
-* **Seamless long video (window mode, beta)**: one switch on the Director. Continued shots are rendered together on
+* **Seamless long video (window mode, beta; needs ComfyUI 0.44+)**: one switch on the Director. Continued shots are rendered together on
   one timeline (no continuation seams); hard cuts stay cuts; long plans are grouped only at hard cuts. 导演台一个开关：
   续接的镜头在同一条时间线上一起生成（没有续接接缝）；硬切照常；长计划只在硬切处分组。
 

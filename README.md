@@ -38,7 +38,7 @@ generate them segment by segment, keep every finished segment on disk, and repai
 > or ComfyUI-Manager → **Custom Nodes Manager** → search **H3MD Director**.
 
 1. No `pip install` is needed.
-2. You need a ComfyUI version with MiniMax H3 support (0.43 or newer recommended).
+2. You need a ComfyUI version with MiniMax H3 support (0.43 or newer; **0.44 or newer for Seamless long video**).
 3. Open an example workflow: ComfyUI **Templates** → `ComfyUI-H3MD-Director`, or drag one from
    [`example_workflows/`](example_workflows) into ComfyUI. **New here? Start with `H3MD Director simple`** (v0.3):
    only three things on the canvas – the **H3MD Control Panel** (size, fps / interpolation, face refine, seed, which
@@ -208,7 +208,7 @@ changes:
 
 | Node pack | What it does in the workflows | Needed? | Without it |
 |---|---|---|---|
-| ComfyUI 0.43+ (core MiniMax H3 nodes) | models, sampler, VAE | **required** | — |
+| ComfyUI 0.43+ (core MiniMax H3 nodes; 0.44+ for Seamless long video) | models, sampler, VAE | **required** | — |
 | H3MD Director (this pack) | Director, Loop Sampler, Save Video Interp, depth / SAM3 motion copy | **required** | — |
 | [ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) | SageAttention and chunked feed-forward patches (less VRAM) | recommended (simple + full) | runs, but needs more VRAM; the SageAttention patch also needs the SageAttention package, otherwise bypass that node |
 | [ComfyUI-ClipProj](https://github.com/nicolab28/ComfyUI-ClipProj) | 4B text encoder projection, saves 10+ GB VRAM | only with the 4B encoder | use the 32B encoder |

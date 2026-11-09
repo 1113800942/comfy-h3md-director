@@ -38,7 +38,7 @@
 > 或者 ComfyUI-Manager → **Custom Nodes Manager** → 搜 **H3MD Director**。
 
 1. 不需要 `pip install`。
-2. ComfyUI 需要支持 MiniMax H3 的版本（建议 0.43 或更新）。
+2. ComfyUI 需要支持 MiniMax H3 的版本（0.43 或更新；**无接缝长视频需要 0.44 或更新**）。
 3. 打开示例工作流：ComfyUI **模板 / Templates** → `ComfyUI-H3MD-Director`，或者把
    [`example_workflows/`](example_workflows) 里的文件拖进 ComfyUI。**第一次用请先开 `H3MD Director simple`（v0.3 清爽版）**：
    画布上只有三样——**总控台**（尺寸、帧数 / 插帧、修脸、种子、跑哪几段、风格按钮 均衡 / 高动态 / 动作复刻、低清和高清两张
@@ -148,7 +148,7 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
 
 | 节点包 | 在工作流里做什么 | 要不要装 | 不装会怎样 |
 |---|---|---|---|
-| ComfyUI 0.43+（自带 MiniMax H3 节点） | 模型、采样器、VAE | **必需** | — |
+| ComfyUI 0.43+（自带 MiniMax H3 节点；无接缝长视频需要 0.44+） | 模型、采样器、VAE | **必需** | — |
 | H3MD Director（本包） | 导演台、循环采样、保存、深度 / SAM3 动作复刻 | **必需** | — |
 | [ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) | SageAttention 和 FeedForward 分块补丁（省显存） | 推荐（清爽版和完整版都用） | 能跑，但显存占用更高；SageAttention 补丁还需要装 SageAttention 包，没装就把那个节点绕过 |
 | [ComfyUI-ClipProj](https://github.com/nicolab28/ComfyUI-ClipProj) | 4B 文本编码器投影，省 10 GB 以上显存 | 只有用 4B 编码器时需要 | 改用 32B 编码器 |
