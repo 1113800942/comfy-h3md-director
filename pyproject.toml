@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-h3md-director"
 description = "H3MD Director: long multi-shot MiniMax H3 video - visual Director, seamless long takes with Chained Context Windows (CCW, ComfyUI 0.44+), redraw just a few seconds, disk cache and resume, streamed save with optional RIFE interpolation."
-version = "0.4.1"
+version = "0.4.2"
 license = { text = "AGPL-3.0-or-later" }
 authors = [{ name = "YJ" }]
 requires-python = ">=3.10"

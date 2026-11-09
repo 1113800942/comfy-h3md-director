@@ -87,7 +87,7 @@ part is kept on disk, and you repair only what went wrong — down to a few seco
 H3MD Director --plan--> H3MD Loop Sampler (+ H3MD Loop Options) --long video--> H3MD Save Video Interp
 ```
 
-## Seamless long video — CCW: Chained Context Windows (window mode, beta)
+## Seamless long video — CCW: Chained Context Windows (window mode)
 0.4.0's main feature. ComfyUI's core Context Windows render a long video as overlapping windows and average the
 overlaps; CCW runs the windows in time order and lets each window take over the overlap from the one before it, so
 nothing is averaged and nothing doubles.

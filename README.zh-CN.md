@@ -80,7 +80,7 @@
 H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--> H3MD Save Video Interp
 ```
 
-## 无接缝长视频 — CCW：Chained Context Windows（接续窗口；窗口模式，测试版）
+## 无接缝长视频 — CCW：Chained Context Windows（接续窗口；窗口模式）
 0.4.0 的主要功能。ComfyUI 核心的 Context Windows 把长视频分成互相重叠的窗口，重叠部分两边平均；CCW 按时间顺序跑窗口，重叠部分接手前一个窗口的结果，不平均，所以不会出现重影。
 
 在导演台顶部勾选 **无接缝长视频**。计划完全不用改，变的只是生成方式：

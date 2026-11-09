@@ -2,6 +2,11 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.4.2] — 2026-11-08
+* **Window mode is no longer marked beta / 窗口模式不再标"测试版"**: 0.4.0 is the finished version. README headings and the
+  manual node's name (`H3MD Context Windows (window mode)`, class name unchanged - saved workflows keep working) drop
+  "beta" / "exp". 0.4.0 是定版：README 标题和手动节点的显示名去掉 "beta" / "exp"（类名不变，保存的工作流照常能用）。
+
 ## [0.4.1] — 2026-11-08
 * **Clear message on ComfyUI older than 0.44 / ComfyUI 低于 0.44 时给清楚的提示**: with "Seamless long video" ticked, the
   Loop now stops before anything runs with "needs ComfyUI 0.44 or newer" (this ComfyUI's version and what to do)

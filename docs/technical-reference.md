@@ -16,7 +16,7 @@ Multi-segment MiniMax H3 pipeline nodes (category `MiniMax H3/H3MD`):
 | H3MDLoopOptions | H3MD Loop Options | advanced Loop switches (Alpha/Beta prefix, handoff, seams, ref windows, tiling, cache details) -> `options` |
 | H3MDLoopSampler | H3MD Loop Sampler (legacy) | the original single node, inputs unchanged, kept so saved workflows load exactly; same computation |
 | H3MDSemanticBridge | H3MD Semantic Bridge | chainable Semantic Bridge (six-tensor MLP / trainer MLP / T8 transformer) -> Loop Sampler `semantic_bridge` |
-| H3MDContextWindows | H3MD Context Windows (window mode, exp) | the window-mode patch on one MODEL for hand-built graphs (243 / 22, 接续窗口 on); the Loop applies it itself when the plan has `windowMode` |
+| H3MDContextWindows | H3MD Context Windows (window mode) | the window-mode patch on one MODEL for hand-built graphs (243 / 22, 接续窗口 on); the Loop applies it itself when the plan has `windowMode` |
 | H3MDRedrawPreview | H3MD Redraw / Preview 局部重绘 / 低清预览 | between the Director's `plan` and the Loop's `plan`: low-res preview on/off and local redraw seconds (writes `windowMode.preview` / `windowMode.redraw`); bypassed = plan unchanged (0.4.0) |
 | H3MDLowVRAMLoraLoader | H3MD LowVRAM LoRA Loader | token-sliced bypass LoRA loader (same behaviour as H3LowVRAMBypassLoraLoader) |
 
@@ -401,7 +401,7 @@ rendered in ONE sampling run with the core MiniMax H3 context windows (ComfyUI 0
   group); the high-res pass plans its strips per window.
 * Speed (RTX 5090, 1920x1088, per latent and step vs one pass): low-res chained 243 / 22 about +11 %, high-res 175 / 22
   about +34 %, about +25 % overall (11-08, 22 s take).
-* Manual node `H3MD Context Windows (window mode, exp)`: the same patch on one MODEL for hand-built graphs; defaults
+* Manual node `H3MD Context Windows (window mode)`: the same patch on one MODEL for hand-built graphs; defaults
   243 / 22 with `chain` on (use it on the low-res model).
 
 ### H3MD drift (own implementation)

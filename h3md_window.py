@@ -1096,5 +1096,5 @@ class H3MDRedrawPreview:
 
 
 NODE_CLASS_MAPPINGS = {"H3MDContextWindows": H3MDContextWindows, "H3MDRedrawPreview": H3MDRedrawPreview}
-NODE_DISPLAY_NAME_MAPPINGS = {"H3MDContextWindows": "H3MD Context Windows (window mode, exp)",
+NODE_DISPLAY_NAME_MAPPINGS = {"H3MDContextWindows": "H3MD Context Windows (window mode)",
                               "H3MDRedrawPreview": "H3MD Redraw / Preview 局部重绘 / 低清预览"}
