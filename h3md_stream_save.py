@@ -73,11 +73,17 @@ _SEG_JSON = re.compile(r"^seg_(\d{3,})\.json$")
 # ---------------------------------------------------------------------------
 
 def segments_info(cache_dir: str, indices, trims, overlap_source: str = "next", audio_crossfade_ms: int = 0,
-                  hires_mode: str = "per_segment") -> dict:
-    """The H3MD_SEGMENTS value: everything needed to rebuild the merge from disk (no tensors)."""
-    return {"version": INFO_VERSION, "cache_dir": os.path.abspath(cache_dir), "indices": [int(k) for k in indices],
-            "trims": [int(t) for t in trims], "overlap_source": str(overlap_source),
-            "audio_crossfade_ms": int(audio_crossfade_ms), "fps": D.FPS, "hires_mode": str(hires_mode)}
+                  hires_mode: str = "per_segment", cuts=None) -> dict:
+    """The H3MD_SEGMENTS value: everything needed to rebuild the merge from disk (no tensors).
+    cuts (0.3.9-beta): per segment, the hard cuts INSIDE it (frames from the segment's own first frame, e.g. a
+    window-mode group's windowCuts); hard cuts between segments come from trims (0 = cut).  Older values have no
+    'cuts' key: only the cuts between segments are known then."""
+    out = {"version": INFO_VERSION, "cache_dir": os.path.abspath(cache_dir), "indices": [int(k) for k in indices],
+           "trims": [int(t) for t in trims], "overlap_source": str(overlap_source),
+           "audio_crossfade_ms": int(audio_crossfade_ms), "fps": D.FPS, "hires_mode": str(hires_mode)}
+    if cuts is not None:
+        out["cuts"] = [sorted({int(c) for c in (cs or ()) if int(c) > 0}) for cs in cuts]
+    return out
 
 
 def keep_spans(manifests, trims, overlap_source: str):
@@ -129,6 +135,9 @@ class SegmentSource:
         self.total = pos
         self._mm = {}
         self.drift = None   # v0.2.0: h3md_drift_correct.Plan applied in read() (None = frames unchanged)
+        inner = info.get("cuts")
+        self.inner_cuts = [list(c or ()) for c in inner] if isinstance(inner, list) and len(inner) == len(mans) \
+            else [[] for _ in mans]
 
     def _p(self, k, suffix):
         return os.path.join(self.dir, f"seg_{k:03d}{suffix}")
@@ -175,6 +184,20 @@ class SegmentSource:
         cut = [j == 0 or int(t) == 0 for j, t in enumerate(self.trims)]
         return blocks, cut
 
+    def hard_cuts(self):
+        """Merged-clip frame numbers where a new shot starts (0.3.9-beta): every segment after the first that is not a
+        continuation (trim 0), plus the cuts inside a segment (info 'cuts', e.g. a window-mode group) that fall in
+        the frames this segment contributes.  Frame c = first frame of the new shot, so frames c-1 and c must never
+        be blended by the interpolation."""
+        out = set()
+        for j, ((s, e), g0) in enumerate(zip(self.spans, self.starts)):
+            if j > 0 and int(self.trims[j]) == 0:
+                out.add(g0)
+            for c in self.inner_cuts[j]:
+                if s <= int(c) < e:
+                    out.add(g0 + int(c) - s)
+        return sorted(f for f in out if 0 < f < self.total)
+
     def audio(self):
         """Joined audio, like SegmentCache.merge (audio is small: ~0.4 MB/s stereo float32)."""
         merged = None
@@ -212,6 +235,34 @@ def target_positions(source_fps: float, target_fps: float, total_source_frames: 
         i2 = min(i1 + 1, n - 1)
         out.append((i1, i2, 0.0 if i1 == i2 else p - i1))
     return out
+
+
+def skip_cuts(positions, cuts):
+    """0.3.9-beta: never interpolate across a hard cut.  positions [(src1, src2, factor)]; cuts = frames where a new
+    shot starts.  An output frame between frames c-1 and c (a blend of two different shots) becomes a plain copy of the
+    nearer source frame (the earlier one at exactly half way); timing, frame count and audio stay the same.
+    -> (new positions, number of output frames changed)."""
+    cs = sorted({int(c) for c in cuts or ()})
+    if not cs:
+        return list(positions), 0
+    import bisect
+    out, changed = [], 0
+    for i1, i2, f in positions:
+        if f and i1 != i2:
+            k = bisect.bisect_right(cs, int(i1))       # first cut after i1
+            if k < len(cs) and cs[k] <= int(i2):       # i1 < cut <= i2: the two frames belong to different shots
+                src = i1 if f <= 0.5 else i2
+                out.append((src, src, 0.0))
+                changed += 1
+                continue
+        out.append((i1, i2, f))
+    return out, changed
+
+
+def log_cut_skips(cuts, changed, tag=_TAG):
+    if cuts:
+        LOG.info("%s %d hard cut(s) at source frames %s: %d interpolated frame(s) across them use the nearest source "
+                 "frame (no blend of two shots)", tag, len(cuts), cuts, changed)
 
 
 def next_chunk(positions, j: int, n_source: int, chunk_frames: int):
@@ -939,9 +990,11 @@ def stream_save(info, path, interpolate=False, target_fps=SOURCE_FPS, scale=1.0,
                     "the video plays %.2fx %s than real time and the audio will NOT match. Set target_fps = %g, or "
                     "turn interpolate on.", _TAG, out_fps, n, source_fps, out_fps, out_fps / source_fps,
                     "faster" if out_fps > source_fps else "slower", source_fps)
+    cuts, cut_copies = src.hard_cuts(), 0
     if do_interp:
         wrapper = interpolator if interpolator is not None else load_interpolator(model_name, bool(use_fp16))
-        positions = interpolator_positions(wrapper, source_fps, out_fps, n)
+        positions, cut_copies = skip_cuts(interpolator_positions(wrapper, source_fps, out_fps, n), cuts)
+        log_cut_skips(cuts, cut_copies)
         device = getattr(wrapper, "device", torch.device("cpu"))
         fp16 = bool(getattr(wrapper, "use_fp16", False))
     else:
@@ -1036,7 +1089,8 @@ def stream_save(info, path, interpolate=False, target_fps=SOURCE_FPS, scale=1.0,
               "real_time": do_interp or abs(source_fps - out_fps) < 0.01,
               "chunk_sizes": sorted(set(sizes)), "oom_events": state["events"],
               "audio_seconds": round(writer.a_done / writer.sr, 3) if writer.a is not None else None,
-              "peak_chunk_mb": round(peak_chunk / 1e6, 1), "cache_dir": src.dir, "elapsed_s": round(time.time() - t0, 1)}
+              "peak_chunk_mb": round(peak_chunk / 1e6, 1), "cache_dir": src.dir, "elapsed_s": round(time.time() - t0, 1),
+              "hard_cuts": cuts, "cut_frames_copied": cut_copies}
     if drift_rows is not None:
         report["drift_report"] = write_drift_report(path, drift_rows, drift_strength)
     LOG.info("%s saved %s", _TAG, report)

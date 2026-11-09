@@ -296,6 +296,18 @@ class LoopRerunTests(unittest.TestCase):
         self.run_loop(plan2)
         self.assertEqual(len(FakeSampler.calls), 0)
 
+    def test_long_video_carries_inner_cuts(self):
+        """0.3.9-beta: the Loop hands each segment's windowCuts to the save node (no interpolation across them)."""
+        import h3md_stream_save as SS
+        plan = make_plan(3)
+        plan["segments"][0]["windowCuts"] = [51]
+        _node, out = self.run_loop(plan)
+        info = next(o for o in out if isinstance(o, dict) and "cache_dir" in o)
+        self.assertEqual(info["cuts"], [[51], [], []])
+        src = SS.SegmentSource(info)
+        self.assertEqual(src.hard_cuts(), [51])
+        src.close()
+
     def test_lowres_anchor_option(self):
         plan = make_plan(3)
         self.run_loop(plan)

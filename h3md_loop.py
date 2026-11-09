@@ -1273,7 +1273,10 @@ class H3MDLoopSampler:
             # --- H3MD stream save hook: 'long video' describes the on-disk merge for H3MD Save Video Interp ---
             self._segments_info = SS.segments_info(cache.dir, indices, trims, self._post["merge_overlap_source"],
                                                    audio_crossfade_ms,
-                                                   "per_segment")
+                                                   "per_segment",
+                                                   # 0.3.9-beta: hard cuts inside a segment (window-mode groups) so
+                                                   # the save node never interpolates across them
+                                                   [segs[k].get("windowCuts") or [] for k in indices])
             # never concatenated in RAM: audio only (small); the frames stay on disk for H3MD Save Video Interp
             _idr = plan.get("idRef") if isinstance(plan, dict) else None   # 2026-10-28 idref
             if _idr and _idr.get("file"):

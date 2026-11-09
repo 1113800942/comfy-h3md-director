@@ -1057,6 +1057,8 @@ def refined_stream_save(info, path, refiner, interpolate=False, target_fps=S.SOU
     drift_rows = S.attach_drift(base_src, drift_correct, drift_strength)   # v0.2.0: corrected before the face refine
     src = RefinedSource(base_src, refiner)
     n = src.total
+    _hc = getattr(base_src, "hard_cuts", None)   # 0.3.9-beta: no interpolated frame across a hard cut
+    cuts, cut_copies = (list(_hc()) if callable(_hc) else []), 0
     source_fps = float(src.fps)
     out_fps = float(target_fps)
     if out_fps <= 0:
@@ -1068,7 +1070,8 @@ def refined_stream_save(info, path, refiner, interpolate=False, target_fps=S.SOU
                     "faster" if out_fps > source_fps else "slower")
     if do_interp:
         wrapper = interpolator if interpolator is not None else S.load_interpolator(model_name, bool(use_fp16))
-        positions = S.interpolator_positions(wrapper, source_fps, out_fps, n)
+        positions, cut_copies = S.skip_cuts(S.interpolator_positions(wrapper, source_fps, out_fps, n), cuts)
+        S.log_cut_skips(cuts, cut_copies, _TAG)
         device = getattr(wrapper, "device", torch.device("cpu"))
         fp16 = bool(getattr(wrapper, "use_fp16", False))
     else:
@@ -1168,7 +1171,8 @@ def refined_stream_save(info, path, refiner, interpolate=False, target_fps=S.SOU
               "refined_frames": len(refiner.count), "refined_twice": len(twice),
               "vosr2_s": round(refiner.t_vosr2, 1), "stitch_s": round(refiner.t_stitch, 1),
               "audio_seconds": round(writer.a_done / writer.sr, 3) if writer.a is not None else None,
-              "peak_chunk_mb": round(peak_chunk / 1e6, 1), "cache_dir": src.dir, "elapsed_s": round(time.time() - t0, 1)}
+              "peak_chunk_mb": round(peak_chunk / 1e6, 1), "cache_dir": src.dir, "elapsed_s": round(time.time() - t0, 1),
+              "hard_cuts": cuts, "cut_frames_copied": cut_copies}
     if drift_rows is not None:
         report["drift_report"] = S.write_drift_report(path, drift_rows, drift_strength)
     LOG.info("%s saved %s", _TAG, report)
