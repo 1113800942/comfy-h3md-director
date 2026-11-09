@@ -1,8 +1,8 @@
 {
  "id": "ae199950-ee64-4d60-918b-94513d88482f",
  "revision": 0,
- "last_node_id": 336,
- "last_link_id": 194,
+ "last_node_id": 337,
+ "last_link_id": 195,
  "nodes": [
   {
    "id": 75,
@@ -1344,7 +1344,7 @@
      "localized_name": "plan",
      "name": "plan",
      "type": "H3MD_PLAN",
-     "link": 76
+     "link": 195
     },
     {
      "localized_name": "clip",
@@ -3809,6 +3809,65 @@
    },
    "color": "#432",
    "bgcolor": "#000"
+  },
+  {
+   "id": 337,
+   "type": "H3MDRedrawPreview",
+   "pos": [
+    780,
+    1460
+   ],
+   "size": [
+    340,
+    130
+   ],
+   "flags": {},
+   "order": 52,
+   "mode": 4,
+   "title": "Redraw / Preview (bypassed - Ctrl+B to use) 局部重绘 / 低清预览（默认旁路，Ctrl+B 打开）",
+   "inputs": [
+    {
+     "localized_name": "plan",
+     "name": "plan",
+     "type": "H3MD_PLAN",
+     "link": 76
+    },
+    {
+     "localized_name": "preview",
+     "name": "preview",
+     "type": "BOOLEAN",
+     "widget": {
+      "name": "preview"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "redraw",
+     "name": "redraw",
+     "type": "STRING",
+     "widget": {
+      "name": "redraw"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "plan",
+     "name": "plan",
+     "type": "H3MD_PLAN",
+     "links": [
+      195
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "H3MDRedrawPreview"
+   },
+   "widgets_values": [
+    false,
+    ""
+   ]
   }
  ],
  "links": [
@@ -3880,7 +3939,7 @@
    76,
    226,
    0,
-   227,
+   337,
    0,
    "H3MD_PLAN"
   ],
@@ -4099,6 +4158,14 @@
    227,
    10,
    "H3MD_DEPTH"
+  ],
+  [
+   195,
+   337,
+   0,
+   227,
+   0,
+   "H3MD_PLAN"
   ]
  ],
  "groups": [

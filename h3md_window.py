@@ -961,5 +961,111 @@ class H3MDContextWindows:
         return (apply(model, context_length, context_overlap, fuse_method, freenoise, crop_guide_video, bool(chain)),)
 
 
-NODE_CLASS_MAPPINGS = {"H3MDContextWindows": H3MDContextWindows}
-NODE_DISPLAY_NAME_MAPPINGS = {"H3MDContextWindows": "H3MD Context Windows (window mode, exp)"}
+_TIME = r"(\d+(?:\.\d+)?|\d+:\d{1,2}(?:\.\d+)?)"
+_RANGE = re.compile(_TIME + r"\s*(?:-|–|—|~|～|to|到|至)\s*" + _TIME, re.IGNORECASE)
+
+
+def _seconds(t: str) -> float:
+    """'12.5' -> 12.5; '1:05' -> 65.0; '1:05.5' -> 65.5"""
+    if ":" in t:
+        m, s = t.split(":", 1)
+        return int(m) * 60 + float(s)
+    return float(t)
+
+
+def parse_redraw(text: str, total_s: float | None = None):
+    """'4-8, 1:12-1:15' -> [[4.0, 8.0], [72.0, 75.0]] (seconds on the whole video's timeline, sorted, merged).
+    Separators between ranges: comma, semicolon, new line (Chinese ones too).  Raises ValueError with a message
+    the user can act on."""
+    text = str(text or "").strip()
+    if not text:
+        return []
+    out = []
+    for part in re.split(r"[,，;；\n]+", text):
+        part = part.strip()
+        if not part:
+            continue
+        m = _RANGE.fullmatch(part)
+        if not m:
+            raise ValueError(f"{_TAG} redraw: '{part}' is not a time range - write it like 4-8 or 1:12-1:15 (seconds). "
+                             f"局部重绘：'{part}' 看不懂，请写成 4-8 或 1:12-1:15（秒）。")
+        a, b = _seconds(m.group(1)), _seconds(m.group(2))
+        if b <= a:
+            raise ValueError(f"{_TAG} redraw: '{part}' ends before it starts. 局部重绘：'{part}' 结束时间要晚于开始时间。")
+        if total_s is not None and a >= total_s:
+            raise ValueError(f"{_TAG} redraw: '{part}' starts after the video ends ({total_s:.2f} s). "
+                             f"局部重绘：'{part}' 超出视频长度（{total_s:.2f} 秒）。")
+        out.append([a, min(b, total_s) if total_s is not None else b])
+    out.sort()
+    merged = []
+    for a, b in out:
+        if merged and a <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], b)
+        else:
+            merged.append([a, b])
+    return [[round(a, 3), round(b, 3)] for a, b in merged]
+
+
+def plan_seconds(plan) -> float | None:
+    segs = (plan or {}).get("segments") or []
+    try:
+        return max(int(s["startFrame"]) + int(s["length"]) for s in segs) / float(FPS)
+    except Exception:
+        return None
+
+
+class H3MDRedrawPreview:
+    """0.3.9-beta: low-res preview and local redraw as their own node (YJ 11-08: not on the Director's editor, so the
+    old interface stays as it is).  Put it between the Director's 'plan' and the Loop's 'plan'.  Bypassed or both
+    switches off = the plan goes through unchanged."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "plan": ("H3MD_PLAN",),
+            "preview": ("BOOLEAN", {"default": False, "tooltip":
+                        "Low-res pass only (about half the time). Happy with it? Switch this off and run again: the "
+                        "full version reuses the low-res pass from the cache.\n"
+                        "只跑低清（约省一半时间）。满意后关掉再跑一次，完整版直接用缓存里的低清结果。"}),
+            "redraw": ("STRING", {"default": "", "multiline": False, "tooltip":
+                       "Seconds of a FINISHED run to render again with a new seed, e.g. 4-8 or 4-8, 1:12-1:15 "
+                       "(time on the whole video). Everything else stays exactly as it was; the previous version is "
+                       "kept in the cache folder. Each run with this filled in tries a new seed; empty it (or bypass "
+                       "the node) to keep the version you like.\n"
+                       "已经跑完的片子里要重画的秒数（整条片子的时间），如 4-8 或 4-8, 1:12-1:15。其他部分一帧不变，"
+                       "旧版本留在缓存文件夹里。填着就每跑一次换一个种子重画；满意了清空（或旁路这个节点）就保留当前版本。"}),
+        }}
+
+    RETURN_TYPES = ("H3MD_PLAN",)
+    RETURN_NAMES = ("plan",)
+    FUNCTION = "run"
+    CATEGORY = "MiniMax H3/H3MD"
+    DESCRIPTION = ("Low-res preview and local redraw for seamless long video (window mode). Between the Director and "
+                   "the Loop. 无接缝长视频的低清预览和局部重绘，接在导演台和 Loop 之间。")
+
+    def run(self, plan, preview=False, redraw=""):
+        import copy
+        ranges = parse_redraw(redraw, plan_seconds(plan))
+        if not preview and not ranges:
+            return (plan,)
+        if not isinstance(plan, dict) or not plan.get("windowMode"):
+            raise ValueError(f"{_TAG} low-res preview and local redraw work with seamless long video only: tick "
+                             f"'无接缝长视频' in the Director (or bypass this node). 低清预览和局部重绘只能用在无接缝长视频："
+                             f"在导演台勾上「无接缝长视频」（或旁路这个节点）。")
+        if preview and ranges:
+            raise ValueError(f"{_TAG} preview and redraw together: redraw works on a finished full run - switch preview "
+                             f"off first. 低清预览和局部重绘不能同时开：局部重绘要在跑完的完整版上做，先关掉低清预览。")
+        out = copy.deepcopy(plan)
+        wm = dict(out["windowMode"]) if isinstance(out["windowMode"], dict) else \
+            dict(normalize_window_mode(out["windowMode"]) or {})
+        wm["preview"] = bool(preview)
+        wm["redraw"] = ranges or None   # None = the normalized 'no redraw'
+        out["windowMode"] = wm
+        LOG.info("%s Redraw / Preview node: %s", _TAG,
+                 f"local redraw of seconds {ranges}" if ranges else "low-res preview only")
+        return (out,)
+
+
+NODE_CLASS_MAPPINGS = {"H3MDContextWindows": H3MDContextWindows, "H3MDRedrawPreview": H3MDRedrawPreview}
+NODE_DISPLAY_NAME_MAPPINGS = {"H3MDContextWindows": "H3MD Context Windows (window mode, exp)",
+                              "H3MDRedrawPreview": "H3MD Redraw / Preview 局部重绘 / 低清预览"}
