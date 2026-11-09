@@ -2,6 +2,14 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.4.1] — 2026-11-08
+* **Clear message on ComfyUI older than 0.44 / ComfyUI 低于 0.44 时给清楚的提示**: with "Seamless long video" ticked, the
+  Loop now stops before anything runs with "needs ComfyUI 0.44 or newer" (this ComfyUI's version and what to do)
+  instead of a bare `cannot import name 'MiniMaxH3ContextWindowsNode'`. 勾了"无接缝长视频"时，Loop 在开始前就说明需要
+  ComfyUI 0.44 或更新（附当前版本号和怎么办），不再是看不懂的导入错误。
+* **Registry / Manager description / 注册表和 Manager 里的一句话简介**: now mentions seamless long takes (CCW) and local
+  redraw. 改成写无接缝长镜头（CCW）和局部重绘。
+
 ## [0.4.0] — 2026-11-08 — CCW: Chained Context Windows (seamless long video, includes 0.3.8)
 **In short / 简要：**
 * **CCW = Chained Context Windows (接续窗口)**: the name of this release. ComfyUI's core Context Windows render a long

@@ -900,10 +900,36 @@ def install(handler, crop_guide: bool):
     return handler
 
 
+MIN_COMFYUI = "0.44"   # first ComfyUI with the core MiniMax H3 context windows (MiniMaxH3ContextWindowsNode)
+
+
+def comfyui_version() -> str:
+    try:
+        import comfyui_version as v
+        return str(v.__version__)
+    except Exception:
+        return "unknown"
+
+
+def core_windows_node():
+    """0.4.1: the core MiniMax H3 context-window node, or a clear message on a ComfyUI that does not have it (before:
+    a bare ImportError).  The Loop wraps its models first thing, so this stops the run before anything is encoded."""
+    try:
+        from comfy_extras.nodes_context_windows import MiniMaxH3ContextWindowsNode
+    except ImportError as e:
+        ver = comfyui_version()
+        raise RuntimeError(
+            f"{_TAG} Seamless long video (window mode, CCW) needs ComfyUI {MIN_COMFYUI} or newer: this ComfyUI ({ver}) "
+            f"has no core MiniMax H3 context windows. Update ComfyUI, or untick 'Seamless long video' on the Director. "
+            f"/ 无接缝长视频（窗口模式，CCW）需要 ComfyUI {MIN_COMFYUI} 或更新：当前 ComfyUI（{ver}）没有核心的 MiniMax H3 "
+            f"Context Windows。请更新 ComfyUI，或在导演台取消勾选「无接缝长视频」。") from e
+    return MiniMaxH3ContextWindowsNode
+
+
 def apply(model, length=124, overlap=56, fuse_method="pyramid", freenoise=True, crop_guide=True, chain=False,
           chain_pin=0.0):
     """Core MiniMax H3 context windows + H3MD additions on a clone of `model` (chain: 接续窗口, 11-08)."""
-    from comfy_extras.nodes_context_windows import MiniMaxH3ContextWindowsNode
+    MiniMaxH3ContextWindowsNode = core_windows_node()
     res = MiniMaxH3ContextWindowsNode.execute(model, int(length), int(overlap), fuse_method, bool(freenoise), False)
     patched = res.result[0] if hasattr(res, "result") else res[0]
     handler = install(patched.model_options["context_handler"], bool(crop_guide))
