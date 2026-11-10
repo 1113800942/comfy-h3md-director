@@ -99,6 +99,13 @@ non_diegetic_music:
 - 素材拖进 shot 只是挂上，标签用提示词下方的标签按钮或输入 @ 插入，保证编号和后端一致。
 - **先核对每张 `<Picture N>` 在本 shot 里实际是什么图，再写它的作用**（标签按钮上有缩略图；问不清就问用户）。人物、服装、场景要分别对应到真正包含它的那张图，不要套“`<Picture 1>` 是人物、`<Picture 2>` 是脸”这类固定模板。有场景图时，写明它是整段的拍摄地点、从第一帧到最后一帧不变。
 - 人物替换：参考视频提供动作和位置，人换成 `<Subject N>`，用 `attribute_transfer`。
+- **动作复刻（TARA）：原片拍成什么样，提示词就写成什么样**（0.4.4，11-09 实测）。提示词要和原片对得上；照"原地跳舞"写的模板（"固定机位、在某场景跳舞、场景不变"）用在镜头会动的原片上，第 2 个窗口就跳回了提示词里的场景。
+  - 镜头：照原片。原片固定机位 → `A locked-off shot matching the framing of <Video 1>.`；原片在动（跟拍、摇镜头、跟着跑步的人）→ `One continuous tracking shot that moves exactly like the camera of <Video 1>.`
+  - 景物：用原片的，或者写明新场景。
+    用原片的（最稳，镜头在动时首选）：`The surroundings are the ones in <Video 1> and pass by exactly as in <Video 1>, in the same order and at the same moments, as one continuous route; nothing in the background jumps, resets or repeats.`，retention 写 `<Video 1>: attribute_transfer - its motion, timing, camera movement and surroundings are kept; only the person is replaced by <Subject 1>.`
+    换新场景：写明是什么地方、从头到尾是同一个地方。固定机位没问题；镜头在动、又开了无接缝时，两个窗口交接处可能小跳一下（实测），所以镜头在动时优先用原片的景物。
+  - 原片里有剪辑：按原片的时间逐个写 `[9.1s cut] ...`（写清切过去是什么画面），无接缝模式会在那里断开窗口。只有没有剪辑的原片才写"一个连续镜头"。
+  - 动作：`<Subject 1> moves exactly like the person in <Video 1>: every step, arm swing, head turn and expression in order and at matching times.`；原片是跳舞才写 "dance"、"on the beat"。
 
 ## 5. RefMod（用 H3MD Director + RefMod 时）
 - 写 `<RefMod j>`（`RefMod j`、`参考RefMod 1` 也行，不分大小写）。运行时自动替换成它实际的 `<Picture k>` / `<Video k>` / `<Audio k>`。只认 “RefMod” 这个词，写成 `Ref 1` 或直接写 `<Video 2>` 都不会替换。

@@ -169,6 +169,20 @@ non_diegetic_music:
   fixed template like "`<Picture 1>` is the person, `<Picture 2>` is the face". A location picture: say it is the set of
   the whole shot, unchanged from the first frame to the last.
 - Person swap: the reference video gives motion and position, the person becomes `<Subject N>`, `attribute_transfer`.
+- **Motion copy (TARA): write what the guide video really shows** (0.4.4, measured 11-09). The prompt must match the
+  guide; a dance-only template ("locked-off, dances in <scene>, the place stays the same") on a guide whose camera
+  moves made the second window jump back to the scene words.
+  - Camera: as in the guide. Fixed camera → `A locked-off shot matching the framing of <Video 1>.` Moving camera
+    (tracking, panning, following a runner) → `One continuous tracking shot that moves exactly like the camera of <Video 1>.`
+  - Surroundings: keep the guide's, or name a new setting.
+    Keep (steadiest; best for a moving camera): `The surroundings are the ones in <Video 1> and pass by exactly as in <Video 1>, in the same order and at the same moments, as one continuous route; nothing in the background jumps, resets or repeats.`
+    with `<Video 1>: attribute_transfer - its motion, timing, camera movement and surroundings are kept; only the person is replaced by <Subject 1>.`
+    New setting: say what it is and that it stays one place. With a fixed camera this is safe; with a moving camera
+    in window mode a small jump can show where two windows hand over (tested), so prefer keeping the guide's.
+  - Cuts in the guide: write each one at the guide's time as `[9.1s cut] ...` (what the new shot shows); window mode
+    breaks the windows there. Only a guide without cuts gets "one continuous shot".
+  - Motion: `<Subject 1> moves exactly like the person in <Video 1>: every step, arm swing, head turn and expression in order and at matching times.`
+    "dance" / "on the beat" only when the guide is a dance.
 
 ## 5. RefMod (H3MD Director + RefMod)
 - Write `<RefMod j>` (`RefMod j` works too, any case). At run time it becomes its real `<Picture k>` / `<Video k>` /

@@ -2,11 +2,18 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
-## [Unreleased]
+## [0.4.4] — 2026-11-09
 * **Fix / 修复: `delete_cache_after_save` now really deletes the run cache.** The save nodes refused every run folder
   ("holds non-H3MD files") because of the run's own `run.json` (its base seed), so the cache was always kept. Folders
   with any other foreign file are still never deleted. 保存后删缓存现在真的会删：以前每个运行文件夹里都有自己的
   `run.json`（记录种子），保存节点把它当成外来文件，一律不删。有其他外来文件的文件夹仍然不删。
+* **Prompt skill: motion copy written as the guide really is / 提示词技能：动作复刻照原片的样子写** (`skills/h3md-prompt`,
+  English and Chinese). Camera as in the guide (fixed → locked-off, moving → tracking shot); keep the guide's
+  surroundings (steadiest, first choice for a moving camera) or name a new setting; cuts in the guide written as
+  `[Ns cut]` at the guide's times; "dance" only for dances. Measured 11-09: a dance-only prompt on a tracking-shot
+  guide made the second window jump back to the scene words; the matching prompt joined cleanly.
+  镜头照原片（固定 → locked-off，在动 → tracking shot）；景物用原片的（最稳，镜头在动时首选）或写明新场景；原片的剪辑按原片时间写
+  `[Ns cut]`；原片是跳舞才写 dance。11-09 实测：跟拍的原片配"原地跳舞"的提示词，第 2 个窗口跳回提示词里的场景；照原片写就接得上。
 
 ## [0.4.3] — 2026-11-08
 * **Lighter Control Panel / 总控台更轻**: each LoRA dropdown now holds only its own LoRA until it is opened; the full
