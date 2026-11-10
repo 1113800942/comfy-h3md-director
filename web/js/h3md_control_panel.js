@@ -126,14 +126,32 @@ function totalSegments() {
   return null;
 }
 
+// 0.4.5 试镜: what each number means (from the Director's preview): [{n, shots:[a,b], start, end, after}] or null
+function trialParts() {
+  for (const n of app.graph?._nodes || []) {
+    const a = n.__h3md?.as;
+    if (a && a.ok && Array.isArray(a.trial)) return a.trial;
+  }
+  return null;
+}
+const mmss = (t) => `${Math.floor(t / 60)}:${String(Math.round(t % 60)).padStart(2, "0")}`;
+const shotsZh = (p) => (p.shots[0] === p.shots[1] ? `镜头 ${p.shots[0]}` : `镜头 ${p.shots[0]}–${p.shots[1]}`);
+const partZh = (p) => `${shotsZh(p)}（${mmss(p.start)}–${mmss(p.end)}）`;
+
 function hintText(text, total = totalSegments()) {
+  const parts = trialParts();
+  if (parts) total = parts.length;
   const s = parseSegments(text);
   const all = total ? `共 ${total} 段 · ${total} segment(s)` : "";
   if (s === null) return { bad: true, t: "写法有误 / cannot read it — 例 e.g.  2   1-2   3, 6-7, 9" };
   if (total && s.length && s[s.length - 1] > total)
-    return { bad: true, t: `超出范围：本片只有 ${total} 段（段号按导演台自动拆分后的顺序，和日志一致）· out of range: ${total} segment(s)` };
+    return { bad: true, t: `超出范围：本片只有 ${total} 段试镜· out of range: ${total} segment(s)` };
+  if (parts) {
+    if (!s.length) return { bad: false, t: `试镜空着 = 出整片（共 ${parts.length} 段试镜，点下面的段落只跑那一段）· Empty = the whole video` };
+    return { bad: false, set: true, t: `⚠ 试镜中：只跑 ${s.map((k) => partZh(parts[k - 1])).join("、")}。要出整片请清空 · Trial: only part(s) ${s.join(", ")}. Clear to render everything` };
+  }
   if (!s.length) return { bad: false, t: `全部跑完：有缓存的段直接用${all ? "（" + all + "）" : ""} · Run all (cached segments are reused)` };
-  return { bad: false, set: true, t: `⚠ 已设定：只跑第 ${s.join("、")} 段${all ? "（" + all + "）" : ""}，有缓存的也重新生成。要跑完整片请清空此框 · Set: only segment(s) ${s.join(", ")} (cached ones again too). Clear the box to run everything` };
+  return { bad: false, set: true, t: `⚠ 试镜中：只跑第 ${s.join("、")} 段${all ? "（" + all + "）" : ""}，有缓存的也重新生成。要出整片请清空 · Trial: only segment(s) ${s.join(", ")} (cached ones again too). Clear the box to run everything` };
 }
 
 // a wrong "which segments" box blocks the queue (instead of failing after the models are loaded)
@@ -166,6 +184,7 @@ const CSS = `
 .h3mdcp{font:12px sans-serif;color:#ddd;display:flex;flex-direction:column;gap:6px;padding:2px 2px 6px}
 .h3mdcp .hint{font-size:11px;color:#9ab;padding:0 4px;display:flex;align-items:center;gap:6px}.h3mdcp .hint.bad{color:#fff;background:#8a2a2a;border-radius:4px;padding:4px 6px}
 .h3mdcp .hint.set{color:#1a1a1a;background:#f0a020;border-radius:4px;padding:4px 6px;font-weight:bold}
+.h3mdcp .trials{display:flex;flex-wrap:wrap;gap:4px;padding:2px 4px}.h3mdcp .trials button{font-size:11px;padding:2px 7px;border:1px solid #556;border-radius:10px;background:#2a3540;color:#cde;cursor:pointer}.h3mdcp .trials button.on{background:#f0a020;color:#111;border-color:#f0a020;font-weight:bold}
 .h3mdcp .hint button{margin-left:auto;font-size:11px;padding:1px 6px;border:1px solid #333;border-radius:4px;background:#fff3;color:inherit;cursor:pointer}
 .h3mdcp .styles{display:flex;gap:4px}.h3mdcp .styles button{flex:1;padding:5px 2px;border:1px solid #555;border-radius:5px;background:#2a2a2a;color:#ccc;cursor:pointer;font-size:11px}
 .h3mdcp .styles button.on{background:#2f5d8a;border-color:#4a8bd0;color:#fff}
@@ -190,6 +209,7 @@ class Panel {
     this.widget.serialize = false;
     for (const n of ["style", "lora_low", "lora_high"]) { const w = W(node, n); if (w) w.hidden = true; }
     const seg = W(node, "segments_to_run");
+    if (seg) seg.label = "试镜 trial";
     if (seg) { const cb = seg.callback; seg.callback = (...a) => { const r = cb?.apply(seg, a); this.render(); return r; }; }
     const interp = W(node, "interpolate");
     if (interp) { const cb = interp.callback; interp.callback = (...a) => { const r = cb?.apply(interp, a); this.syncFps(); return r; }; }
@@ -266,12 +286,32 @@ class Panel {
     return box;
   }
 
+  // 0.4.5 试镜: one button per part (click = only this part; shift-click = add / remove)
+  trialsEl() {
+    const parts = trialParts();
+    const box = el("div", { class: "trials" });
+    if (!parts || parts.length < 2) return box;
+    const sel = parseSegments(W(this.node, "segments_to_run")?.value) || [];
+    for (const p of parts) {
+      box.append(el("button", { class: sel.includes(p.n) ? "on" : null, title: `试镜 ${p.n}：${partZh(p)}${p.after === "continue" ? "（接着上一段的长镜头，会先用 / 先补跑上一段）" : ""}`,
+        onclick: (e) => {
+          const w = W(this.node, "segments_to_run"); if (!w) return;
+          let cur = parseSegments(w.value) || [];
+          cur = e.shiftKey ? (cur.includes(p.n) ? cur.filter((k) => k !== p.n) : [...cur, p.n].sort((a, b) => a - b)) : (cur.length === 1 && cur[0] === p.n ? [] : [p.n]);
+          w.value = cur.join(", "); w.callback?.(w.value); this.render();
+        } }, `试镜 ${p.n} · ${shotsZh(p)} · ${mmss(p.start)}–${mmss(p.end)}`));
+    }
+    return box;
+  }
+
   // cheap refresh of the hint line only (the Director's auto-split count arrives later / changes)
   updateHint() {
     const old = this.root.querySelector(".hint");
     if (!old) return;
     const h = hintText(W(this.node, "segments_to_run")?.value);
     if (old.firstChild?.textContent !== "↑ " + h.t) old.replaceWith(this.hintEl(h));
+    const sig = JSON.stringify(trialParts()) + (W(this.node, "segments_to_run")?.value || "");
+    if (sig !== this.trialSig) { this.trialSig = sig; this.root.querySelector(".trials")?.replaceWith(this.trialsEl()); }
   }
 
   render() {
@@ -280,6 +320,7 @@ class Panel {
     const style = W(this.node, "style")?.value || "balanced";
     this.root.replaceChildren(
       this.hintEl(h),
+      this.trialsEl(),
       el("div", { class: "styles" }, ...["balanced", "high_motion", "motion_copy"].map((s) =>
         el("button", { class: s === style ? "on" : "", title: STYLE_TIP[s], onclick: () => this.setStyle(s) }, STYLE_LABEL[s]))),
       ...(this.taraNote ? [el("div", { class: "taranote" }, this.taraNote)] : []),
@@ -312,7 +353,7 @@ app.registerExtension({
       app.queuePrompt = async function (...args) {
         const bad = panelProblems();
         if (bad.length) {
-          const msg = "H3MD Control Panel · 跑哪几段: " + bad[0];
+          const msg = "H3MD Control Panel · 试镜: " + bad[0];
           try { app.extensionManager?.toast?.add?.({ severity: "error", summary: "H3MD", detail: msg, life: 6000 }); }
           catch { /* older frontend */ }
           console.warn("[H3MD]", msg);

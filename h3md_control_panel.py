@@ -232,9 +232,11 @@ class H3MDControlPanel:
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xFFFFFFFFFFFFFFFF, "control_after_generate": True,
                                  "tooltip": "Fixed or random (control after generate). 种子：固定或随机。"}),
                 "segments_to_run": ("STRING", {"default": "", "tooltip":
-                                    "Empty: run everything (cached segments reused). 2 / 1-2 / 3, 6-7, 9: generate "
-                                    "only these (cached ones again too). The box keeps its value (orange banner) until you clear it.\n"
-                                    "空 = 全部跑完；填 2 / 1-2 / 3, 6-7, 9 = 只生成这几段。框里的值会保留（橙色提示），要跑完整片请清空。"}),
+                                    "试镜 / Trial. Empty: render the whole video (cached parts reused). 2 / 1-2 / 3, 6-7: render only "
+                                    "these parts - with Seamless long video a part is one of the buttons under the box "
+                                    "(shots + seconds), otherwise a segment. The box keeps its value (orange banner) until you clear it.\n"
+                                    "试镜：空 = 出整片（有缓存的直接用）；填 2 / 1-2 / 3, 6-7 = 只跑这几段。开了无接缝长视频时，"
+                                    "段 = 框下面那排按钮（写着哪几个镜头、几秒到几秒），点一下就填好；没开时 = 分段。框里的值会保留（橙色提示），出整片请清空。"}),
                 "style": (STYLES, {"default": "balanced", "tooltip":
                           "balanced: drama, walking, dancing · high_motion: fights, gunfights · motion_copy: "
                           "dance / motion transfer. Sets the recommended LoRAs (no semantic bridge: un-bypass the "
@@ -249,7 +251,7 @@ class H3MDControlPanel:
                     "seed", "segments_to_run", "semantic_bridge")
     FUNCTION = "run"
     CATEGORY = CATEGORY
-    DESCRIPTION = ("H3MD Control Panel: resolution, fps / interpolation, face refine, seed, which segments to run, "
+    DESCRIPTION = ("H3MD Control Panel: resolution, fps / interpolation, face refine, seed, 试镜 trial (which parts to run), "
                    "style (balanced / high motion / motion copy) and the low-res + high-res LoRA lists in one place.")
 
     def run(self, low_res_model, high_res_model, width, height, interpolate, fps, face_refine, seed,

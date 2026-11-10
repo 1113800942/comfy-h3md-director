@@ -353,6 +353,34 @@ def plan_segments_to_run(text: str, segs: list, cache, beta: bool):
     return stop, rerun, line
 
 
+def plan_trial(text: str, segs: list, cache, beta: bool):
+    """0.4.5 试镜 (trial) in window mode: '2' / '1, 3' -> (indices, rerun list, log line).
+    Only the listed parts run; a part that starts with a continuation (overlapIn > 0: a long take with no hard cut
+    inside the group limit) also needs the part before it (taken from the cache, or generated when missing).
+    Parts after a hard cut are independent (cache key "prev": "cut"), so a trial take is the same take the full run
+    makes and is reused by it.  Listed parts that are cached are generated again (a new take); when every other part
+    is cached, the whole video is kept (a repair inside a finished video)."""
+    sel = parse_segments(text, len(segs))
+    if not sel:
+        return None
+    need = set(sel)
+    for k in sel:
+        j = k
+        while j > 0 and int(segs[j]["overlapIn"]) > 0:
+            j -= 1
+            need.add(j)
+    forced = [k for k in sel if cache_usable(cache, k, segs, beta)]
+    missing = sorted(k for k in need if k not in sel and not cache_usable(cache, k, segs, beta))
+    others_cached = all(cache_usable(cache, k, segs, beta) for k in range(len(segs)) if k not in sel)
+    indices = list(range(len(segs))) if (forced and others_cached) else sorted(need)
+    rerun = sorted(set(sel) | set(missing)) if forced else []
+    one = lambda ks: ", ".join(str(k + 1) for k in ks) or "-"   # noqa: E731
+    line = (f"试镜 / trial '{text}': parts {one(sel)}; needed before them (a long take continues): "
+            f"{one(sorted(need - set(sel)))} (missing, generated: {one(missing)}); cached and taken again: {one(forced)}; "
+            f"output = parts {one(indices)}")
+    return indices, rerun, line
+
+
 def describe_rerun(selected: list, indices: list, segs: list, tail_from: dict) -> str:
     """One line per segment for the log: cache / rerun (head from / tail locked to)."""
     lines = []
@@ -870,7 +898,16 @@ class H3MDLoopSampler:
             users = images_used_downstream(prompt, unique_id)
             if users:  # once per run
                 LOG.warning("%s %s (node(s) %s use 'images').", _TAG, IMAGES_PLACEHOLDER_WARNING, ", ".join(users))
-        if run_text:   # v0.3 segments_to_run: decide rerun vs. normal resume from what is really in the cache
+        if run_text and isinstance(plan, dict) and plan.get("windowMode"):   # 0.4.5 试镜: only the chosen parts
+            t_indices, selected, line = plan_trial(run_text, segs, cache if resume_from_cache else None,
+                                                   continue_lowres_prefix == BETA)
+            LOG.info("%s %s", _TAG, line)
+            if t_indices != indices:
+                indices = t_indices
+                pbar = progress_bar(len(indices), unique_id)
+            if selected and not (decode_output and cache_mode == "disk" and resume_from_cache):
+                selected = []
+        elif run_text:   # v0.3 segments_to_run: decide rerun vs. normal resume from what is really in the cache
             planned = plan_segments_to_run(run_text, segs, cache if resume_from_cache else None,
                                            continue_lowres_prefix == BETA)
             _stop, selected, line = planned

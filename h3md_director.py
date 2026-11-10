@@ -721,6 +721,24 @@ def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = Fa
     }
     if window_mode is not None:
         out["windowMode"] = window_mode
+    out["trial"] = trial_parts(segments)
+    return out
+
+
+def trial_parts(segments: list) -> list:
+    """0.4.5 试镜: what each number in the Control Panel's 试镜 box means - [{n, shots: [first, last] (1-based),
+    start, end (seconds), after: "cut" | "continue"}].  In window mode a part is a group of shots; otherwise a
+    segment (an auto-split part keeps its shot number)."""
+    out = []
+    for i, seg in enumerate(segments):
+        if "shotRange" in seg:
+            a, b = seg["shotRange"]
+        else:
+            a = b = int(seg.get("shotIndex", seg.get("shot", seg.get("index", i))))
+        start = int(seg.get("startFrame") or 0)
+        out.append({"n": i + 1, "shots": [a + 1, b + 1], "start": round(start / FPS, 2),
+                    "end": round((start + int(seg["length"])) / FPS, 2),
+                    "after": "continue" if int(seg.get("overlapIn") or 0) > 0 else "cut"})
     return out
 
 
@@ -790,7 +808,10 @@ def group_window_segments(segments: list, window_mode: dict, notes: list, contin
     out, drift = [], 0
     for gi, parts in enumerate(groups):
         if len(parts) == 1:
-            out.append(_shifted(parts[0], drift))
+            one = _shifted(parts[0], drift)
+            si = int(parts[0].get("shotIndex", parts[0]["index"]))
+            one = dict(one, shotRange=[si, si])
+            out.append(one)
             continue
         g0 = parts[0]["startFrame"]
         length = parts[-1]["startFrame"] + parts[-1]["length"] - g0
@@ -817,6 +838,7 @@ def group_window_segments(segments: list, window_mode: dict, notes: list, contin
                            "images": [images.index(im) for im in p["images"]], "seg": p})
         g = dict(parts[0])
         g.update({"length": length, "images": images, "videos": [], "audios": [], "groupParts": gparts,
+                  "shotRange": [int(parts[0].get("shotIndex", parts[0]["index"])), int(parts[-1].get("shotIndex", parts[-1]["index"]))],
                   "windowCuts": sorted({17 * round(gp["origin"] / 17) for gp in gparts if gp["cut"]} |
                                        {17 * round((gp["origin"] + c) / 17) for gp in gparts
                                         for c in gp["seg"].get("windowCuts") or () if 0 < c < gp["end"] - gp["origin"]}),

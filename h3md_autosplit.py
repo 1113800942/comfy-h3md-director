@@ -365,7 +365,7 @@ def preview(plan_json, width: int = 0, height: int = 0) -> dict:
         report = []
         plan = D.parse_plan(raw, int(width or 0), int(height or 0), True, motion=D.make_motion(raw), sizes=sizes,
                             extra_tokens=extra, report=report)
-        return {"ok": True, "budget": plan.get("tokenBudget"), "budgetInfo": plan.get("tokenBudgetInfo"),
+        return {"ok": True, "trial": plan.get("trial"), "budget": plan.get("tokenBudget"), "budgetInfo": plan.get("tokenBudgetInfo"),
                 "width": plan["width"], "height": plan["height"], "segments": len(plan["segments"]),
                 "totalFrames": plan["total_frames"], "shots": report}
     except Exception as exc:

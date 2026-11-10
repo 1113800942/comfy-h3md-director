@@ -45,8 +45,8 @@ part is kept on disk, and you repair only what went wrong — down to a few seco
 2. You need a ComfyUI version with MiniMax H3 support (0.43 or newer; **0.44 or newer for Seamless long video**).
 3. Open an example workflow: ComfyUI **Templates** → `ComfyUI-H3MD-Director`, or drag one from
    [`example_workflows/`](example_workflows) into ComfyUI. **New here? Start with `H3MD Director simple`** (v0.3):
-   only three things on the canvas – the **H3MD Control Panel** (size, fps / interpolation, face refine, seed, which
-   segments to run, style buttons Balanced / High motion / Motion copy, low-res and high-res LoRA lists), the
+   only three things on the canvas – the **H3MD Control Panel** (size, fps / interpolation, face refine, seed, trial (which
+   parts to run), style buttons Balanced / High motion / Motion copy, low-res and high-res LoRA lists), the
    **Director** (media, shots, prompts) and the video preview. Models, sampler and save settings sit in subgraphs
    (click to open). `H3MD Director` is the older flat full layout.
    Hardware: 40 / 50-series GPU with **16 GB VRAM minimum, 24 GB+ recommended** (measured on an RTX 5090; reports from

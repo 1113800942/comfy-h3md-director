@@ -2,6 +2,19 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.4.5] — 2026-11-09
+* **试镜 / Trial** (the Control Panel box that was "which segments"): with **Seamless long video** on, a number now
+  means a part of the timeline, shown as buttons under the box — `试镜 2 · 镜头 5–9 · 0:58–1:52` (shots and seconds).
+  Click a button to render only that part (shift-click adds more); any part can be tried, not just the first. A part
+  after a hard cut runs on its own and is the same take the full run makes (the full run reuses it); a part that
+  continues a long take (no hard cut inside ~60 s) also uses / renders the part before it. When every other part is
+  cached, a tried part is a new take inside the finished video. Without Seamless long video the box works as before
+  (segments). The internal input name `segments_to_run` is unchanged, so old workflows open as they are.
+  控制台的"跑哪几段"改名**试镜**。开了无接缝长视频时，框下面一排按钮列出每一段（哪几个镜头、几秒到几秒），点一下就只跑那段，
+  任何一段都能单独试，不只第一段；硬切后面的段单独跑，结果和整片里的一样，出整片时直接复用；接着长镜头的段会先用 / 先补跑上一段。
+  没开无接缝时照旧按分段算。旧工作流照常打开。
+* The Director's preview (`/h3md/autosplit`) and the parsed plan carry a `trial` list (parts → shots, seconds).
+
 ## [0.4.4] — 2026-11-09
 * **Fix / 修复: `delete_cache_after_save` now really deletes the run cache.** The save nodes refused every run folder
   ("holds non-H3MD files") because of the run's own `run.json` (its base seed), so the cache was always kept. Folders
