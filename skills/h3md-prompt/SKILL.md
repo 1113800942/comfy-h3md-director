@@ -346,6 +346,7 @@ After the prompts, also give the whole plan as ONE JSON code block that the user
 - [ ] Format and field order right; field names exact.
 - [ ] Times start at 0; the last shot time is inside the length; in continued shots new action starts after the overlap.
 - [ ] Lengths are 5+17n; total counted as length − overlap; motion copy total within the reference video.
+- [ ] Motion copy: camera, surroundings and cuts match the guide (fixed / tracking; the guide's surroundings or a named new setting; the guide's cuts written as `[Ns cut]` at its times).
 - [ ] Long shots that will autosplit describe a steady state, no ordered events or sub-shots.
 - [ ] An outfit that no picture shows is written in full, word for word the same in every shot (fabric opaque).
 - [ ] Window mode: lines and actions inside long shots timed from the shot's start (`At 00:07.9 ...` or `[8s] ...`), about 8 s apart; dialogue / lyrics in `<d>[English] ...</d>`; the summary says what stays the same.
