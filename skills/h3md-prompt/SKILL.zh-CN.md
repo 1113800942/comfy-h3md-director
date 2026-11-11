@@ -201,6 +201,43 @@ non_diegetic_music:
 - `prompt` 是这一段完整的提示词（换行写成 `\n`），和要粘贴的内容一字不差。
 - 必须是合法 JSON（双引号、不加注释、末尾不留逗号）。导演台发现问题（长度、重叠、标签没有对应素材、缺文件）会逐条列出来，不会替你改。
 
+## 12c. 带图片和歌的计划 zip（能写文件时优先用这个）
+单个 `.json` 只导入计划本身：图片、歌还得用户一个个上传，文件名还要对得上。只要你能生成文件（用户给了图片 / 歌，或者是你做的），就交**一个 `.zip`**：导演台 **Import plan…** 会把素材解压到 `input/H3MD_plans/<名字>/`，并自动把计划里的路径指过去，一键可用。
+
+```
+<名字>.zip
+├─ manifest.json   {"format": "h3md-plan", "plan_version": 1, "name": "<名字>", "width": W, "height": H, "fps": 24,
+│                   "with_media": true,
+│                   "media": [{"kind": "images", "id": "eve", "file": "eve.png", "included": true, "zip": "media/eve.png"},
+│                             {"kind": "audios", "id": "song", "file": "song.mp3", "included": true, "zip": "media/song.mp3"}]}
+├─ plan.json       12b 的计划（id 一致；"file" 写纯文件名，如 "eve.png"）
+└─ media/          eve.png、song.mp3……（平铺，不建子文件夹）
+```
+- `plan.json` 里每张图、每个视频、每首歌在 manifest 的 `media` 里各写一条；manifest 的 `file` = `plan.json` 的 `file`；`zip` = `media/` + 它在 zip 里的文件名。文件名不重复、不建子文件夹、不以点开头。
+- 素材格式只认：png jpg jpeg webp bmp gif tif · mp4 mov webm mkv avi m4v · wav mp3 flac ogg m4a aac opus。zip 里别的文件会被忽略，并列为问题。
+- **不要**放 `workflow.json` / `settings.json`：这样导入时是「Plan only」，只换计划，用户自己工作流里的 LoRA、强度、种子都不动。带工作流的包只由 H3MD 的 **Export plan** 导出。
+- 打包前自查：长度 5+17n、重叠对、每个 `<Picture N>` / `<Audio N>` 都有对应素材、每个素材文件确实在 `media/` 里。导入后导演台会把问题逐条列出来。
+- Python（只用标准库）：
+  ```python
+  import json, os, zipfile
+  def make_plan_zip(plan, media_paths, out_zip, name):      # media_paths: {"eve.png": "/path/to/eve.png", ...}
+      kinds = {"images": plan["media"].get("images", []), "videos": plan["media"].get("videos", []),
+               "audios": plan["media"].get("audios", [])}
+      man = {"format": "h3md-plan", "plan_version": 1, "name": name, "width": plan["width"],
+             "height": plan["height"], "fps": plan.get("fps", 24), "with_media": True, "media": []}
+      with zipfile.ZipFile(out_zip, "w", zipfile.ZIP_DEFLATED) as z:
+          for kind, items in kinds.items():
+              for it in items:
+                  base = os.path.basename(it["file"])
+                  z.write(media_paths[base], "media/" + base)
+                  man["media"].append({"kind": kind, "id": it["id"], "file": it["file"],
+                                       "included": True, "zip": "media/" + base})
+          z.writestr("plan.json", json.dumps(plan, ensure_ascii=False, indent=2))
+          z.writestr("manifest.json", json.dumps(man, ensure_ascii=False, indent=2))
+  ```
+- 没法生成文件（只能聊天）？就给 12b 的 `.json` 代码块，并列出用户要按原文件名上传到 `input/` 的文件。
+- 完整包的样例（H3MD 自己导出、带工作流）：huggingface.co/yj0942/H3MD-Director 的 `plans/H3MD_demo_eve_mv.zip`。
+
 ## 13. 输出前自查
 - [ ] 确实是 H3MD 任务（不是就改用 `h3-prompt-writing`）。
 - [ ] 格式和段落顺序对；字段名一字不差。
@@ -221,3 +258,4 @@ non_diegetic_music:
 - [ ] 有参考图时：没有写长相、皮肤、妆容、灯光、色彩、风格，只写机位、动作、时间和声音。
 - [ ] 前奏 / 间奏 / 尾奏是单独的段，提示词里没有任何"唱"的意思；没有"no X"这类负面写法；参考图是原图，没有做过局部修图。
 - [ ] 用户要导入时：给了一个合法的计划 JSON，长度、重叠、offset 和提示词与上面各段一致。
+- [ ] 计划 zip：`manifest.json` + `plan.json` + 平铺的 `media/`，计划用到的图和歌都在里面，没有 `workflow.json`。
