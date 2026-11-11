@@ -341,6 +341,51 @@ After the prompts, also give the whole plan as ONE JSON code block that the user
 - Valid JSON only (double quotes, no comments, no trailing commas). The Director lists any problem it finds
   (lengths, overlaps, tags without media, missing files) instead of fixing it.
 
+## 12c. Importable plan .zip with the pictures and songs (preferred when you can write files)
+A bare `.json` imports only the plan: the user still has to upload every picture and song and the file names must
+match. When you can create files (and the user gave you the pictures / songs, or you made them), deliver ONE `.zip`
+instead; **Import plan…** unpacks the media to `input/H3MD_plans/<name>/` and points the plan at them, one click:
+
+```
+<name>.zip
+├─ manifest.json   {"format": "h3md-plan", "plan_version": 1, "name": "<name>", "width": W, "height": H, "fps": 24,
+│                   "with_media": true,
+│                   "media": [{"kind": "images", "id": "eve", "file": "eve.png", "included": true, "zip": "media/eve.png"},
+│                             {"kind": "audios", "id": "song", "file": "song.mp3", "included": true, "zip": "media/song.mp3"}]}
+├─ plan.json       the plan from 12b (same ids; "file" = the plain file name, e.g. "eve.png")
+└─ media/          eve.png, song.mp3, ... (flat: no sub-folders)
+```
+- One `media` entry per picture / video / song of `plan.json`; `file` in the manifest = `file` in `plan.json`; `zip` =
+  `media/` + the file's name inside the zip. File names unique, no sub-folders, no names starting with a dot.
+- Allowed media: png jpg jpeg webp bmp gif tif · mp4 mov webm mkv avi m4v · wav mp3 flac ogg m4a aac opus. Anything
+  else in the zip is ignored and listed as a problem.
+- Do **not** add `workflow.json` / `settings.json`: then the import offers "Plan only", which replaces the plan and
+  keeps the user's own workflow settings (LoRAs, strengths, seed). Only H3MD's **Export plan** writes a workflow.
+- Before zipping, check: lengths 5+17n, overlaps right, every `<Picture N>` / `<Audio N>` has its media, every media
+  file is really in `media/`. The Director lists anything wrong after import.
+- Python (standard library only):
+  ```python
+  import json, os, zipfile
+  def make_plan_zip(plan, media_paths, out_zip, name):      # media_paths: {"eve.png": "/path/to/eve.png", ...}
+      kinds = {"images": plan["media"].get("images", []), "videos": plan["media"].get("videos", []),
+               "audios": plan["media"].get("audios", [])}
+      man = {"format": "h3md-plan", "plan_version": 1, "name": name, "width": plan["width"],
+             "height": plan["height"], "fps": plan.get("fps", 24), "with_media": True, "media": []}
+      with zipfile.ZipFile(out_zip, "w", zipfile.ZIP_DEFLATED) as z:
+          for kind, items in kinds.items():
+              for it in items:
+                  base = os.path.basename(it["file"])
+                  z.write(media_paths[base], "media/" + base)
+                  man["media"].append({"kind": kind, "id": it["id"], "file": it["file"],
+                                       "included": True, "zip": "media/" + base})
+          z.writestr("plan.json", json.dumps(plan, ensure_ascii=False, indent=2))
+          z.writestr("manifest.json", json.dumps(man, ensure_ascii=False, indent=2))
+  ```
+- No way to create files (chat only)? Give the 12b `.json` block and list the files the user must upload to `input/`
+  under exactly those names.
+- Example of a full pack (exported by H3MD, with a workflow): `plans/H3MD_demo_eve_mv.zip` on
+  huggingface.co/yj0942/H3MD-Director.
+
 ## 13. Self-check before output
 - [ ] It really is an H3MD task (otherwise use `h3-prompt-writing`).
 - [ ] Format and field order right; field names exact.
@@ -365,3 +410,4 @@ After the prompts, also give the whole plan as ONE JSON code block that the user
 - [ ] Intro / interlude / outro are their own segments with no singing in the prompt; no "no X" wording; the reference
       photo is the original (no local retouching).
 - [ ] When the user wants to import: one valid plan JSON block whose lengths, overlaps, offsets and prompts match the shots above.
+- [ ] Plan .zip: `manifest.json` + `plan.json` + flat `media/` with every picture / song the plan names, no `workflow.json`.

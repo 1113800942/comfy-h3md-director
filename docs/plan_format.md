@@ -55,3 +55,12 @@ Problems are listed and nothing is changed for you: a length that is not 5 + 17n
   (`[8s] ...` or `At 00:07.9 ...`). `"preview": true` = low-res only; `"redraw": [[20, 24]]` = render seconds 20–24 of
   a finished run again with a new seed (the node H3MD Redraw / Preview writes both for you, between the Director and the
   Loop). Details: [technical reference](technical-reference.md).
+
+## Plan .zip written by an agent
+
+An agent that can create files should hand over a `.zip` instead of a bare `.json`, so the pictures and songs come
+with it: `manifest.json` (`format`, `plan_version`, `name`, `width`, `height`, `fps`, `with_media: true`, and one
+`media` entry per file: `kind`, `id`, `file` (= the plan's `file`), `included: true`, `zip: "media/<name>"`) +
+`plan.json` + a flat `media/` folder. No `workflow.json`: the import then offers **Plan only** and keeps the user's own
+workflow settings. Import unpacks the media to `input/H3MD_plans/<name>/` and rewrites the plan's paths. The prompt
+skill (`skills/h3md-prompt`, section 12c) has a ready Python function.
