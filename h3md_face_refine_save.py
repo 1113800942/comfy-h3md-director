@@ -945,6 +945,34 @@ def _unwrap_image(res):
     return res
 
 
+def edge_safe_masks(masks, boxes, stitch_kw):
+    """0.5.3 fix: a head mask (hair down to the shoulders) reaches the crop's border; the stitch blurs with
+    replicate padding, so the paste ended in a hard straight line at the crop edge (a visible box on the chest).
+    Here the mask is dilated as the stitch would, then faded to 0 towards every border of the canvas: zero within
+    one feather width of the edge, full one more feather width in. The stitch then only blurs (dilation 0).
+    masks [n, ch, cw]; boxes: the crop box [x, y, w, h] of each frame (source pixels)."""
+    import torch.nn.functional as F
+    m = masks.to(torch.float32).unsqueeze(1)
+    n, _, ch, cw = m.shape
+    d = int(stitch_kw.get("mask_dilation", 0) or 0)
+    if d > 0:
+        m = F.max_pool2d(m, 2 * d + 1, stride=1, padding=d)
+    feather = float(stitch_kw.get("feather", 0) or 0)
+    ys = torch.arange(ch, dtype=torch.float32).view(-1, 1)
+    xs = torch.arange(cw, dtype=torch.float32).view(1, -1)
+    dist = torch.minimum(torch.minimum(ys, ch - 1 - ys), torch.minimum(xs, cw - 1 - xs))   # px to the nearest edge
+    out = []
+    for k in range(n):
+        if stitch_kw.get("feather_scales_with_crop", False):
+            f = feather
+        else:   # the stitch's own conversion of feather (source px) to canvas px
+            f = feather * (ch / max(float(boxes[k][3]), 1.0))
+        f = max(2.0, min(f, ch / 3.0))
+        ramp = ((dist - f) / f).clamp(0.0, 1.0)
+        out.append(m[k, 0] * ramp)
+    return torch.stack(out, 0)
+
+
 class FaceRefiner:
     """crop -> VOSR2 -> stitch for any range of source frames, driven by the whole-clip transform."""
 
@@ -1078,8 +1106,10 @@ class FaceRefiner:
             t1 = time.time()
             tr = slice_transform(self.t, group, start, n)
             if redrawn:
-                out = self.mask_stitch.run(base_images=out, refined_crops=refined, transform=tr,
-                                           masks=torch.stack([masks[i] for i in group], 0), **self.mask_stitch_kw)[0]
+                m = edge_safe_masks(torch.stack([masks[i] for i in group], 0), [self.t["boxes"][i] for i in group],
+                                    self.mask_stitch_kw)
+                kw = dict(self.mask_stitch_kw, mask_dilation=0)   # dilated already, inside the canvas
+                out = self.mask_stitch.run(base_images=out, refined_crops=refined, transform=tr, masks=m, **kw)[0]
             else:
                 out = self.stitch.run(base_images=out, refined_crops=refined, transform=tr, **self.stitch_kw)[0]
             self.t_vosr2 += t1 - t0

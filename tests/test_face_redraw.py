@@ -318,3 +318,13 @@ def test_missing_inputs_fall_back_to_restore_only(tmp_path):
                                             {"redraw_face_image": torch.rand(1, 8, 8, 3)},
                                             {"detector": "x", "confidence": 0.3}, {}, None, None)
     assert layer is None and rep is None and "SKIPPED" in notes[0] and "redraw_model" in notes[0]
+
+
+def test_edge_safe_masks_fade_to_zero_at_the_crop_border():
+    m = torch.zeros(1, 128, 128)
+    m[0, 40:, 30:100] = 1.0                       # hair running off the bottom of the crop
+    out = F.edge_safe_masks(m, [[0, 0, 100, 100]], {"mask_dilation": 4, "feather": 10})
+    f = 10 * 128 / 100
+    assert float(out[0, -1].max()) == 0.0 and float(out[0, -int(f)].max()) == 0.0   # nothing at the edge
+    assert float(out[0, 64, 64]) == 1.0                                              # the middle untouched
+    assert float(out[0, 40 - 3, 64]) == 1.0                                          # dilated as the stitch would
