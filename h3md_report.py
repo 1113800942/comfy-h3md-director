@@ -117,7 +117,7 @@ def scrub(text):
 def scrub_obj(obj, keep_text=True):
     """recursively scrub strings; keep_text False: long free text (prompts) -> '<text, N chars>'"""
     if isinstance(obj, str):
-        if not keep_text and len(obj) > 160:
+        if not keep_text and len(obj) > 160 and not obj.lstrip().startswith(("[{", "{")):   # JSON (LoRA rows) stays
             return f"<text, {len(obj)} chars>"
         return scrub(obj)
     if isinstance(obj, list):
@@ -274,6 +274,14 @@ def _W():
     except ImportError:
         import h3md_window as W
     return W
+
+
+def _RS():
+    try:
+        from . import h3md_report_settings as m
+    except ImportError:
+        import h3md_report_settings as m
+    return m
 
 
 def _P():
@@ -463,11 +471,11 @@ def build(plan_json, workflow=None, include_prompts: bool = True, width: int = 0
            if isinstance(s, dict)) or plan.get("swapEngine"):
         models += check_models([{"name": SAM3_CKPT, "directory": "checkpoints"}]) if not any(
             m["name"] == SAM3_CKPT for m in models) else []
-    settings = scrub_obj(P.workflow_settings(workflow) if workflow else [], keep_text=include_prompts)
+    settings, example, diff, keys, sf = _settings_part(workflow, plan, include_prompts, env)
     pf, summary = plan_findings(plan, width, height, env)
     runs = recent_runs()
     lines = log_lines()
-    F = pf + run_findings(runs, lines)
+    F = pf + sf + run_findings(runs, lines)
     for m in models:
         if m.get("found") is False:
             F.append({"sev": "warn", "cat": "env", "where": "models", "text": f"model file not found: {m['name']} "
@@ -482,7 +490,30 @@ def build(plan_json, workflow=None, include_prompts: bool = True, width: int = 0
     plan_out = scrub_obj(plan, keep_text=include_prompts)
     return {"created": _dt.datetime.now().isoformat(timespec="seconds"), "h3md": env.get("h3md"),
             "prompts_included": bool(include_prompts), "environment": env, "models": models, "plan_summary": summary,
-            "findings": F, "recent_runs": runs, "log": lines, "settings": settings, "plan": plan_out}
+            "findings": F, "recent_runs": runs, "log": lines, "settings": settings, "plan": plan_out,
+            "example_workflow": example, "settings_diff": diff, "key_switches": keys}
+
+
+def _settings_part(workflow, plan, include_prompts, env):
+    """every node, named + state, compared with the closest shipped example workflow (0.5.1)"""
+    RS = _RS()
+    if not workflow:
+        return [], None, None, [], []
+    look = RS.spec_lookup()
+    clean = lambda rows: scrub_obj(rows, keep_text=include_prompts)  # noqa: E731
+
+    def strip_plan(rows):
+        for r in rows:
+            if str(r.get("type", "")).startswith("H3MDDirector") and "plan_json" in r["params"]:
+                r["params"]["plan_json"] = "<plan.json>"
+        return rows
+    rows = clean(strip_plan(RS.named_nodes(workflow, look)))
+    examples = {k: clean(strip_plan(v)) for k, v in RS.load_examples(lookup=look).items()}
+    example = RS.best_example(rows, examples)
+    diff = RS.compare(rows, examples[example]) if example else None
+    keys = [[k, v] for k, v in RS.key_switches(rows, plan)]
+    sf = RS.settings_findings(rows, diff, plan, env.get("vram_total_gb"))
+    return rows, example, diff, keys, sf
 
 
 def to_markdown(r: dict) -> str:
@@ -501,6 +532,7 @@ def to_markdown(r: dict) -> str:
             L.append(f"| {icon.get(f['sev'], '')} | {CATEGORIES.get(f['cat'], f['cat'])} | {f['where']} | "
                      f"{str(f['text']).replace('|', '/').replace(chr(10), ' ')} |")
         L.append("")
+    L += _settings_md(r)
     L += ["## 2. Environment 环境", ""]
     for k in ("comfyui", "frontend", "python", "torch", "cuda", "os", "gpu", "vram_total_gb", "vram_free_now_gb",
               "vram_peak_reserved_gb", "vram_peak_allocated_gb", "ram_total_gb", "ram_free_now_gb", "vram_mode",
@@ -515,7 +547,7 @@ def to_markdown(r: dict) -> str:
         L.append(f"- {m['name']}: {'found (' + str(m.get('folder')) + ')' if m.get('found') else 'NOT FOUND' if m.get('found') is False else '?'}")
     s = r["plan_summary"]
     L += ["", "## 3. Plan 计划", "", "- " + ", ".join(f"{k}: {v}" for k, v in s.items()), "",
-          "Full plan: plan.json · all node settings: settings.json", ""]
+          "Full plan: plan.json · every node and setting 全部节点和参数: settings.md / settings.json", ""]
     L += ["## 4. Recent runs 最近的运行", ""]
     for i, run in enumerate(r["recent_runs"], 1):
         L.append(f"- run {i}: {run.get('status')} {str(run.get('seconds', '?')) + ' s' if run.get('seconds') else ''}"
@@ -528,6 +560,41 @@ def to_markdown(r: dict) -> str:
     return "\n".join(L)
 
 
+def _cell(v, n=120):
+    t = str(v).replace("|", "/").replace("\n", " ")
+    return t if len(t) <= n else t[:n] + " …"
+
+
+def _settings_md(r: dict) -> list:
+    L = []
+    if r.get("key_switches"):
+        L += ["## 1a. Key switches 关键开关", "", "| switch 开关 | value 值 |", "|---|---|"]
+        L += [f"| {k} | {_cell(v, 200)} |" for k, v in r["key_switches"]]
+        L.append("")
+    d = r.get("settings_diff")
+    if d is not None:
+        L += [f"## 1b. Differences from the example workflow 和示例工作流不同的地方", "",
+              f"Compared with 对照: `{r.get('example_workflow')}` (the shipped example closest to this workflow 随包示例里最像的一个)", ""]
+        if not any(d.get(k) for k in ("switched", "missing", "added", "changed")):
+            L += ["Same as the example (apart from per-run values) 和示例一样（每次运行会变的值除外）", ""]
+        if d.get("switched"):
+            L += ["**Nodes switched on / off 开关不同的节点**", "", "| node 节点 | example 示例 | here 这里 |", "|---|---|---|"]
+            L += [f"| {_cell(x['node'])} | {x['example']} | **{x['now']}** |" for x in d["switched"]] + [""]
+        if d.get("changed"):
+            L += ["**Changed settings 改过的参数**", "", "| node 节点 | parameter 参数 | example 示例 | here 这里 |",
+                  "|---|---|---|---|"]
+            L += [f"| {_cell(x['node'])} | {x['param']} | {_cell(x['example'])} | **{_cell(x['now'])}** |"
+                  for x in d["changed"]] + [""]
+        if d.get("missing"):
+            L += ["**In the example, not here 示例里有、这里没有**: " + "; ".join(_cell(x["node"]) for x in d["missing"]), ""]
+        if d.get("added"):
+            L += ["**Added here 这里多加的**: " + "; ".join(f"{_cell(x['node'])} ({x['state']})" for x in d["added"]), ""]
+        if d.get("run"):
+            L += ["Per-run values 本次运行的值 (normal 正常): " + "; ".join(
+                f"{x['param']} = {_cell(x['now'], 60)}" for x in d["run"][:40]), ""]
+    return L
+
+
 def write_zip(r: dict) -> bytes:
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
@@ -536,6 +603,9 @@ def write_zip(r: dict) -> bytes:
                                              ensure_ascii=False, indent=1))
         z.writestr("plan.json", json.dumps(r["plan"], ensure_ascii=False, indent=2))
         z.writestr("settings.json", json.dumps(r["settings"], ensure_ascii=False, indent=1))
+        if r.get("settings"):
+            z.writestr("settings.md", _RS().settings_markdown(r["settings"], r.get("settings_diff"),
+                                                              r.get("example_workflow")))
     return buf.getvalue()
 
 

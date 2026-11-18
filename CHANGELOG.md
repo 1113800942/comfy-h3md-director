@@ -2,6 +2,21 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.5.1] - 2026-11-17
+* **Diagnostic report: every setting, named, compared with the example workflow / 诊断报告：全部参数带名字，并和示例工作流对照.**
+  Before, the report held each node's values as an unnamed list and left out bypassed nodes, so "is tiling on?" could
+  not be read from it. Now: every node (inside subgraphs too) with its state (on / bypassed / muted, or off because its
+  subgraph is off) and its settings by name (`settings.md` for people, `settings.json` for tools); a **Key switches**
+  table at the top of report.md (seamless long video, style, size, interpolation, face refine, LoRAs and strengths,
+  high-res tiling and its axis / overlap, low-res scale and steps, upscaler, cache and cache type, VRAM release,
+  Remake model, motion control, semantic bridge, redraw); and **Differences from the example workflow**: the shipped
+  example closest to yours is picked automatically, then nodes switched on / off, missing or added, and every changed
+  value are listed (seed, plan text and media files are listed apart as per-run values). New checks: high-res tiling
+  off (warning under 40 GB VRAM), a multi-person swap plan with the Remake model off or missing, H3MD / model nodes
+  switched off against the example. Same privacy rules as 0.5.0.
+  报告里列出每个节点的开关状态（开 / 旁路 / 静音）和带名字的全部参数；report.md 顶部加「关键开关」表；自动找最像的随包示例工作流，
+  列出开关不同、缺少、多加的节点和每个改过的参数。新增检查：高清分块关着、多人换人计划但 Remake 模型没开。隐私规则不变。
+
 ## [0.5.0] - 2026-11-15
 * **New / 新功能: multi-person swap with Viggle Remake** (plan `"swapEngine": "remake"`). Replace several people of a
   real video with your own characters; motion, camera, lip movement, timing and the soundtrack stay. The low-res pass

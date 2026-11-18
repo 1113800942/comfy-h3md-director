@@ -204,7 +204,9 @@ for releasing Remake.
 
 In the H3MD Director click **Report 诊断报告** (next to Export plan) and attach the .zip from `output/H3MD_reports/`
 to your [GitHub issue](../../issues). It holds what we need to find the cause: GPU, VRAM (and the peak of the last
-run), versions of ComfyUI / torch / H3MD and the related node packs, which models were found, the node settings, a
+run), versions of ComfyUI / torch / H3MD and the related node packs, which models were found, every node's settings
+by name and whether the node is on, bypassed or muted (`settings.md`), the key switches (tiling, cache, LoRAs ...) and
+what differs from the shipped example workflow, a
 check of the plan against the prompt-skill rules (lengths, window handoffs, Remake keyframes...) and the last runs'
 H3MD log and error. It has no user or computer names, no folders (paths are cut to file names) and no pictures,
 videos or audio; untick **prompts** to leave the prompts out. It is only saved on your machine.

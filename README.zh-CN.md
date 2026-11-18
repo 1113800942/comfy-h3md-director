@@ -146,7 +146,7 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
 
 在导演台点 **Report 诊断报告**（在 Export plan 旁边），把 `output/H3MD_reports/` 里的 zip 附到 [GitHub issue](../../issues)。
 里面是我们查问题要用的：显卡、显存（和上次运行的峰值）、ComfyUI / torch / H3MD 和相关节点包的版本、模型找没找到、
-节点设置、按提示词 skill 规则对计划的检查（长度、窗口交接、Remake 关键帧……），以及最近几次运行的 H3MD 日志和报错。
+全部节点参数（带名字，每个节点开着、旁路还是静音，见 `settings.md`）、关键开关（分块、缓存、LoRA……）、和随包示例工作流不同的地方、按提示词 skill 规则对计划的检查（长度、窗口交接、Remake 关键帧……），以及最近几次运行的 H3MD 日志和报错。
 不含用户名、电脑名、文件夹（路径只留文件名），也不含任何图片、视频、音频；不想带提示词就取消勾选 **prompts**。
 报告只存在你自己的电脑上。
 
