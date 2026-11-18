@@ -2,6 +2,19 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.5.2] - 2026-11-17
+* **Fix / 修复: dull, damaged sound with high-res tiling (issue #5).** When the high-res pass has to run in 2 or more
+  strips (long or large shots, e.g. 1080p over ~10 s), the strips cannot share the audio, so the audio was kept at the
+  low-res pass's hand-over estimate - a mid-schedule guess, which sounds muffled / smeared. Generated audio (dialogue,
+  sound effects, a generated song) is now finished after the strips with the same recipe the 1-strip high-res pass
+  uses (same model, schedule, cfg, audio start and noise), with the final video scaled to the low grid and held, so
+  the extra run is cheap (about a quarter of the frame, a few low-res steps). Locked audio (a song you give, audio
+  reuse) is never touched and costs nothing extra; 1-strip runs are unchanged. The log says "audio finished on the low
+  grid". Found by issue #5 (and the out-of-memory in #3 comes from tiling being off).
+  修复：开高清分块且画面切成 2 条以上时（长镜头、大画面，比如 1080p 超过约 10 秒），声音沿用低清阶段半路的估计，
+  听起来发闷、发糊。现在切条后用和整帧高清同样的做法，在低清尺寸上把生成的声音补完（画面用成片缩小后固定不动，额外开销小）；
+  锁定的原声不受影响、不多花时间；不切条时完全不变。
+
 ## [0.5.1] - 2026-11-17
 * **Diagnostic report: every setting, named, compared with the example workflow / 诊断报告：全部参数带名字，并和示例工作流对照.**
   Before, the report held each node's values as an unnamed list and left out bypassed nodes, so "is tiling on?" could

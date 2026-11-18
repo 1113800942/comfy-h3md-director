@@ -188,6 +188,48 @@ class SamplerTests(unittest.TestCase):
         audio_in = comfy.utils.unpack_latents(captured["in_audio"], shapes)[1]
         self.assertTrue(torch.allclose(a.float(), audio_in.float(), atol=1e-4))
 
+    def _strips_only_full_grid(self):
+        """2+ strips at the full grid (w 24), 1 strip at the low grid (w 12) - the issue #5 situation."""
+        real = TILED.plan_tiles
+
+        def plan(patcher, video_shape, *a, **k):
+            k["available"] = 1.0 if video_shape[4] >= 24 else 1e15
+            return real(patcher, video_shape, *a, **k)
+        return patch.object(TILED, "plan_tiles", plan)
+
+    def test_tiling_strips_audio_finished_on_low_grid(self):
+        """0.5.2 (issue #5): generated audio is finished on the low grid when the high-res pass ran in strips."""
+        latent = av_latent(t=7, h=8, w=24, seed=1)
+        captured = {}
+        real_run = TILED._run
+
+        def spy(executor, state, req, stats, noise, latent_image, smp, sigmas, denoise_mask, *a, **k):
+            captured.setdefault("in_audio", latent_image.clone())
+            captured.setdefault("shapes", k.get("latent_shapes") or a[-1])
+            return real_run(executor, state, req, stats, noise, latent_image, smp, sigmas, denoise_mask, *a, **k)
+
+        with self._strips_only_full_grid(), patch.object(TILED, "_run", spy):
+            node, out = self.run_sampler(latent, highres_tiling=True, tiling_overlap=2)
+        self.assertEqual(node.last_tiling.get("audio_finish"), "low grid")
+        self.assertGreater(node.last_tiling["tiles_run"], 1)             # main pass stats kept
+        self.assertEqual(node.last_tiling["audio_finish_run"], {"tiles": 1, "audio": "high-res"})
+        v, a = streams(out)
+        self.assertEqual(tuple(v.shape), (1, 24, 7, 8, 24))
+        self.assertTrue(torch.isfinite(a).all())
+        import comfy.utils
+        audio_in = comfy.utils.unpack_latents(captured["in_audio"], captured["shapes"])[1]
+        self.assertFalse(torch.allclose(a.float(), audio_in.float(), atol=1e-4))   # no longer the hand-over guess
+
+    def test_tiling_strips_locked_audio_untouched(self):
+        audio_t = streams(av_latent(t=7, h=8, w=24, seed=1))[1].shape[-1]
+        latent = av_latent(t=7, h=8, w=24, seed=1, audio_mask=torch.zeros(1, 1, 2, audio_t))
+        song = streams(latent)[1].clone()
+        with self._strips_only_full_grid():
+            node, out = self.run_sampler(latent, highres_tiling=True, tiling_overlap=2)
+        self.assertGreater(node.last_tiling["plan"]["tiles"], 1)
+        self.assertIsNone(node.last_tiling.get("audio_finish"))          # nothing generated: no extra run
+        self.assertTrue(torch.equal(streams(out)[1], song))
+
     def test_frozen_audio_mask(self):
         shapes = [(1, 24, 2, 4, 4), (1, 32, 2, 5)]
         m = TILED.frozen_audio_mask(None, shapes)

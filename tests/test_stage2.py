@@ -105,7 +105,7 @@ class RetryTests(Base):
         self.assertEqual(len(node.last_tiling["retries"]), 1)
         self.assertTrue(torch.isfinite(streams(out)[0]).all())
         recs = TILED.local_records()
-        self.assertEqual([r["ok"] for r in recs], [False, True])
+        self.assertEqual([r["ok"] for r in recs][:2], [False, True])   # 0.5.2: + the low-grid audio run
 
     def test_local_failure_tightens_limit(self):
         before = TILED.calibration(True, "gpu-x")["limit"]

@@ -10,8 +10,10 @@ of every strip starts from the same full-frame state (neighbours included):
   * keyframe conditioning latents are cropped to the strip; references / text / audio stay whole; RoPE positions of
     the strip rows are the FULL frame's (core H3 normalises positions by sqrt(h*w));
   * audio is not predicted per strip: with N > 1 strips the audio part of the denoise mask is set to 0, so the
-    audio stays at the clean audio Luna handed over from the low-res pass (its x0); with 1 strip Luna finishes the
-    audio in the high-res pass as usual;
+    audio stays at the clean audio Luna handed over from the low-res pass (its x0) during the strips; with 1 strip
+    Luna finishes the audio in the high-res pass as usual.  0.5.2 (issue #5): that hand-over audio is only a
+    mid-schedule estimate (dull sound), so after a 2+ strip pass Luna finishes generated audio with the same
+    high-res recipe on the low grid, the final video held (luna_two_pass.finish_audio_low); locked audio untouched;
   * a PREPARE_SAMPLING wrapper makes ComfyUI reserve memory for the largest strip, not for the full frame.
 
 Attribution: tile_spans follows the strip layout technique of nkxx188/ComfyUI-MiniMaxH3-Easy (nodes.py:
@@ -772,7 +774,7 @@ def _run_plan(executor, state, plan, stats, noise, latent_image, sampler, sigmas
     state.joint = {"axis": axis, "spans": spans, "windows": joint_windows(spans), "hw": (H, W)}
     state.budget = math.prod(tshape[1:]) + math.prod(shapes[1][1:])
     LOG.info("%s joint method: %d strips %s[%s] blended per model evaluation (overlap %d, linear feather); "
-             "audio kept at the low-res pass's clean audio; memory reserved for the largest strip %s", _TAG,
+             "audio held during the strips (generated audio is finished on the low grid afterwards); memory reserved for the largest strip %s", _TAG,
              len(spans), plan["axis_name"], ", ".join(f"{s}:{e}" for s, e, _ in spans), plan["overlap"],
              tuple(tshape))
     tic = time.perf_counter()
