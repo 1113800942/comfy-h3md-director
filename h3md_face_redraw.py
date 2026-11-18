@@ -10,13 +10,15 @@ the head, the way the published 'minimax_h3_r2v_perfect_face_refine' workflow do
   3. the crops are VAE-encoded, that latent mask is the noise mask, DifferentialDiffusion softens its edge;
   4. the clip's own sound is encoded and locked (noise mask 0), so the lips keep the timing of the audio;
   5. conditioning = one face close-up (the reference photo cropped to its face, 2 MP), prompt empty;
-  6. euler, beta schedule, 8 steps, denoise 0.8 (0.5 = lighter; up to 1.0);
+  6. euler, beta schedule, 4 steps (our 768 turbo LoRA is a 4-step LoRA), denoise 0.8 (0.5 lighter, up to 1.0);
   7. the save node then runs its restore model (VOSR2) and pastes the crops back through the RAW SAM3 head mask.
 
 Tested 11-17 (L15b, Water wide shot, face ~90 px): face and hair strands clear and close to the reference, calm
 expression, lips on the original audio.
 
-Long videos: units of 124 frames (5 s), neighbours overlap by 17 frames and are cross-faded.  SAM3 masks
+Long videos: units of up to 362 frames (15 s, one pass as tested); a longer clip is chained like the Loop: the
+next unit starts from the previous unit's redrawn overlap (17+ frames, locked) instead of two separate redraws being
+cross-faded (11-17 test: cross-fading 5 s units left a double face where the eyes differed).  SAM3 masks
 (<cache>/face_mask/) and redrawn crops (<cache>/face_layer/) are kept per unit, so a failed save does not redraw.
 SAM3 runs over every unit first and is unloaded before H3 is used.
 
@@ -40,13 +42,13 @@ import torch.nn.functional as F
 LOG = logging.getLogger("H3MD")
 _TAG = "[H3MD FaceRedraw]"
 
-UNIT_FRAMES = 124            # 5 s at 24 fps (5 + 17k)
+UNIT_FRAMES = 362            # 15 s at 24 fps (5 + 17k): one pass, as tested (L15b); longer clips chain units
 OVERLAP_FRAMES = 17          # cross-fade between neighbouring units
 MASK_DIR, LAYER_DIR = "face_mask", "face_layer"
 
 MASK_TEXT = "head"           # 11-17: "face" left the hair blurry; "head" redraws hair and face together
 DENOISE = 0.8                # 0.5 = the published baseline; 0.8 tested best on a 90 px face
-STEPS, SCHEDULER, SAMPLER = 8, "beta", "euler"
+STEPS, SCHEDULER, SAMPLER = 4, "beta", "euler"   # 4 = our 768 turbo LoRA (the reference used an 8-step LoRA)
 SEED = 42
 
 SAM3_CKPT = "sam3.1_multiplex_fp16.safetensors"
@@ -263,7 +265,8 @@ def clean_masks(m: torch.Tensor, threshold: float = CLEAN_THRESHOLD, shrink: int
 
 
 def to_latent_mask(m: torch.Tensor, latents: int, grow_px: int = LATENT_GROW_PX,
-                   grow_frames: int = LATENT_GROW_FRAMES, spatial: int = VAE_SPATIAL, token: int = TOKEN):
+                   grow_frames: int = LATENT_GROW_FRAMES, spatial: int = VAE_SPATIAL, token: int = TOKEN,
+                   lock_frames: int = 0):
     """Pixel masks [T, H, W] -> H3 latent noise mask [latents, H // spatial, W // spatial]: grown in space and time,
     max over every 16x16 cell, then over every 2x2 token, then over the frames of each latent."""
     x = _grow(m.to(torch.float32), int(grow_px))
@@ -283,7 +286,12 @@ def to_latent_mask(m: torch.Tensor, latents: int, grow_px: int = LATENT_GROW_PX,
         LOG.warning("%s %d frames gave %d latents (expected %d): mask frames split evenly", _TAG, T, latents,
                     len(groups))
         groups = even_groups(T, int(latents))
-    return torch.stack([x[s:min(e, T)].amax(0) for s, e in groups])
+    out = torch.stack([x[s:min(e, T)].amax(0) for s, e in groups])
+    if lock_frames > 0:   # latents made only of carried-over frames stay as they are (like the Loop's overlap)
+        for j, (s, e) in enumerate(groups):
+            if e <= lock_frames:
+                out[j] = 0.0
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -455,7 +463,8 @@ class H3MaskRedraw:
         self._dd = None
         self.seconds, self.units, self.empty_frames = 0.0, 0, 0
 
-    def run(self, crops: torch.Tensor, mask: torch.Tensor, audio, unit_index: int = 0) -> torch.Tensor:
+    def run(self, crops: torch.Tensor, mask: torch.Tensor, audio, unit_index: int = 0,
+            lock_frames: int = 0) -> torch.Tensor:
         """crops float [T, H, W, 3] (T = 5 + 17k, H, W multiples of 32), cleaned mask [T, H, W], audio dict ->
         redrawn crops [T, H, W, 3]."""
         t0 = time.time()
@@ -470,7 +479,7 @@ class H3MaskRedraw:
                          width=W, height=H, length=T, ref_image_size="match")[0]
         video = call_node(self.reg, "VAEEncode", pixels=crops[..., :3], vae=self.vae)[0]
         lat_t = int(video["samples"].shape[2])
-        lmask = to_latent_mask(mask, lat_t)
+        lmask = to_latent_mask(mask, lat_t, lock_frames=lock_frames)
         video = call_node(self.reg, "SetLatentNoiseMask", samples=video, mask=lmask)[0]
         alat = call_node(self.reg, "VAEEncodeAudio", audio=audio, vae=self.audio_vae)[0]
         lock = call_node(self.reg, "SolidMask", value=0.0, width=32, height=32)[0]
@@ -550,8 +559,14 @@ def build(read, crop, transform, todo, tracker, painter, masks: UnitStore, layer
             raw = masks.get((a, b))
             no_head += int((raw.flatten(1).amax(1) <= CLEAN_THRESHOLD).sum())
             clean = clean_masks(raw)
-            layer.put((a, b), painter.run(crops_of(a, b), clean, slice_audio(audio, a, b, fps) or
-                                          silence(b - a, fps), k))
+            crops, lock = crops_of(a, b), 0
+            prev = [sp for sp in layer.spans if sp[0] < a < sp[1]]
+            if prev:   # chain like the Loop: the overlap starts from the previous unit's redraw and stays locked
+                pa, pb = max(prev, key=lambda sp: sp[1])
+                lock = min(pb, b) - a
+                crops[:lock] = layer.get((pa, pb))[a - pa:a - pa + lock, ..., :3]
+            layer.put((a, b), painter.run(crops, clean, slice_audio(audio, a, b, fps) or silence(b - a, fps), k,
+                                          lock_frames=lock))
             redrawn += 1
         done_steps += 1
         if progress is not None:

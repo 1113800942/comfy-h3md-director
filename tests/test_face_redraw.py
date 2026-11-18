@@ -15,10 +15,10 @@ import h3md_face_refine_save as F  # noqa: E402
 
 def test_units_and_crossfade():
     assert RD.valid_length(124) == 124 and RD.valid_length(130) == 124 and RD.valid_length(4) == 0
-    sp = RD.unit_spans(362)
+    sp = RD.unit_spans(362, 124)
     assert sp[0] == (0, 124) and sp[-1] == (238, 362) and all((b - a) == 124 for a, b in sp)
     assert all(sp[k + 1][0] <= sp[k][1] - 17 for k in range(len(sp) - 1))
-    assert RD.unit_spans(100) == [(0, 90)] + [(10, 100)]
+    assert RD.unit_spans(100, 124) == [(0, 90)] + [(10, 100)] and RD.unit_spans(362) == [(0, 362)]
     assert RD.span_weight((0, 124), 0, 362) == 1.0 and RD.span_weight((107, 231), 107, 362) < 0.1
 
 
@@ -140,7 +140,7 @@ def test_redraw_recipe_calls():
     by = {}
     for name, kw in _Node.calls:
         by.setdefault(name, []).append(kw)
-    assert by["Sched"][0] == {"model": "model", "scheduler": "beta", "steps": 8, "denoise": 0.8}
+    assert by["Sched"][0] == {"model": "model", "scheduler": "beta", "steps": 4, "denoise": 0.8}
     assert by["Guider"][0]["model"] == "dd-model" and by["KSS"][0]["sampler_name"] == "euler"
     assert by["Noise"][0]["noise_seed"] == 45
     assert by["R2V"][0]["prompt"] == "" and "ref_image_0" in by["R2V"][0]["ref_images"]
@@ -172,7 +172,7 @@ def test_build_runs_sam3_first_then_h3(tmp_path):
     class Painter:
         seconds = 0.0
 
-        def run(self, crops, mask, audio, k):
+        def run(self, crops, mask, audio, k, lock_frames=0):
             order.append(("h3", crops.shape[0], audio["waveform"].shape[-1] > 0))
             return crops * 0 + 0.5
 
@@ -244,3 +244,39 @@ def test_refiner_pastes_redrawn_frames_through_masks(tmp_path):
     plain, drawn = Stitch.calls
     assert plain == ([4, 5, 6, 7, 8, 9], False, 0.0)          # frames 22..27: no redraw -> standard paste
     assert drawn[:2] == ([0, 1, 2, 3], True) and abs(drawn[2] - 0.5) < 0.01   # frames 18..21: redrawn, via the mask
+
+
+def test_lock_frames_zero_the_carried_latents():
+    m = torch.ones(22, 64, 64)
+    lm = RD.to_latent_mask(m, 7, grow_px=0, grow_frames=0, lock_frames=17)
+    assert float(lm[:5].max()) == 0.0 and float(lm[5:].min()) == 1.0   # frames 0..16 = latents 0..4
+
+
+def test_chained_units_start_from_the_previous_redraw(tmp_path):
+    seen = []
+
+    class Tracker:
+        seconds = 0.0
+
+        def track(self, crops):
+            return torch.ones(crops.shape[:3])
+
+        def close(self):
+            pass
+
+    class Painter:
+        seconds = 0.0
+
+        def run(self, crops, mask, audio, k, lock_frames=0):
+            seen.append((k, lock_frames, float(crops[:max(lock_frames, 1)].mean())))
+            return crops * 0 + 0.2 * (k + 1)
+
+    total = 40
+    transform = {"boxes": [[0, 0, 100, 100]] * total, "crop_factor": 2.5}
+    masks = RD.UnitStore(str(tmp_path / "m"), total, "a")
+    layer = RD.UnitStore(str(tmp_path / "l"), total, "b")
+    RD.build(lambda a, b: torch.ones(b - a, 8, 8, 3), lambda f, i: torch.ones(1, 16, 16, 3), transform,
+             [True] * total, Tracker(), Painter(), masks, layer, unit=22)
+    assert seen[0][1] == 0 and all(s[1] >= 17 for s in seen[1:])
+    assert all(abs(s[2] - 0.2 * s[0]) < 0.01 for s in seen[1:])        # overlap = the previous unit's redraw
+    assert RD.UNIT_FRAMES == 362 and RD.STEPS == 4

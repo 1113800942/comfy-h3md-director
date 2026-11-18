@@ -1449,8 +1449,8 @@ class H3MDSaveVideoFaceRefineInterp:
         opt["redraw_prompt"] = ("STRING", {"default": "", "multiline": True, "tooltip":
                                 "face refine prompt. Empty (recommended): the face picture alone guides the redraw."})
         opt["redraw_unit"] = ("INT", {"default": RD.UNIT_FRAMES, "min": 22, "max": 362, "step": 17, "tooltip":
-                              "Frames redrawn together (5 + 17n). Neighbouring units overlap 17 frames and are "
-                              "cross-faded."})
+                              "Frames redrawn in one pass (5 + 17n, up to 15 s). A longer clip is chained: each unit "
+                              "starts from the previous unit's redrawn overlap (locked), like the Loop."})
         opt["redraw_skip_above_px"] = ("INT", {"default": 0, "min": 0, "max": 4096, "tooltip":
                                        "Do not redraw units whose face is taller than this (source pixels); those go "
                                        "through the restore model only. 0 = redraw every face."})
