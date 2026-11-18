@@ -2,6 +2,12 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.5.5] - 2026-11-18
+
+### Changed / 改动
+- Keyframe workflow (multi-person swap): drag the source video into a Load Video node instead of typing its path in the input folder; `start_s` / `end_s` on H3MD Keyframe 1: Prepare recast only that part (cut with its sound; it becomes the plan's source video). The typed path still works for older workflows. Director, Loop and Remake unchanged.
+  关键帧工作流（多人换人）：原片直接拖进「加载视频」节点，不用再放进 input 文件夹填路径；Prepare 上的 `start_s` / `end_s` 只换其中一段（连同原声截出来，作为计划包的原片）。旧工作流填路径照样能用。导演台、Loop、Remake 不变。
+
 ## [0.5.4] - 2026-11-17
 
 ### Fixed / 修复

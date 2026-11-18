@@ -62,6 +62,54 @@ def resolve_video(video: str) -> str:
     return p
 
 
+SOURCES_SUBDIR = "_sources"   # input/H3MD_keyframes/_sources: the dragged-in / trimmed source clips
+
+
+def source_clip(video=None, path=None, start_s=0.0, end_s=0.0, out_dir=None, stem=None):
+    """0.5.5: the source the plan uses.  video = a core VIDEO (Load Video node, drag a file in) or None; path = the
+    old typed path (used when no video is connected).  start_s / end_s (0 = to the end) cut the part to recast.
+    Returns a file path: the original when nothing has to change, else the part (with its sound) written to
+    out_dir (input/H3MD_keyframes/_sources)."""
+    start_s, end_s = max(0.0, float(start_s or 0.0)), max(0.0, float(end_s or 0.0))
+    if end_s and end_s <= start_s:
+        raise K.KeyframeError(f"{TAG} end_s ({end_s:g}) must be after start_s ({start_s:g}), or 0 for the end of "
+                              "the video. 结束秒要大于起始秒（0 = 到片尾）。")
+    src = None
+    if video is not None:
+        s = video.get_stream_source() if hasattr(video, "get_stream_source") else None
+        src = s if isinstance(s, str) and os.path.isfile(s) else None
+    elif path:
+        src = path
+    else:
+        raise K.KeyframeError(f"{TAG} connect a Load Video node (drag the source video into it). "
+                              "接一个「加载视频」节点，把原片拖进去。")
+    trim = start_s > 0 or end_s > 0
+    if src is not None and not trim:
+        return src
+    if video is None:
+        from comfy_api.latest import InputImpl
+        video = InputImpl.VideoFromFile(src)
+    if trim:
+        if not hasattr(video, "as_trimmed"):
+            raise K.KeyframeError(f"{TAG} cutting a part (start_s / end_s) needs a newer ComfyUI (Trim Video); "
+                                  "update ComfyUI. 截取片段需要更新 ComfyUI。")
+        part = video.as_trimmed(start_s, (end_s - start_s) if end_s else 0.0)
+        if part is None:
+            raise K.KeyframeError(f"{TAG} could not cut {start_s:g}-{end_s or 'end'} s from the video "
+                                  f"(it is {video.get_duration():.2f} s long). 截取失败，检查起止秒。")
+        video = part
+    os.makedirs(out_dir, exist_ok=True)
+    base = os.path.splitext(os.path.basename(src))[0] if src else (stem or "source")
+    tag = f"_{start_s:g}-{end_s:g}s" if trim else ""
+    dst = os.path.join(out_dir, f"{base}{tag}.mp4")
+    try:
+        video.save_to(dst, crf=16)
+    except TypeError:            # an older ComfyUI without the crf argument
+        video.save_to(dst)
+    LOG.info("%s source part %s -> %s", TAG, f"{start_s:g}-{end_s or 'end'} s", dst)
+    return dst
+
+
 def plan_path(video: str, path: str) -> str:
     """the source as the plan names it: relative to input with forward slashes (absolute stays absolute)"""
     import folder_paths
@@ -300,8 +348,9 @@ class H3MDKeyframePrepare:
         return {
             "required": {
                 "video": ("STRING", {"default": "", "tooltip":
-                                     "Source video, path inside ComfyUI's input folder (e.g. clips/dance.mp4). "
-                                     "原片在 input 文件夹里的路径。"}),
+                                     "Only when no Load Video node is connected to source_video: the source video's "
+                                     "path inside ComfyUI's input folder (older workflows). 没接加载视频时才用：原片在 "
+                                     "input 里的路径。"}),
                 "mapping": ("STRING", {"multiline": True, "default": "图1换左二\n图2换左四", "tooltip":
                                        "Which picture replaces which person; people are numbered left to right in the "
                                        "first clear frame (see people_sheet). '图1换左二' = picture 1 replaces the "
@@ -324,7 +373,16 @@ class H3MDKeyframePrepare:
                                         "tooltip": "SAM3 detection threshold for 'person'"}),
                 "max_people": ("INT", {"default": 8, "min": 1, "max": 20}),
             },
-            "optional": pics,
+            # 0.5.5 (appended last; old workflows keep the typed path): drag the video into a Load Video node
+            "optional": dict(pics, source_video=("VIDEO", {"tooltip":
+                             "The source video: connect a Load Video node and drag the file into it. When it is "
+                             "connected the 'video' path box is ignored. 原片：接「加载视频」节点，把视频拖进去。"}),
+                             start_s=("FLOAT", {"default": 0.0, "min": 0.0, "max": 36000.0, "step": 0.1,
+                                                "tooltip": "Recast only from this second on (0 = from the start). "
+                                                           "只换这一秒之后的部分。"}),
+                             end_s=("FLOAT", {"default": 0.0, "min": 0.0, "max": 36000.0, "step": 0.1,
+                                              "tooltip": "...up to this second (0 = to the end). The part is cut with "
+                                                         "its sound and becomes the plan's source. 到这一秒（0 = 片尾）。"})),
         }
 
     RETURN_TYPES = ("IMAGE", "IMAGE", "STRING", "H3MD_KEYFRAME_JOB", "IMAGE", "STRING")
@@ -345,7 +403,8 @@ class H3MDKeyframePrepare:
                    "motion), and gives one crop + character picture + prompt per recast person per moment. Put any "
                    "image-edit model after it (lists: it runs once per crop), then H3MD Keyframe 2: Assemble.")
 
-    def prepare(self, video, mapping, descriptions, people_at_start, max_gap_s, prompt_language, threshold, max_people, **pics):
+    def prepare(self, video, mapping, descriptions, people_at_start, max_gap_s, prompt_language, threshold, max_people,
+                source_video=None, start_s=0.0, end_s=0.0, **pics):
         import comfy.utils
         mp = K.parse_mapping(mapping)
         for p in mp:
@@ -354,7 +413,10 @@ class H3MDKeyframePrepare:
                                       f"图{p} 没接。")
         descs = K.parse_descriptions(descriptions, mp.keys())
         looks = {k: s for k, s in enumerate(K.parse_people(people_at_start), 1)}
-        path = resolve_video(video)
+        import folder_paths
+        typed = resolve_video(video) if source_video is None else None
+        path = source_clip(source_video, typed, start_s, end_s,
+                           os.path.join(folder_paths.get_input_directory(), KF_SUBDIR, SOURCES_SUBDIR))
         info = probe(path)
         size = K.target_size(info["width"], info["height"])
         n24 = int(math.floor(info["duration"] * K.FPS + 1e-6))

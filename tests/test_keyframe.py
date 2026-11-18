@@ -1,3 +1,4 @@
+import os
 import numpy as np
 import pytest
 
@@ -133,3 +134,49 @@ def test_place_changes_far_swap():
                                           key=lambda w: w[1][0])})
     ch = K.place_changes(fr, [1, 2, 3, 4, 5])
     assert [c[2] for c in ch] == [[(2, 5)]]
+
+
+def test_source_clip_drag_in_and_trim(tmp_path):
+    import h3md_keyframe_nodes as KN
+    src = tmp_path / "dance.mp4"
+    src.write_bytes(b"x")
+    calls = []
+
+    class Vid:
+        def __init__(self, path=None):
+            self.path = path
+
+        def get_stream_source(self):
+            return self.path
+
+        def get_duration(self):
+            return 26.4
+
+        def as_trimmed(self, start, dur):
+            calls.append(("trim", start, dur))
+            return Vid(None)
+
+        def save_to(self, dst, crf=None):
+            calls.append(("save", os.path.basename(dst), crf))
+            open(dst, "wb").write(b"y")
+
+    out = str(tmp_path / "out")
+    assert KN.source_clip(Vid(str(src)), None, 0, 0, out) == str(src)           # dragged in, whole video: as is
+    p = KN.source_clip(Vid(str(src)), None, 3, 13, out)
+    assert calls == [("trim", 3.0, 10.0), ("save", "dance_3-13s.mp4", 16)] and os.path.isfile(p)
+    calls.clear()
+    KN.source_clip(Vid(str(src)), None, 5, 0, out)                              # 0 = to the end
+    assert calls[0] == ("trim", 5.0, 0.0)
+    for bad in ((Vid(str(src)), None, 10, 4), (None, None, 0, 0)):
+        try:
+            KN.source_clip(*bad, out)
+            raise AssertionError("accepted")
+        except K.KeyframeError:
+            pass
+
+
+def test_prepare_inputs_keep_old_widget_order():
+    import h3md_keyframe_nodes as KN
+    spec = KN.H3MDKeyframePrepare.INPUT_TYPES()
+    assert list(spec["required"])[0] == "video"
+    assert list(spec["optional"])[-3:] == ["source_video", "start_s", "end_s"]

@@ -173,8 +173,9 @@ Replace several people in a real video with your own characters ("picture 1 repl
 keeping the motion, camera, lip movement and soundtrack. The Director runs Viggle Remake's swap model in the low-res
 pass and its own high-res pass on top.
 
-1. **Keyframes + plan, locally in one run**: open `example_workflows/Qwen Image 2.1 Keyframe.json`. Put the source
-   video in ComfyUI's input folder, connect the character pictures, write the mapping ("图1换左二" / "picture 1 ->
+1. **Keyframes + plan, locally in one run**: open `example_workflows/Qwen Image 2.1 Keyframe.json`. Drag the source
+   video into its Load Video node (optional `start_s` / `end_s` on Prepare: recast only that part, cut with its
+   sound), connect the character pictures, write the mapping ("图1换左二" / "picture 1 ->
    left 2"; people are numbered left to right in the first clear frame - check the people sheet) and one description
    line per picture. **H3MD Keyframe 1: Prepare** tracks the people (core SAM3.1), picks keyframe moments at most
    about 5 s apart where the people stand apart, and crops every recast person; any image-edit model redraws the crops

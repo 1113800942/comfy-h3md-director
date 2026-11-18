@@ -122,8 +122,8 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
 把真人视频里的几个人换成你自己的角色(例如"图1换左二"),动作、镜头、口型和原声都保留。导演台低清这一遍用 Viggle Remake
 的换人模型,高清这一遍照常用 H3MD 自己的。
 
-1. **关键帧 + 计划包,本地一次跑完**:打开 `example_workflows/Qwen Image 2.1 Keyframe.json`。原片放进 input 文件夹,
-   接上角色图,写"图1换左二"(人按开头第一帧清楚的画面从左到右编号,看「认人表」核对),每张图写一行外貌描述。
+1. **关键帧 + 计划包,本地一次跑完**:打开 `example_workflows/Qwen Image 2.1 Keyframe.json`。把原片拖进「加载视频」节点
+   (只换其中一段就在 Prepare 填 `start_s` 起始秒、`end_s` 结束秒,连同原声一起截出来),接上角色图,写"图1换左二"(人按开头第一帧清楚的画面从左到右编号,看「认人表」核对),每张图写一行外貌描述。
    **H3MD Keyframe 1: Prepare 准备关键帧** 用 ComfyUI 自带的 SAM3.1 跟踪每个人,挑关键帧时刻(相邻不超过约 5 秒,
    避开人贴在一起),把每个要换的人裁出来;中间用任何修图模型重画(示例是 Qwen Image 2.1 编辑 + 2 步 LoRA + 官方
    提示词增强,也可以换 Flux 等);**H3MD Keyframe 2: Assemble 打包计划** 对色、贴回、写 Remake 计划,计划包存到
