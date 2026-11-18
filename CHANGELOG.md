@@ -9,6 +9,8 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   关键帧工作流（多人换人）：原片直接拖进「加载视频」节点，不用再放进 input 文件夹填路径；Prepare 上的 `start_s` / `end_s` 只换其中一段（连同原声截出来，作为计划包的原片）。旧工作流填路径照样能用。
 - Keyframe example: the prompt enhancer is removed. Prepare already writes the edit prompt for each crop; the enhancer only rewrote it and took most of the time (about 11 of 14 minutes for a 26 s clip). Its prompts now go straight into Text Encode.
   关键帧示例：去掉提示词增强器。Prepare 已经给每张裁图写好修图提示词，增强器只是再改写一遍，却占了大部分时间（26 秒原片 14 分钟里约 11 分钟）。现在 Prepare 的提示词直接进文字编码。
+- Keyframe example: the `descriptions` box now holds correct lines for the three example pictures (it had wrong placeholder text). Without the enhancer the edit model follows the text: one simple line is enough when it matches the picture, but a line that contradicts it (gender, race, clothes) gives the wrong person. Tested: 26 s source, keyframes in 2 min 33 s, all three people right.
+  关键帧示例：descriptions 换成和三张示例角色图对得上的描述（原来是乱写的占位）。不开增强器时修图照文字画：一句简单的、和图对得上就够；和图相反（性别、人种、衣服）就会换错人。实测：26 秒原片，关键帧 2 分 33 秒，三个人都换对。
 - Director: a multi-person swap plan (swapEngine remake) now runs at a size Remake was trained on, whatever the Control Panel says: if the Control Panel size is not 1664x960 / 960x1664 / 2560x1472, the plan's size is used when it is one of them, otherwise 1664x960 (960x1664 for portrait). The run log and report say so. Before, a Control Panel at 1920x1088 stopped the run with an error.
   导演台：多人互换计划（swapEngine remake）自动用 Remake 训练过的尺寸：总控台尺寸不是 1664x960 / 960x1664 / 2560x1472 时，计划里的尺寸合规就用计划的，否则横屏 1664x960、竖屏 960x1664；日志和报告里写明。以前总控台是 1920x1088 会直接报错停下。
 
