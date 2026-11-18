@@ -10,7 +10,7 @@ the head, the way the published 'minimax_h3_r2v_perfect_face_refine' workflow do
   3. the crops are VAE-encoded, that latent mask is the noise mask, DifferentialDiffusion softens its edge;
   4. the clip's own sound is encoded and locked (noise mask 0), so the lips keep the timing of the audio;
   5. conditioning = one face close-up (the reference photo cropped to its face, 2 MP), prompt empty;
-  6. euler, beta schedule, 4 steps (our 768 turbo LoRA is a 4-step LoRA), denoise 0.8 (0.5 lighter, up to 1.0);
+  6. euler, beta schedule, 6 steps (our 768 turbo LoRA; tested at 4 and 8), denoise 0.8 (0.5 lighter, up to 1.0);
   7. the save node then runs its restore model (VOSR2) and pastes the crops back through the RAW SAM3 head mask.
 
 Tested 11-17 (L15b, Water wide shot, face ~90 px): face and hair strands clear and close to the reference, calm
@@ -48,7 +48,7 @@ MASK_DIR, LAYER_DIR = "face_mask", "face_layer"
 
 MASK_TEXT = "head"           # 11-17: "face" left the hair blurry; "head" redraws hair and face together
 DENOISE = 0.8                # 0.5 = the published baseline; 0.8 tested best on a 90 px face
-STEPS, SCHEDULER, SAMPLER = 4, "beta", "euler"   # 4 = our 768 turbo LoRA (the reference used an 8-step LoRA)
+STEPS, SCHEDULER, SAMPLER = 6, "beta", "euler"   # YJ 11-17: 6 (our 768 turbo LoRA is a 4-step LoRA; the reference used an 8-step one)
 SEED = 42
 
 SAM3_CKPT = "sam3.1_multiplex_fp16.safetensors"
@@ -515,11 +515,25 @@ def face_height(transform, i: int) -> float:
     return float(transform["boxes"][i][3]) / float(transform.get("crop_factor", 2.5) or 2.5)
 
 
+def shot_spans(total: int, segments=None, unit: int = UNIT_FRAMES, overlap: int = OVERLAP_FRAMES):
+    """unit_spans inside every shot (the track's segments between hard cuts): a redraw never runs across a cut.
+    Shots shorter than 5 frames get no unit (their frames are only restored)."""
+    out = []
+    for a, b in (segments or [(0, total)]):
+        a, b = max(0, int(a)), min(int(total), int(b))
+        out += [(a + s, a + e) for s, e in unit_spans(b - a, unit, overlap)]
+    return out
+
+
+def _is_oom(exc) -> bool:
+    return isinstance(exc, getattr(torch.cuda, "OutOfMemoryError", ())) or "out of memory" in str(exc).lower()
+
+
 def build(read, crop, transform, todo, tracker, painter, masks: UnitStore, layer: UnitStore, audio=None,
           fps: float = 24.0, unit: int = UNIT_FRAMES, skip_above_px: float = 0.0, check=None, progress=None) -> dict:
     """Pass A: SAM3 head masks for every unit to redraw (then SAM3 is unloaded).  Pass B: H3 redraws each unit.
     read(a, b) -> source frames [b - a, H, W, C]; crop(frame [1, H, W, C], i) -> canvas crop [1, ch, cw, 3]."""
-    spans = unit_spans(layer.total, unit, layer.overlap)
+    spans = shot_spans(layer.total, transform.get("segments"), unit, layer.overlap)
     plan, skipped_big, skipped_empty = [], 0, 0
     for (a, b) in spans:
         idx = [i for i in range(a, b) if todo[i]]
@@ -549,7 +563,7 @@ def build(read, crop, transform, todo, tracker, painter, masks: UnitStore, layer
                 progress(done_steps, steps)
     finally:
         tracker.close()
-    redrawn = reused = no_head = 0
+    redrawn = reused = no_head = oom = 0
     for k, (a, b) in enumerate(plan):
         if check is not None:
             check()
@@ -565,14 +579,26 @@ def build(read, crop, transform, todo, tracker, painter, masks: UnitStore, layer
                 pa, pb = max(prev, key=lambda sp: sp[1])
                 lock = min(pb, b) - a
                 crops[:lock] = layer.get((pa, pb))[a - pa:a - pa + lock, ..., :3]
-            layer.put((a, b), painter.run(crops, clean, slice_audio(audio, a, b, fps) or silence(b - a, fps), k,
-                                          lock_frames=lock))
-            redrawn += 1
+            try:
+                layer.put((a, b), painter.run(crops, clean, slice_audio(audio, a, b, fps) or silence(b - a, fps), k,
+                                              lock_frames=lock))
+                redrawn += 1
+            except Exception as exc:   # out of memory: this unit is only restored, the save goes on
+                if not _is_oom(exc):
+                    raise
+                oom += 1
+                LOG.warning("%s unit %s ran out of memory: not redrawn (set redraw_unit lower)", _TAG, (a, b))
+                del crops
+                try:
+                    import comfy.model_management as mm
+                    mm.soft_empty_cache()
+                except Exception:
+                    pass
         done_steps += 1
         if progress is not None:
             progress(done_steps, steps)
     rep = {"units": len(spans), "redrawn": redrawn, "reused": reused, "skipped_no_face": skipped_empty,
-           "skipped_large_face": skipped_big, "frames_without_head": no_head,
+           "skipped_large_face": skipped_big, "frames_without_head": no_head, "out_of_memory": oom,
            "sam3_s": round(tracker.seconds, 1), "h3_s": round(painter.seconds, 1)}
     LOG.info("%s %s", _TAG, rep)
     return rep

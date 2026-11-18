@@ -1359,6 +1359,10 @@ def _spec_default(spec):
     return None
 
 
+def redraw_restore_name(redraw):
+    return "VOSR2 / SeedVR2 as selected"
+
+
 def redraw_canvas(track_kw):
     """The face redraw needs a manual canvas that is a multiple of 32 and at least RD.CANVAS: -> (track_kw, note)."""
     kw = dict(track_kw)
@@ -1528,6 +1532,25 @@ class H3MDSaveVideoFaceRefineInterp:
             ref, note = RD.crop_face_reference(fr, identity_reference, track_kw["detector"], track_kw["confidence"])
             note = "face redraw " + note
         notes.append(note)
+        # 0.5.3: anything missing -> no redraw, the restore-only refine as before (an old workflow keeps working)
+        missing = [k for k in ("redraw_model", "redraw_clip", "redraw_vae", "redraw_audio_vae") if redraw.get(k) is None]
+        why = None
+        if missing:
+            why = (f"{', '.join(missing)} not connected (connect the sampler's H3 model, text encoder and VAEs; "
+                   "see the example workflows)")
+        elif ref is None:
+            why = "no face picture (connect redraw_face_image, identity_reference, or set the Director ID Ref)"
+        else:
+            try:
+                import folder_paths
+                if not folder_paths.get_full_path("checkpoints", RD.SAM3_CKPT):
+                    why = f"{RD.SAM3_CKPT} is not in models/checkpoints"
+            except Exception:
+                pass
+        if why:
+            note = f"face redraw SKIPPED: {why}; the face was only restored ({redraw_restore_name(redraw)})"
+            LOG.warning("%s %s", _TAG, note)
+            return None, None, None, [note]
         text = str(redraw.get("redraw_mask_text") or RD.MASK_TEXT).strip()
         unit = int(redraw.get("redraw_unit", RD.UNIT_FRAMES))
         denoise = float(redraw.get("redraw_denoise", RD.DENOISE))
@@ -1568,7 +1591,9 @@ class H3MDSaveVideoFaceRefineInterp:
                       face_pick, prompt, extra_pnginfo, unique_id, save_kw, track_kw, stitch_kw, seedvr2_model=None,
                       seedvr2_vae=None, refine_model="VOSR2", stitch_mode="standard", flow_lock=False, redraw=None):
         redraw = dict(redraw or {})
-        track_kw, canvas_note = redraw_canvas(track_kw)   # 0.5.3: face refine = the masked redraw
+        canvas_note = None
+        if all(redraw.get(k) is not None for k in REDRAW_INPUTS[:4]):   # 0.5.3: the redraw needs a 768+ canvas
+            track_kw, canvas_note = redraw_canvas(track_kw)
         g = lambda k, dflt: save_kw.get(k, dflt)  # noqa: E731
         fmt = g("format", "video/h264-mp4")
         removed = sorted(k for k in save_kw if k in S.REMOVED_INPUTS)
@@ -1696,7 +1721,8 @@ class H3MDSaveVideoFaceRefineInterp:
             *plus_notes,
             *([f"face redraw: {redraw_rep['redrawn']} unit(s) redrawn, {redraw_rep['reused']} reused from the cache, "
                f"{redraw_rep['skipped_large_face']} skipped (large face), {redraw_rep['skipped_no_face']} without a "
-               f"face; {redraw_rep['frames_without_head']} frame(s) without a head mask (kept as they were); "
+               f"face, {redraw_rep['out_of_memory']} out of memory (only restored); "
+               f"{redraw_rep['frames_without_head']} frame(s) without a head mask (kept as they were); "
                f"SAM3 {redraw_rep['sam3_s']}s, H3 {redraw_rep['h3_s']}s; denoise {redraw_rep['denoise']}, mask "
                f"'{redraw_rep['mask_text']}'"] if redraw_rep else []),
             *redraw_notes,

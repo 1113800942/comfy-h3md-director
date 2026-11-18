@@ -140,7 +140,7 @@ def test_redraw_recipe_calls():
     by = {}
     for name, kw in _Node.calls:
         by.setdefault(name, []).append(kw)
-    assert by["Sched"][0] == {"model": "model", "scheduler": "beta", "steps": 4, "denoise": 0.8}
+    assert by["Sched"][0] == {"model": "model", "scheduler": "beta", "steps": 6, "denoise": 0.8}
     assert by["Guider"][0]["model"] == "dd-model" and by["KSS"][0]["sampler_name"] == "euler"
     assert by["Noise"][0]["noise_seed"] == 45
     assert by["R2V"][0]["prompt"] == "" and "ref_image_0" in by["R2V"][0]["ref_images"]
@@ -279,4 +279,42 @@ def test_chained_units_start_from_the_previous_redraw(tmp_path):
              [True] * total, Tracker(), Painter(), masks, layer, unit=22)
     assert seen[0][1] == 0 and all(s[1] >= 17 for s in seen[1:])
     assert all(abs(s[2] - 0.2 * s[0]) < 0.01 for s in seen[1:])        # overlap = the previous unit's redraw
-    assert RD.UNIT_FRAMES == 362 and RD.STEPS == 4
+    assert RD.UNIT_FRAMES == 362 and RD.STEPS == 6
+
+
+def test_shot_spans_never_cross_a_cut():
+    sp = RD.shot_spans(400, [(0, 100), (100, 103), (103, 400)], 124)
+    assert all(not (a < 100 < b) and not (a < 103 < b) for a, b in sp)
+    assert sp[0] == (0, 90) and (100, 103) not in sp and sp[-1][1] == 400
+
+
+def test_out_of_memory_unit_is_skipped_not_fatal(tmp_path):
+    class Tracker:
+        seconds = 0.0
+
+        def track(self, crops):
+            return torch.ones(crops.shape[:3])
+
+        def close(self):
+            pass
+
+    class Painter:
+        seconds = 0.0
+
+        def run(self, crops, mask, audio, k, lock_frames=0):
+            raise RuntimeError("CUDA out of memory. Tried to allocate 2 GiB")
+
+    total = 22
+    layer = RD.UnitStore(str(tmp_path / "l"), total, "b")
+    rep = RD.build(lambda a, b: torch.ones(b - a, 8, 8, 3), lambda f, i: torch.ones(1, 16, 16, 3),
+                   {"boxes": [[0, 0, 100, 100]] * total}, [True] * total, Tracker(), Painter(),
+                   RD.UnitStore(str(tmp_path / "m"), total, "a"), layer, unit=22)
+    assert rep["out_of_memory"] == 1 and rep["redrawn"] == 0 and layer.frame(5) is None
+
+
+def test_missing_inputs_fall_back_to_restore_only(tmp_path):
+    node = F.H3MDSaveVideoFaceRefineInterp()
+    layer, masks, rep, notes = node._redraw(None, {}, str(tmp_path), {"boxes": [], "canvas": (768, 768)},
+                                            {"redraw_face_image": torch.rand(1, 8, 8, 3)},
+                                            {"detector": "x", "confidence": 0.3}, {}, None, None)
+    assert layer is None and rep is None and "SKIPPED" in notes[0] and "redraw_model" in notes[0]
