@@ -2,6 +2,12 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.5.4] - 2026-11-17
+
+### Fixed / 修复
+- Face refine: when the hair runs off the bottom of the face crop (long hair in a wide shot), the redrawn head was pasted with a hard straight edge at the crop border, a visible box line on the chest. The paste mask now fades to zero towards every border of the crop, so the redrawn part blends into the original frame.
+  修脸：远景长发超出脸部裁图下边时，贴回会在裁图边框处留下一条直边（胸前一道方框线）。现在贴回遮罩在裁图四周逐渐淡到 0，重画部分和原片自然过渡。
+
 ## [0.5.3] - 2026-11-17
 
 ### Changed / 改动
