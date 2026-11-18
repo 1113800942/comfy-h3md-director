@@ -187,6 +187,29 @@ def _label(row) -> str:
     return f"{t} (#{row.get('id')}{', ' + w if w else ''})"
 
 
+def _rows(value):
+    try:
+        rows = json.loads(value) if isinstance(value, str) else value
+    except ValueError:
+        return None
+    if isinstance(rows, list) and rows and all(isinstance(r, dict) and r.get("key") for r in rows):
+        return {r["key"]: r for r in rows}
+    return None
+
+
+def _lora_rows_diff(example, now):
+    """LoRA rows (Control Panel JSON): only the rows that differ, as 'key on 0.7' / 'key off' text."""
+    a, b = _rows(example), _rows(now)
+    if a is None or b is None:
+        return None
+    show = lambda r: "-" if r is None else (f"on {r.get('strength')}" if r.get("on") else "off")  # noqa: E731
+    keys = [k for k in list(a) + [k for k in b if k not in a]
+            if show(a.get(k)) != show(b.get(k)) or (a.get(k) or {}).get("lora") != (b.get(k) or {}).get("lora")]
+    if not keys:
+        return None
+    return ("; ".join(f"{k} {show(a.get(k))}" for k in keys), "; ".join(f"{k} {show(b.get(k))}" for k in keys))
+
+
 def compare(user: list, example: list) -> dict:
     """Differences between the user's workflow and the example: switched, missing, added, changed, run values."""
     res = {"switched": [], "missing": [], "added": [], "changed": [], "run": []}
@@ -220,6 +243,9 @@ def compare(user: list, example: list) -> dict:
             if _same(ev, v):
                 continue
             row = {"node": _label(u), "param": k, "example": ev, "now": v}
+            rows_diff = _lora_rows_diff(ev, v)
+            if rows_diff:
+                row["example"], row["now"] = rows_diff
             (res["run"] if k in RUN_KEYS else res["changed"]).append(row)
     for u in left:
         res["added"].append({"node": _label(u), "state": u["state"]})

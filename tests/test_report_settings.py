@@ -128,3 +128,10 @@ def test_report_zip_has_settings_md(monkeypatch):
     s = z.read("settings.md").decode("utf-8")
     assert "<plan.json>" in s or "plan_json" not in s
     assert "combat" in json.dumps(r["key_switches"], ensure_ascii=False)     # LoRA rows survive prompts-off scrub
+
+
+def test_lora_rows_diff_readable():
+    ex = '[{"key":"combat","lora":"a","on":true,"strength":0.7},{"key":"weapon","lora":"b","on":false,"strength":0.85}]'
+    now = '[{"key":"combat","lora":"a","on":false,"strength":0.7},{"key":"weapon","lora":"b","on":true,"strength":0.85}]'
+    assert RS._lora_rows_diff(ex, now) == ("combat on 0.7; weapon off", "combat off; weapon on 0.85")
+    assert RS._lora_rows_diff(ex, ex.replace("0.85", "0.5")) is None          # strength of a row that is off
