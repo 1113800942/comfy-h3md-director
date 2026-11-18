@@ -179,7 +179,7 @@ pass and its own high-res pass on top.
    left 2"; people are numbered left to right in the first clear frame - check the people sheet) and one description
    line per picture. **H3MD Keyframe 1: Prepare** tracks the people (core SAM3.1), picks keyframe moments at most
    about 5 s apart where the people stand apart, and crops every recast person; any image-edit model redraws the crops
-   (the example uses Qwen Image 2.1 Edit with a 2-step LoRA and the official prompt enhancer - swap in Flux or another
+   (the example uses Qwen Image 2.1 Edit with a 2-step LoRA, prompts straight from Prepare - swap in Flux or another
    editor if you like); **H3MD Keyframe 2: Assemble** colour-matches and pastes them back, writes the Remake plan and
    saves a plan .zip to `output/H3MD_plans/`. Check the keyframe sheet; redo with another seed if a pose or hand is off.
    Instead of this workflow, an agent can paint the keyframes and write the plan (`skills/h3md-prompt`, section 12d).
@@ -195,7 +195,7 @@ pass and its own high-res pass on top.
 Needs (install yourself): the node pack **ComfyUI-Viggle-Remake** and the model
 `viggle_remake_swap_pruned_int8_convrot.safetensors` in `models/diffusion_models`, both from Hugging Face
 [Viggle/Viggle-Remake](https://huggingface.co/Viggle/Viggle-Remake) (see its model card for the licence). Limits:
-output 1664x960 or 960x1664 (or 2560x1472); 90-345 frames per part (autosplit does it); up to 4 keyframes per part;
+output 1664x960 or 960x1664 (or 2560x1472) - the Director switches to it by itself if the Control Panel says otherwise; 90-345 frames per part (autosplit does it); up to 4 keyframes per part;
 window mode is off for these plans. Works best when each recast person and their character are close in hair length,
 build and gender; with big differences it is not perfect, but usable. The keyframe workflow tracks people by position:
 someone who leaves the frame and comes back may be taken for a new person (the info output warns). Thanks to Viggle

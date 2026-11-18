@@ -281,7 +281,6 @@
      "type": "IMAGE",
      "shape": 6,
      "links": [
-      9,
       13
      ]
     },
@@ -291,7 +290,6 @@
      "type": "IMAGE",
      "shape": 6,
      "links": [
-      10,
       14
      ]
     },
@@ -605,178 +603,6 @@
    ]
   },
   {
-   "id": 25,
-   "type": "QwenImage21PELoaderGGUF",
-   "pos": [
-    -450,
-    710
-   ],
-   "size": [
-    360,
-    270
-   ],
-   "flags": {},
-   "order": 25,
-   "mode": 0,
-   "inputs": [],
-   "outputs": [
-    {
-     "localized_name": "PE Model",
-     "name": "PE Model",
-     "type": "QWE_PE_MODEL",
-     "links": [
-      8
-     ]
-    }
-   ],
-   "properties": {
-    "Node name for S&R": "QwenImage21PELoaderGGUF"
-   },
-   "widgets_values": [
-    "Qwen-Image-2.1-PE-T2I.Q5_K_M.gguf",
-    "Qwen-Image-2.1-PE-I2I.Q5_K_M.gguf",
-    "Qwen-Image-2.1-PE-I2I.mmproj-bf16.gguf",
-    -1,
-    "16384",
-    "",
-    true,
-    false,
-    -1
-   ],
-   "title": "Prompt enhancer models (optional)"
-  },
-  {
-   "id": 26,
-   "type": "QwenImage21PromptEnhancer",
-   "pos": [
-    -50,
-    700
-   ],
-   "size": [
-    300,
-    440
-   ],
-   "flags": {},
-   "order": 26,
-   "mode": 0,
-   "inputs": [
-    {
-     "localized_name": "pe_model",
-     "name": "pe_model",
-     "type": "QWE_PE_MODEL",
-     "shape": 7,
-     "link": 8
-    },
-    {
-     "localized_name": "pe_settings",
-     "name": "pe_settings",
-     "type": "QWE_PE_SETTINGS",
-     "shape": 7,
-     "link": null
-    },
-    {
-     "localized_name": "Image 1",
-     "name": "Image 1",
-     "type": "IMAGE",
-     "shape": 7,
-     "link": 9
-    },
-    {
-     "localized_name": "Image 2",
-     "name": "Image 2",
-     "type": "IMAGE",
-     "shape": 7,
-     "link": 10
-    },
-    {
-     "localized_name": "Image 3",
-     "name": "Image 3",
-     "type": "IMAGE",
-     "shape": 7,
-     "link": null
-    },
-    {
-     "localized_name": "Prompt",
-     "name": "Prompt",
-     "type": "STRING",
-     "widget": {
-      "name": "Prompt"
-     },
-     "link": 11
-    },
-    {
-     "localized_name": "Seed",
-     "name": "Seed",
-     "type": "INT",
-     "widget": {
-      "name": "Seed"
-     },
-     "link": null
-    }
-   ],
-   "outputs": [
-    {
-     "localized_name": "Positive Prompt",
-     "name": "Positive Prompt",
-     "type": "STRING",
-     "shape": 6,
-     "links": [
-      16
-     ]
-    },
-    {
-     "localized_name": "WH Ratio",
-     "name": "WH Ratio",
-     "type": "STRING",
-     "shape": 6,
-     "links": []
-    },
-    {
-     "localized_name": "Ratio Follow",
-     "name": "Ratio Follow",
-     "type": "STRING",
-     "shape": 6,
-     "links": []
-    },
-    {
-     "localized_name": "Parse OK",
-     "name": "Parse OK",
-     "type": "BOOLEAN",
-     "shape": 6,
-     "links": []
-    },
-    {
-     "localized_name": "Width",
-     "name": "Width",
-     "type": "INT",
-     "shape": 6,
-     "links": []
-    },
-    {
-     "localized_name": "Height",
-     "name": "Height",
-     "type": "INT",
-     "shape": 6,
-     "links": []
-    }
-   ],
-   "properties": {
-    "Node name for S&R": "QwenImage21PromptEnhancer"
-   },
-   "widgets_values": [
-    "",
-    "Auto (by images)",
-    42,
-    true,
-    1.6,
-    "Auto (model decides)",
-    1,
-    "Auto (official)",
-    true
-   ],
-   "title": "Prompt enhancer (optional: bypass = use the prompt as is)"
-  },
-  {
    "id": 27,
    "type": "TextEncodeQwenImage21",
    "pos": [
@@ -832,7 +658,7 @@
      "widget": {
       "name": "prompt"
      },
-     "link": 16
+     "link": 11
     },
     {
      "localized_name": "negative_prompt",
@@ -1260,7 +1086,7 @@
     "Node name for S&R": "MarkdownNote"
    },
    "widgets_values": [
-    "## H3MD 多人换人：关键帧 + 计划包（H3MD 0.5.5）\n\n**做什么**：一次运行把原片里要换的人在几个时刻画成新角色（关键帧），再写好 Remake 计划，打成计划包 zip。之后到导演台出片：打开 `H3MD Director Remake.json` →「导入计划」选这个 zip → 运行。\n\n**怎么用**\n1. 把原片拖进左上角的「Source video 原片」（加载视频）节点。只想换其中一段，就在 Prepare 填 `start_s`（起始秒）和 `end_s`（结束秒，0 = 到片尾），这一段连同原声截出来当原片用。横屏出 1664×960，竖屏出 960×1664（居中裁）。\n2. 角色图接到 picture_1…5。\n3. `mapping` 写\"图1换左二\"：人按**开头第一帧清楚的画面从左到右**编号，先跑一次看「认人表」核对编号。\n4. `descriptions` 每张图一行：人种、年龄、长相、发型、每件衣服（建议英文，会写进 Remake 提示词）。`people_at_start` 可选：原片开头从左到右每人一行现在的样子，帮修图认准人。\n5. 运行。看「关键帧总览」，满意就去导演台导入 `output/H3MD_plans/<名字>.zip`；不满意换修图种子再跑。\n\n**修图模型可以换**：中间这组是示例（Qwen Image 2.1 编辑 + 2 步 LoRA + 官方提示词增强）。换成任何\"图1 + 图2 + 提示词 → 新图\"的编辑模型都行：输入接 Prepare 的 crops（图1）、pictures（图2）、prompts，输出接 Assemble 的 edited。提示词增强可以旁路（直接用 Prepare 写好的提示词）。\n\n**效果上限**：被换的人和角色发型长短、体型、性别接近时最好；差很多时不完美，但能用。人走出画面再回来可能被当成新的人（看 info 里的提醒）。\n\n---\n\n**What it does**: one run redraws the recast people at a few moments (keyframes), writes the Remake plan and packs a plan zip. Then open `H3MD Director Remake.json`, Import plan → the zip, run.\n\n**Steps**: drag the source video into the \"Source video\" (Load Video) node, optional `start_s` / `end_s` to recast only that part (cut with its sound); character pictures on picture_1…5; `mapping` like \"picture 1 -> left 2\" (people numbered **left to right in the first clear frame**: check the people sheet); one description line per picture (race, age, face, hair, every garment); run; check the keyframe sheet.\n\n**Any image-edit model works in the middle**: crops = image 1, pictures = image 2, prompts = prompt, its output → Assemble `edited`. The prompt enhancer can be bypassed.\n\n**Models (this example)**: Qwen Image 2.1 int8 / text encoder / VAE from [Comfy-Org/Qwen-Image-2.1](https://huggingface.co/Comfy-Org/Qwen-Image-2.1); 2-step LoRA [linoyts/Qwen-Image-2.1-DMD2-2steps](https://huggingface.co/linoyts/Qwen-Image-2.1-DMD2-2steps) (sigmas 1.0, 0.5, 0; shift 1; cfg 1); prompt enhancer nodes [ComfyUI-Prompt-Enhancer](https://github.com/xiaowuapple-pixel/ComfyUI-Prompt-Enhancer) with the PE GGUF models ([T2I](https://huggingface.co/prithivMLmods/Qwen-Image-2.1-PE-T2I-GGUF), [I2I + mmproj](https://huggingface.co/prithivMLmods/Qwen-Image-2.1-PE-I2I-GGUF)); people tracking: ComfyUI core SAM3.1 `sam3.1_multiplex_fp16.safetensors` in models/checkpoints.\n"
+    "## H3MD 多人换人：关键帧 + 计划包（H3MD 0.5.5）\n\n**做什么**：一次运行把原片里要换的人在几个时刻画成新角色（关键帧），再写好 Remake 计划，打成计划包 zip。之后到导演台出片：打开 `H3MD Director Remake.json` →「导入计划」选这个 zip → 运行。\n\n**怎么用**\n1. 把原片拖进左上角的「Source video 原片」（加载视频）节点。只想换其中一段，就在 Prepare 填 `start_s`（起始秒）和 `end_s`（结束秒，0 = 到片尾），这一段连同原声截出来当原片用。横屏出 1664×960，竖屏出 960×1664（居中裁）。\n2. 角色图接到 picture_1…5。\n3. `mapping` 写\"图1换左二\"：人按**开头第一帧清楚的画面从左到右**编号，先跑一次看「认人表」核对编号。\n4. `descriptions` 每张图一行：人种、年龄、长相、发型、每件衣服（建议英文，会写进 Remake 提示词）。`people_at_start` 可选：原片开头从左到右每人一行现在的样子，帮修图认准人。\n5. 运行。看「关键帧总览」，满意就去导演台导入 `output/H3MD_plans/<名字>.zip`；不满意换修图种子再跑。\n\n**修图模型可以换**：中间这组是示例（Qwen Image 2.1 编辑 + 2 步 LoRA，提示词直接用 Prepare 写好的，不做增强）。换成任何\"图1 + 图2 + 提示词 → 新图\"的编辑模型都行：输入接 Prepare 的 crops（图1）、pictures（图2）、prompts，输出接 Assemble 的 edited。\n\n**效果上限**：被换的人和角色发型长短、体型、性别接近时最好；差很多时不完美，但能用。人走出画面再回来可能被当成新的人（看 info 里的提醒）。\n\n---\n\n**What it does**: one run redraws the recast people at a few moments (keyframes), writes the Remake plan and packs a plan zip. Then open `H3MD Director Remake.json`, Import plan → the zip, run.\n\n**Steps**: drag the source video into the \"Source video\" (Load Video) node, optional `start_s` / `end_s` to recast only that part (cut with its sound); character pictures on picture_1…5; `mapping` like \"picture 1 -> left 2\" (people numbered **left to right in the first clear frame**: check the people sheet); one description line per picture (race, age, face, hair, every garment); run; check the keyframe sheet.\n\n**Any image-edit model works in the middle**: crops = image 1, pictures = image 2, prompts = prompt, its output → Assemble `edited`.\n\n**Models (this example)**: Qwen Image 2.1 int8 / text encoder / VAE from [Comfy-Org/Qwen-Image-2.1](https://huggingface.co/Comfy-Org/Qwen-Image-2.1); 2-step LoRA [linoyts/Qwen-Image-2.1-DMD2-2steps](https://huggingface.co/linoyts/Qwen-Image-2.1-DMD2-2steps) (sigmas 1.0, 0.5, 0; shift 1; cfg 1); people tracking: ComfyUI core SAM3.1 `sam3.1_multiplex_fp16.safetensors` in models/checkpoints.\n"
    ],
    "title": "Note: 怎么用 How to use"
   },
@@ -1623,34 +1449,10 @@
    "MODEL"
   ],
   [
-   8,
-   25,
-   0,
-   26,
-   0,
-   "QWE_PE_MODEL"
-  ],
-  [
-   9,
-   10,
-   0,
-   26,
-   2,
-   "IMAGE"
-  ],
-  [
-   10,
-   10,
-   1,
-   26,
-   3,
-   "IMAGE"
-  ],
-  [
    11,
    10,
    2,
-   26,
+   27,
    5,
    "STRING"
   ],
@@ -1685,14 +1487,6 @@
    27,
    4,
    "VAE"
-  ],
-  [
-   16,
-   26,
-   0,
-   27,
-   5,
-   "STRING"
   ],
   [
    17,

@@ -50,7 +50,9 @@ def test_window_mode_rules():
 def test_remake_rules():
     p = _plan(swapEngine="remake", autoSplit=True, width=1280, height=720)
     F, _ = R.plan_findings(p)
-    assert any(f["cat"] == "settings" and "1664x960" in f["text"] for f in F)
+    # 0.5.5: the Director now switches a swap plan to a Remake size itself and says so (info, not an error)
+    assert any("multi-person swap: size" in f["text"] and "1664x960" in f["text"] for f in F)
+    assert not any(f["sev"] == "error" and "Remake needs" in f["text"] for f in F)
 
 
 def test_markdown_and_zip():

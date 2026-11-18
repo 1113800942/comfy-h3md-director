@@ -84,9 +84,23 @@ class Canvas(unittest.TestCase):
     def test_check(self):
         p = D.parse_plan(json.dumps(raw_plan()))
         self.assertEqual(SWAP.check(p, p["segments"][0]), 480)
-        bad = D.parse_plan(json.dumps(raw_plan(w=1920, h=1088)))
+        bad = dict(p, width=1920, height=1088)
         with self.assertRaises(ValueError):
             SWAP.check(bad, bad["segments"][0])
+
+    def test_size_forced_for_swap(self):
+        # 0.5.5: a Control Panel size Remake can't run is replaced (plan size if valid, else 1664x960 by orientation)
+        p = D.parse_plan(json.dumps(raw_plan()), width=1920, height=1088)
+        self.assertEqual((p["width"], p["height"]), (1664, 960))
+        p = D.parse_plan(json.dumps(raw_plan(w=1088, h=1920)), width=1088, height=1920)
+        self.assertEqual((p["width"], p["height"]), (960, 1664))
+        p = D.parse_plan(json.dumps(raw_plan(w=960, h=1664)), width=1920, height=1088)
+        self.assertEqual((p["width"], p["height"]), (960, 1664))
+        p = D.parse_plan(json.dumps(raw_plan()), width=2560, height=1472)
+        self.assertEqual((p["width"], p["height"]), (2560, 1472))
+        self.assertEqual(SWAP.check(p, p["segments"][0]), 736)
+        p = D.parse_plan(json.dumps(raw_plan(swap=None, w=1920, h=1088)))
+        self.assertEqual((p["width"], p["height"]), (1920, 1088))
 
 
 class Schedule(unittest.TestCase):

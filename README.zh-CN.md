@@ -125,8 +125,8 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
 1. **关键帧 + 计划包,本地一次跑完**:打开 `example_workflows/Qwen Image 2.1 Keyframe.json`。把原片拖进「加载视频」节点
    (只换其中一段就在 Prepare 填 `start_s` 起始秒、`end_s` 结束秒,连同原声一起截出来),接上角色图,写"图1换左二"(人按开头第一帧清楚的画面从左到右编号,看「认人表」核对),每张图写一行外貌描述。
    **H3MD Keyframe 1: Prepare 准备关键帧** 用 ComfyUI 自带的 SAM3.1 跟踪每个人,挑关键帧时刻(相邻不超过约 5 秒,
-   避开人贴在一起),把每个要换的人裁出来;中间用任何修图模型重画(示例是 Qwen Image 2.1 编辑 + 2 步 LoRA + 官方
-   提示词增强,也可以换 Flux 等);**H3MD Keyframe 2: Assemble 打包计划** 对色、贴回、写 Remake 计划,计划包存到
+   避开人贴在一起),把每个要换的人裁出来;中间用任何修图模型重画(示例是 Qwen Image 2.1 编辑 + 2 步 LoRA,提示词直接用
+   Prepare 写好的,也可以换 Flux 等);**H3MD Keyframe 2: Assemble 打包计划** 对色、贴回、写 Remake 计划,计划包存到
    `output/H3MD_plans/`。看「关键帧总览」,姿势或手不对就换种子重跑。也可以不用这个工作流,让智能体画关键帧、
    写计划(`skills/h3md-prompt` 第 12d 节)。Remake 很听关键帧的话,关键帧画得好不好直接决定成片。
 2. **计划**:在导演台(本地或 RunningHub)导入这个 zip。
@@ -138,7 +138,7 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
 
 需要自己安装:节点包 **ComfyUI-Viggle-Remake** 和模型 `viggle_remake_swap_pruned_int8_convrot.safetensors`(放
 `models/diffusion_models`),都在 Hugging Face [Viggle/Viggle-Remake](https://huggingface.co/Viggle/Viggle-Remake)(许可见
-其模型卡)。限制:成片 1664x960 或 960x1664(或 2560x1472);每段 90-345 帧(自动分段会处理);每段最多 4 张关键帧;
+其模型卡)。限制:成片 1664x960 或 960x1664(或 2560x1472),总控台填了别的尺寸导演台会自动改过来;每段 90-345 帧(自动分段会处理);每段最多 4 张关键帧;
 这类计划不能开无接缝长视频。被换的人和角色的发型长短、体型、性别接近时效果最好;差很多时(如男换女、长短发差很多)
 不完美,但能用。关键帧工作流按位置跟人:人走出画面再回来可能被当成新的人(info 里会提醒)。感谢 Viggle 开源 Remake。
 

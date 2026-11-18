@@ -402,6 +402,23 @@ def make_motion(raw):
         return AS.motion_profile(resolve_media_path(f), float(ref["trimStart"]), content / FPS) if f else None
     return motion
 
+REMAKE_SIZES = ((1664, 960), (960, 1664), (2560, 1472), (1472, 2560))   # low-res short edge 480 / 736 at scale 0.5
+
+
+def _remake_size(w: int, h: int, pw: int, ph: int, notes: list) -> tuple:
+    """0.5.5: a swap (Remake) plan only runs at the sizes Remake was trained on. If the Control Panel size is not one
+    of them, use the plan's size when it is, otherwise 1664x960 / 960x1664 with the same orientation, and say so."""
+    if (w, h) in REMAKE_SIZES:
+        return w, h
+    if (pw, ph) in REMAKE_SIZES:
+        nw, nh = pw, ph
+    else:
+        nw, nh = (960, 1664) if h > w else (1664, 960)
+    notes.append(f"multi-person swap: size {w}x{h} -> {nw}x{nh} (Remake only runs at 1664x960 / 960x1664 / 2560x1472)")
+    LOG.warning("[H3MD Director] multi-person swap: size %dx%d -> %dx%d (Remake was trained on 1664x960 / 960x1664 / "
+                "2560x1472). 多人互换：尺寸 %dx%d 自动改成 %dx%d（Remake 只认这几个尺寸）。", w, h, nw, nh, w, h, nw, nh)
+    return nw, nh
+
 
 def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = False, motion=None, sizes=None,
                extra_tokens=None, budget=None, report=None) -> dict:
@@ -443,6 +460,8 @@ def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = Fa
         LOG.warning("[H3MD Director] size %dx%d snapped to %dx%d (multiple of %d, so the low-res pass is exactly half "
                     "size)", w, h, sw, sh, SIZE_ALIGN)
         w, h = sw, sh
+    if raw.get("swapEngine") == "remake":
+        w, h = _remake_size(w, h, pw, ph, notes)
 
     media_raw = raw.get("media") or {}
     media = {"images": {}, "videos": {}, "audios": {}}
