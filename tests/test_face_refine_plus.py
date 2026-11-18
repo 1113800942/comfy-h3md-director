@@ -111,14 +111,15 @@ def test_missing_pack_falls_back_with_notes():
 
 def test_new_inputs_are_optional_and_last():
     opt = list(F.H3MDSaveVideoFaceRefineInterp.INPUT_TYPES()["optional"])
-    assert opt[-2:] == ["stitch_mode", "flow_lock"]
+    k = len(F.REDRAW_INPUTS)                                  # 0.5.3 redraw inputs come after them
+    assert opt[-k - 2:-k] == ["stitch_mode", "flow_lock"] and opt[-k:] == list(F.REDRAW_INPUTS)
 
 
 def test_save_accepts_new_inputs_and_hands_them_over():
     node = F.H3MDSaveVideoFaceRefineInterp()
     seen = {}
 
-    def fake(self, *a):
+    def fake(self, *a, **kw):
         seen["args"] = a
         return {"ui": {}, "result": ("p", 1, None, "r", None)}
 

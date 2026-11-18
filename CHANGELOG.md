@@ -2,6 +2,13 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.5.3] - 2026-11-17
+
+### Changed / 改动
+- Face refine now redraws the head with H3 inside a SAM3 head mask before VOSR2 (replaces the restore-only refine; small faces in wide shots come out clear and like the reference). The save node gets four inputs: `redraw_model`, `redraw_clip`, `redraw_vae`, `redraw_audio_vae` (the sampler's H3 model with the 768 turbo LoRA, text encoder, video VAE, audio VAE); the examples have them wired. The clip's own sound is locked, so lips keep their timing. Defaults: mask `head`, denoise 0.8, 8 steps, empty prompt, face close-up from the identity photo (or `redraw_face_image`). Long videos are redrawn 5 s at a time with 17-frame cross-fades; results are cached in `face_mask/` and `face_layer/`. Needs `sam3.1_multiplex_fp16.safetensors` in `checkpoints/`.
+  修脸改为：先用 SAM3 找头部遮罩，H3 只在遮罩里重画，再 VOSR2，按遮罩贴回（替换原来只修复不重画的修脸；远景小脸能修清楚、像参考图）。保存节点新增四个输入（H3 模型 + 768 加速 LoRA、文字编码器、视频 VAE、音频 VAE），示例已接好；原声锁定，口型不乱。需要 SAM3.1 模型。
+- Example workflows: one speed LoRA only (LightX2V 768 turbo v1.2); DMAD, curveproj-compatible and 10ErosMax speed LoRAs removed. 示例工作流只留一个 768 加速 LoRA，DMAD 等其他加速 LoRA 全部删除。
+
 ## [0.5.2] - 2026-11-17
 * **Fix / 修复: dull, damaged sound with high-res tiling (issue #5).** When the high-res pass has to run in 2 or more
   strips (long or large shots, e.g. 1080p over ~10 s), the strips cannot share the audio, so the audio was kept at the

@@ -65,6 +65,11 @@ try:
 except ImportError:  # flat import (tests)
     import h3md_stream_save as S
 
+try:
+    from . import h3md_face_redraw as RD
+except ImportError:  # flat import (tests)
+    import h3md_face_redraw as RD
+
 LOG = logging.getLogger("H3MD")
 _TAG = "[H3MD FaceRefineSave]"
 NODE_ID = "H3MDSaveVideoFaceRefineInterp"
@@ -944,8 +949,10 @@ class FaceRefiner:
     """crop -> VOSR2 -> stitch for any range of source frames, driven by the whole-clip transform."""
 
     def __init__(self, fr, transform, vosr2_model, vosr2_settings, seed, stitch_kw, seedvr2_model=None,
-                 seedvr2_vae=None, plus=False, flow_lock=False):
+                 seedvr2_vae=None, plus=False, flow_lock=False, layer=None, masks=None):
         self.fr = fr
+        self.layer = layer           # 0.5.3 face redraw: redrawn crops (h3md_face_redraw.UnitStore) or None
+        self.masks = masks           # and the SAM3 head masks they are pasted through
         self.t = transform
         self.cw, self.ch = (int(v) for v in transform["canvas"])
         self.model = vosr2_model
@@ -982,6 +989,8 @@ class FaceRefiner:
             self.orig = orig
         else:
             self.vosr2 = _vosr2_class()()
+        self.mask_stitch = _stitch_class()()   # 0.5.3: redrawn frames are pasted through their head mask
+        self.mask_stitch_kw = dict(self.stitch_kw)
         self.plus = bool(plus)
         if self.plus:                # 0.4.7: H3 Face Stitch Plus (ComfyUI-H3-FaceRefine-Plus)
             self.stitch = _plus_class()()
@@ -1040,23 +1049,42 @@ class FaceRefiner:
             k += part.shape[0]
         return outs[0] if len(outs) == 1 else torch.cat(outs, 0)
 
+    def _cut(self, base, start, i):
+        return self.fr._affine_crop(base[i - start:i - start + 1], self.t["boxes"][i], self.cw, self.ch) \
+            .to(torch.float32)[..., :3]
+
     def refine(self, base, start):
         """base: source frames [start, start + n) float32 -> the same frames with the refined face pasted."""
         n = int(base.shape[0])
         idx = [i for i in range(start, start + n) if self.todo[i]]
         if not idx:
             return base
-        crops = torch.cat([self.fr._affine_crop(base[i - start:i - start + 1], self.t["boxes"][i], self.cw, self.ch)
-                           .to(torch.float32) for i in idx], 0)
-        t0 = time.time()
-        refined = self._upscale(crops)
-        del crops
-        t1 = time.time()
-        out = self.stitch.run(base_images=base, refined_crops=refined, transform=slice_transform(self.t, idx, start, n),
-                              **self.stitch_kw)[0]
+        drawn, masks = {}, {}
+        if self.layer is not None:   # 0.5.3: frames the redraw holds go through their head mask
+            for i in idx:
+                x = self.layer.frame(i)
+                m = self.masks.frame(i) if x is not None and self.masks is not None else None
+                if x is not None and m is not None:
+                    drawn[i], masks[i] = x, m
+        out = base
+        for group, redrawn in (([i for i in idx if i not in drawn], False), ([i for i in idx if i in drawn], True)):
+            if not group:
+                continue
+            crops = torch.cat([drawn[i][..., :3].unsqueeze(0) if redrawn else self._cut(base, start, i)
+                               for i in group], 0)
+            t0 = time.time()
+            refined = self._upscale(crops)
+            del crops
+            t1 = time.time()
+            tr = slice_transform(self.t, group, start, n)
+            if redrawn:
+                out = self.mask_stitch.run(base_images=out, refined_crops=refined, transform=tr,
+                                           masks=torch.stack([masks[i] for i in group], 0), **self.mask_stitch_kw)[0]
+            else:
+                out = self.stitch.run(base_images=out, refined_crops=refined, transform=tr, **self.stitch_kw)[0]
+            self.t_vosr2 += t1 - t0
+            self.t_stitch += time.time() - t1
         t2 = time.time()
-        self.t_vosr2 += t1 - t0
-        self.t_stitch += t2 - t1
         if self.flow is not None:    # base = the frames the face was pasted onto, out = the stitch's result
             out = self.flow.run(base_images=base, refined_images=out, sigma_frac=FLOW_SIGMA_FRAC,
                                 threshold=FLOW_THRESHOLD, base_offset=0)[0]
@@ -1255,6 +1283,9 @@ TRACK_OPTIONAL = ("identity_track", "identity_threshold", "select", "fallback_de
                   "frame_index")
 STITCH_REQUIRED = ("paste_region", "mask_dilation", "feather", "colour_match", "blend", "undetected_frames")
 STITCH_OPTIONAL = ("feather_scales_with_crop",)
+REDRAW_INPUTS = ("redraw_model", "redraw_clip", "redraw_vae", "redraw_audio_vae", "redraw_face_image",
+                 "redraw_denoise", "redraw_steps", "redraw_seed", "redraw_mask_text", "redraw_prompt", "redraw_unit",
+                 "redraw_skip_above_px")   # 0.5.3, appended last
 PLUS_INPUTS = ("stitch_mode", "flow_lock")   # 0.4.7
 CANVAS_DEFAULT = 512
 
@@ -1328,6 +1359,22 @@ def _spec_default(spec):
     return None
 
 
+def redraw_canvas(track_kw):
+    """The face redraw needs a manual canvas that is a multiple of 32 and at least RD.CANVAS: -> (track_kw, note)."""
+    kw = dict(track_kw)
+    w, h = int(kw.get("canvas_width") or 0), int(kw.get("canvas_height") or 0)
+    ok = kw.get("canvas_mode") == "manual" and w >= RD.CANVAS and h >= RD.CANVAS and not w % 32 and not h % 32
+    if ok:
+        return kw, None
+    kw.update(canvas_mode="manual", canvas_width=max(RD.CANVAS, w - w % 32), canvas_height=max(RD.CANVAS, h - h % 32))
+    if kw.get("canvas_mode") != track_kw.get("canvas_mode") or (w, h) != (kw["canvas_width"], kw["canvas_height"]):
+        note = (f"face redraw: crop canvas {track_kw.get('canvas_mode')} {w}x{h} -> manual "
+                f"{kw['canvas_width']}x{kw['canvas_height']}")
+        LOG.info("%s %s", _TAG, note)
+        return kw, note
+    return kw, None
+
+
 def _save_inputs():
     req = dict(S.H3MDSaveVideoInterp.INPUT_TYPES()["required"])
     req.pop("segments", None)
@@ -1343,8 +1390,9 @@ class H3MDSaveVideoFaceRefineInterp:
         }
         req.update(_save_inputs())
         req["face_refine"] = ("BOOLEAN", {"default": True, "tooltip":
-                              "On: track the face over the whole video, restore it with VOSR2 and paste it back, "
-                              "chunk by chunk, before interpolation. Off: exactly H3MD Save Video Interp."})
+                              "On: track the face over the whole video, redraw the head with H3 inside a SAM3 mask "
+                              "(needs redraw_model / clip / vae / audio_vae), restore it with VOSR2 and paste it back, "
+                              "before interpolation. Off: exactly H3MD Save Video Interp."})
         req.update({k: track[k] for k in TRACK_REQUIRED})
         req.update({k: stitch[k] for k in STITCH_REQUIRED})
         req["vosr2_seed"] = ("INT", {"default": 42, "min": 0, "max": 0xFFFFFFFFFFFFFFFF, "tooltip":
@@ -1381,6 +1429,31 @@ class H3MDSaveVideoFaceRefineInterp:
                             "After each pasted chunk, H3 Face Flow Lock (ComfyUI-H3-FaceRefine-Plus) pins the "
                             "refined face features back onto the original frames with smoothed optical flow, so the "
                             "face does not wobble on the head. Needs opencv-python. Not installed: skipped."})
+        # 0.5.3 face redraw by mask (replaces the restore-only refine), appended LAST. face_refine on: SAM3 finds the
+        # head on the enlarged crop, H3 redraws only inside it (the clip's own sound locked, a face close-up as the
+        # reference), then the restore model and the paste through the head mask. Canvas at least 768x768.
+        opt["redraw_model"] = ("MODEL", {"tooltip": "face refine: the H3 model with its 768 turbo LoRA."})
+        opt["redraw_clip"] = ("CLIP", {"tooltip": "face refine: the H3 text encoder."})
+        opt["redraw_vae"] = ("VAE", {"tooltip": "face refine: the H3 video VAE."})
+        opt["redraw_audio_vae"] = ("VAE", {"tooltip": "face refine: the H3 audio VAE (locks the clip's sound, so "
+                                                      "the lips keep their timing)."})
+        opt["redraw_face_image"] = ("IMAGE", {"tooltip": "face refine: a close-up of the face to look like. Not "
+                                    "connected: the identity reference (or the Director ID Ref) cropped to its face."})
+        opt["redraw_denoise"] = ("FLOAT", {"default": RD.DENOISE, "min": 0.3, "max": 1.0, "step": 0.05, "tooltip":
+                                 "How much of the head is redrawn. 0.5 = light (keeps more of the footage); 0.8 = "
+                                 "tested on a 90 px face (clear, close to the reference); up to 1.0."})
+        opt["redraw_steps"] = ("INT", {"default": RD.STEPS, "min": 1, "max": 30})
+        opt["redraw_seed"] = ("INT", {"default": RD.SEED, "min": 0, "max": 0xFFFFFFFFFFFFFFFF})
+        opt["redraw_mask_text"] = ("STRING", {"default": RD.MASK_TEXT, "tooltip":
+                                   "What SAM3 masks on the crop: head (face and hair). 'face' leaves the hair as it is."})
+        opt["redraw_prompt"] = ("STRING", {"default": "", "multiline": True, "tooltip":
+                                "face refine prompt. Empty (recommended): the face picture alone guides the redraw."})
+        opt["redraw_unit"] = ("INT", {"default": RD.UNIT_FRAMES, "min": 22, "max": 362, "step": 17, "tooltip":
+                              "Frames redrawn together (5 + 17n). Neighbouring units overlap 17 frames and are "
+                              "cross-faded."})
+        opt["redraw_skip_above_px"] = ("INT", {"default": 0, "min": 0, "max": 4096, "tooltip":
+                                       "Do not redraw units whose face is taller than this (source pixels); those go "
+                                       "through the restore model only. 0 = redraw every face."})
         return {"required": req, "optional": opt,
                 "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "unique_id": "UNIQUE_ID"}}
 
@@ -1408,7 +1481,8 @@ class H3MDSaveVideoFaceRefineInterp:
         track, stitch = _fr_specs()
         track_kw = {k: kw.get(k, _spec_default(track[k])) for k in TRACK_REQUIRED + TRACK_OPTIONAL}
         stitch_kw = {k: kw.get(k, _spec_default(stitch[k])) for k in STITCH_REQUIRED + STITCH_OPTIONAL}
-        unknown = sorted(set(kw) - save_keys - set(track_kw) - set(stitch_kw) - set(PLUS_INPUTS))
+        unknown = sorted(set(kw) - save_keys - set(track_kw) - set(stitch_kw) - set(PLUS_INPUTS) - set(REDRAW_INPUTS))
+        redraw_kw = {k: kw[k] for k in REDRAW_INPUTS if k in kw}
         stitch_mode, flow_lock = kw.get("stitch_mode", "standard"), bool(kw.get("flow_lock", False))
         if unknown:
             raise TypeError(f"{_TAG} unexpected inputs {unknown}")
@@ -1433,7 +1507,7 @@ class H3MDSaveVideoFaceRefineInterp:
             return self._save_refined(segments, vosr2_model, int(vosr2_seed), vosr2_settings, identity_reference,
                                       identity_clip_vision, face_pick, prompt, extra_pnginfo, unique_id, save_kw,
                                       track_kw, stitch_kw, seedvr2_model, seedvr2_vae, refine_model,
-                                      stitch_mode, flow_lock)
+                                      stitch_mode, flow_lock, redraw=redraw_kw)
         except NothingToRefine as exc:
             LOG.warning("%s face refine skipped: %s Saving the video WITHOUT face refine.", _TAG, exc)
             res = S.H3MDSaveVideoInterp().save(segments=segments, prompt=prompt, extra_pnginfo=extra_pnginfo,
@@ -1442,9 +1516,59 @@ class H3MDSaveVideoFaceRefineInterp:
             return {"ui": res["ui"], "result": (path, frames, video, f"face refine SKIPPED ({exc}); saved without "
                                                                      f"refine ({frames} frames) -> {path}", preview)}
 
+    def _redraw(self, fr, info, cache_dir, transform, redraw, track_kw, stitch_kw, identity_reference, unique_id):
+        """0.5.3: SAM3 head masks + H3 redraw of every unit -> (layer, masks, report, notes)."""
+        cw, ch = (int(v) for v in transform["canvas"])
+        total = len(transform["boxes"])
+        notes = []
+        face = redraw.get("redraw_face_image")
+        if face is not None:
+            ref, note = face[:1], "face redraw: reference = redraw_face_image"
+        else:
+            ref, note = RD.crop_face_reference(fr, identity_reference, track_kw["detector"], track_kw["confidence"])
+            note = "face redraw " + note
+        notes.append(note)
+        text = str(redraw.get("redraw_mask_text") or RD.MASK_TEXT).strip()
+        unit = int(redraw.get("redraw_unit", RD.UNIT_FRAMES))
+        denoise = float(redraw.get("redraw_denoise", RD.DENOISE))
+        mask_set = {"text": text, "unit": unit, "sam3": [RD.SAM3_CKPT, RD.SAM3_THRESHOLD, RD.SAM3_MAX_OBJECTS]}
+        draw_set = dict(mask_set, denoise=denoise, steps=int(redraw.get("redraw_steps", RD.STEPS)),
+                        seed=int(redraw.get("redraw_seed", RD.SEED)), prompt=str(redraw.get("redraw_prompt") or ""),
+                        recipe=[RD.SCHEDULER, RD.SAMPLER, RD.CLEAN_THRESHOLD, RD.CLEAN_SHRINK, RD.CLEAN_MIN_FRAMES,
+                                RD.CLEAN_EDGE_GROW, RD.LATENT_GROW_PX, RD.LATENT_GROW_FRAMES, RD.REF_CROP_FACTOR],
+                        ref=None if ref is None else [int(v) for v in ref.shape] + [round(float(ref.mean()), 5)])
+        masks = RD.UnitStore(os.path.join(cache_dir, RD.MASK_DIR), total, RD.store_key(transform, total, mask_set))
+        layer = RD.UnitStore(os.path.join(cache_dir, RD.LAYER_DIR), total, RD.store_key(transform, total, draw_set))
+        reg = _registry()
+        painter = RD.H3MaskRedraw(reg, redraw.get("redraw_model"), redraw.get("redraw_clip"),
+                                  redraw.get("redraw_vae"), redraw.get("redraw_audio_vae"), ref,
+                                  draw_set["prompt"], denoise, draw_set["steps"], draw_set["seed"])
+        tracker = RD.SAM3Tracker(reg, text)
+        w = paste_weights(transform, stitch_kw.get("undetected_frames", "fade_out"), stitch_kw.get("blend", 1.0))
+        absent = transform.get("absent") or [False] * len(w)
+        todo = [(not absent[i]) and w[i] > REFINE_MIN_WEIGHT for i in range(len(w))]
+        src = S.SegmentSource(info)
+        pbar = S.progress_bar(1, unique_id)
+        try:
+            try:
+                audio = src.audio()
+            except Exception as exc:   # a clip without sound: silence is locked instead
+                audio = None
+                notes.append(f"face redraw: no audio in the clip ({exc}); silence locked")
+            rep = RD.build(src.read, lambda frame, i: fr._affine_crop(frame, transform["boxes"][i], cw, ch),
+                           transform, todo, tracker, painter, masks, layer, audio=audio, fps=float(src.fps),
+                           unit=unit, skip_above_px=float(redraw.get("redraw_skip_above_px", 0) or 0),
+                           check=S.check_interrupt, progress=lambda k, n: pbar.update_absolute(k, n))
+        finally:
+            src.close()
+        rep.update(denoise=denoise, mask_text=text)
+        return layer, masks, rep, notes
+
     def _save_refined(self, segments, vosr2_model, seed, vosr2_settings, identity_reference, identity_clip_vision,
                       face_pick, prompt, extra_pnginfo, unique_id, save_kw, track_kw, stitch_kw, seedvr2_model=None,
-                      seedvr2_vae=None, refine_model="VOSR2", stitch_mode="standard", flow_lock=False):
+                      seedvr2_vae=None, refine_model="VOSR2", stitch_mode="standard", flow_lock=False, redraw=None):
+        redraw = dict(redraw or {})
+        track_kw, canvas_note = redraw_canvas(track_kw)   # 0.5.3: face refine = the masked redraw
         g = lambda k, dflt: save_kw.get(k, dflt)  # noqa: E731
         fmt = g("format", "video/h264-mp4")
         removed = sorted(k for k in save_kw if k in S.REMOVED_INPUTS)
@@ -1517,8 +1641,12 @@ class H3MDSaveVideoFaceRefineInterp:
 
         # ---- pass 2: refine + interpolate + encode, chunk by chunk ---------------------------------------------
         use_plus, use_flow, plus_notes = resolve_plus(stitch_mode, flow_lock)
+        redraw_notes = [canvas_note] if canvas_note else []
+        layer, masks, redraw_rep, notes = self._redraw(fr, info, cache_dir, transform, redraw, track_kw, stitch_kw,
+                                                       identity_reference, unique_id)
+        redraw_notes += notes
         refiner = FaceRefiner(fr, transform, vosr2_model, vosr2_settings, seed, stitch_kw, seedvr2_model, seedvr2_vae,
-                              plus=use_plus, flow_lock=use_flow)
+                              plus=use_plus, flow_lock=use_flow, layer=layer, masks=masks)
         path, file, subfolder, kind = S.save_path(g("filename_prefix", "video/H3MD"), g("output_folder", ""), W, H,
                                                   S.EXTENSIONS[fmt], temp=not g("save_output", True))
         meta = None
@@ -1566,6 +1694,12 @@ class H3MDSaveVideoFaceRefineInterp:
             + (f", refined twice: {rep['refined_twice']}" if rep["refined_twice"] else ""),
             f"interpolated: {rep['interpolated']}  oom events: {rep['oom_events'] or 'none'}  cache: {state}",
             *plus_notes,
+            *([f"face redraw: {redraw_rep['redrawn']} unit(s) redrawn, {redraw_rep['reused']} reused from the cache, "
+               f"{redraw_rep['skipped_large_face']} skipped (large face), {redraw_rep['skipped_no_face']} without a "
+               f"face; {redraw_rep['frames_without_head']} frame(s) without a head mask (kept as they were); "
+               f"SAM3 {redraw_rep['sam3_s']}s, H3 {redraw_rep['h3_s']}s; denoise {redraw_rep['denoise']}, mask "
+               f"'{redraw_rep['mask_text']}'"] if redraw_rep else []),
+            *redraw_notes,
             "--- track ---",
             solved["report"],
         ])

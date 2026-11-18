@@ -2,7 +2,7 @@
   "id": "ae199950-ee64-4d60-918b-94513d88482f",
   "revision": 0,
   "last_node_id": 357,
-  "last_link_id": 231,
+  "last_link_id": 239,
   "nodes": [
     {
       "id": 226,
@@ -215,6 +215,30 @@
           "shape": 7,
           "type": "IMAGE",
           "link": null
+        },
+        {
+          "name": "redraw_model",
+          "shape": 7,
+          "type": "MODEL",
+          "link": 233
+        },
+        {
+          "name": "redraw_clip",
+          "shape": 7,
+          "type": "CLIP",
+          "link": 235
+        },
+        {
+          "name": "redraw_vae",
+          "shape": 7,
+          "type": "VAE",
+          "link": 237
+        },
+        {
+          "name": "redraw_audio_vae",
+          "shape": 7,
+          "type": "VAE",
+          "link": 239
         }
       ],
       "outputs": [
@@ -264,10 +288,10 @@
       "title": "Note: Model links 模型下载",
       "properties": {},
       "widgets_values": [
-        "Guide: H3MD Director README（ComfyUI-H3MD-Director）\n\n## 模型下载 Model Links\n\n**官方 ComfyUI 版（Comfy-Org）**\n- [Hugging Face: Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3)\n\n**diffusion_models**\n- `minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors` — [smhfacct/Minimax-H3-fl2va-ref2va-hybrid-models](https://huggingface.co/smhfacct/Minimax-H3-fl2va-ref2va-hybrid-models)（fl2va 画质 + ref2va 参考通路；推荐 b25-49）\n\n**text_encoders**（二选一）\n- `qwen3vl_32b_minimax_h3_int8_convrot.safetensors` — [Comfy-Org/MiniMax-H3 › text_encoders](https://huggingface.co/Comfy-Org/MiniMax-H3/tree/main/text_encoders)（约 25 GB，提示词理解最准）\n- 省显存方案：`qwen3vl_4b_fp8_scaled.safetensors` — [Comfy-Org/Krea-2 › text_encoders](https://huggingface.co/Comfy-Org/Krea-2/tree/main/text_encoders) ＋ 投影 `mmh3-4b-ClipProj-v3.1-mlp.safetensors` — [NicoLab28/ClipProj-MiniMax-H3](https://huggingface.co/NicoLab28/ClipProj-MiniMax-H3)（放 `clip_projections/`，节点 [ComfyUI-ClipProj](https://github.com/nicolab28/ComfyUI-ClipProj)）\n\n**vae**\n- [minimax_h3_video_vae_fp16.safetensors](https://huggingface.co/Comfy-Org/MiniMax-H3/tree/main/vae)\n- [minimax_h3_audio_vae_fp32.safetensors](https://huggingface.co/Comfy-Org/MiniMax-H3/blob/main/vae/minimax_h3_audio_vae_fp32.safetensors)\n\n**latent_upscale_models**（H3MD Loop 的 upscaler_model）\n- `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors` — [Alissonerdx/Minimax-H3-ComfyUI › latent_upscaler](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI/tree/main/latent_upscaler)\n\n**loras**（本工作流实际开启的）\n- `minimax_h3_DMAD_4step_full_lora_avg_rank_39_bf16.safetensors` — [Kijai/MiniMax-H3-experimental › loras](https://huggingface.co/Kijai/MiniMax-H3-experimental/tree/main/loras)\n- `minimax_h3_fl2v_turbo_4step_v1.3_768p_comfyui_bf16.safetensors` — LightX2V 加速 LoRA — [lightx2v/Minimax-h3-Turbo](https://huggingface.co/lightx2v/Minimax-h3-Turbo/tree/main)\n- `minimax_h3_turbo_v4_step600_ema_DasiwaREF2VAHybridV1_0_curveproj1025_compat_v001.safetensors` — [t8star/minimax_h3_turbo_v4_step600_ema_DasiwaREF2VAHybridV1_0_curveproj1025_compat_v001](https://huggingface.co/t8star/minimax_h3_turbo_v4_step600_ema_DasiwaREF2VAHybridV1_0_curveproj1025_compat_v001/tree/main)\n- `minimax_h3_turbo_4step_10ErosMax_test4_pruned_curveproj1025_exp_v001-T8.safetensors` — [t8star/minimax_h3_turbo_4step_10ErosMax_test4_pruned_curveproj1025_T8](https://huggingface.co/t8star/minimax_h3_turbo_4step_10ErosMax_test4_pruned_curveproj1025_T8)（原文件名没有 `-T8`）\n- `minimax_h3_lms_v1.0_r64.safetensors` — [Alissonerdx/Minimax-H3-ComfyUI](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI)\n- `h3-realism-people-r34l1sm-1.0 strong 0.6-0.8 light.safetensors` — [fal/MiniMax-H3-Realism-People-LoRA](https://huggingface.co/fal/MiniMax-H3-Realism-People-LoRA)（原文件名 `h3-realism-people-t2v-i2v-r2v.safetensors`，触发词 `r34l1sm`）\n- `MiniMaxH3_Enhancer_0.5-1.0_3432130_epoch_10.safetensors` — [Civitai: MiniMaxH3 Enhancers](https://civitai.com/models/3025511/minimaxh3enhancers)\n- `H3_Combat_V2.safetensors` — [JOKER141/MiniMax-H3-Combat-Base-V2](https://huggingface.co/JOKER141/MiniMax-H3-Combat-Base-V2/tree/main)\n- `H3_speed_slider_1.1.safetensors` — **只给名称：请到 Civitai 搜索。作者的模型不是免费的，请支持原作者。**（本工作流默认关闭）\n\n**model_patches**（动作复刻 / 深度控制）\n- [minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors](https://huggingface.co/Comfy-Org/MiniMax-H3/blob/main/model_patches/minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors)\n\n**深度与抠人（H3MD Depth Control 自动调用）**\n- `depth_anything_v2_vitl.pth` — 由 comfyui_controlnet_aux 首次使用时自动下载\n- `sam3.1_multiplex_fp16.safetensors` — ComfyUI 核心 SAM3.1，放 `checkpoints/` — [Comfy-Org/sam3.1 › checkpoints](https://huggingface.co/Comfy-Org/sam3.1/tree/main/checkpoints)\n\n## 模型存放位置 Model Storage Location\n\n```\nComfyUI/\n├── models/\n│   ├── diffusion_models/\n│   │   └── minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors\n│   ├── text_encoders/\n│   │   ├── qwen3vl_32b_minimax_h3_int8_convrot.safetensors\n│   │   └── qwen3vl_4b_fp8_scaled.safetensors        (省显存方案)\n│   ├── clip_projections/\n│   │   └── mmh3-4b-ClipProj-v3.1-mlp.safetensors    (省显存方案)\n│   ├── vae/\n│   │   ├── minimax_h3_video_vae_fp16.safetensors\n│   │   └── minimax_h3_audio_vae_fp32.safetensors\n│   ├── latent_upscale_models/\n│   │   └── h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors\n│   ├── loras/\n│   │   └── (上面列出的 LoRA)\n│   ├── model_patches/\n│   │   └── minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors\n│   └── checkpoints/\n│       └── sam3.1_multiplex_fp16.safetensors\n└── custom_nodes/\n    └── ComfyUI-H3MD-Director/\n```\n\n## 问题反馈 Report Issue\n- 先把 ComfyUI 更新到最新版，并确认模型都放对了文件夹。\n- H3MD 节点问题：GitHub `1113800942/comfy-h3md-director` › Issues\n- 基于 H3MD，作者 YJ（AGPL-3.0-or-later + 署名条款）\n"
+        "Guide: H3MD Director README（ComfyUI-H3MD-Director）\n\n## 模型下载 Model Links\n\n**官方 ComfyUI 版（Comfy-Org）**\n- [Hugging Face: Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3)\n\n**diffusion_models**\n- `minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors` — [smhfacct/Minimax-H3-fl2va-ref2va-hybrid-models](https://huggingface.co/smhfacct/Minimax-H3-fl2va-ref2va-hybrid-models)（fl2va 画质 + ref2va 参考通路；推荐 b25-49）\n\n**text_encoders**（二选一）\n- `qwen3vl_32b_minimax_h3_int8_convrot.safetensors` — [Comfy-Org/MiniMax-H3 › text_encoders](https://huggingface.co/Comfy-Org/MiniMax-H3/tree/main/text_encoders)（约 25 GB，提示词理解最准）\n- 省显存方案：`qwen3vl_4b_fp8_scaled.safetensors` — [Comfy-Org/Krea-2 › text_encoders](https://huggingface.co/Comfy-Org/Krea-2/tree/main/text_encoders) ＋ 投影 `mmh3-4b-ClipProj-v3.1-mlp.safetensors` — [NicoLab28/ClipProj-MiniMax-H3](https://huggingface.co/NicoLab28/ClipProj-MiniMax-H3)（放 `clip_projections/`，节点 [ComfyUI-ClipProj](https://github.com/nicolab28/ComfyUI-ClipProj)）\n\n**vae**\n- [minimax_h3_video_vae_fp16.safetensors](https://huggingface.co/Comfy-Org/MiniMax-H3/tree/main/vae)\n- [minimax_h3_audio_vae_fp32.safetensors](https://huggingface.co/Comfy-Org/MiniMax-H3/blob/main/vae/minimax_h3_audio_vae_fp32.safetensors)\n\n**latent_upscale_models**（H3MD Loop 的 upscaler_model）\n- `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors` — [Alissonerdx/Minimax-H3-ComfyUI › latent_upscaler](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI/tree/main/latent_upscaler)\n\n**loras**（本工作流实际开启的）\n- `minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors` — LightX2V 768 加速 LoRA（唯一的加速 LoRA，1.0） — [lightx2v/Minimax-h3-Turbo](https://huggingface.co/lightx2v/Minimax-h3-Turbo/tree/main)\n- `minimax_h3_lms_v1.0_r64.safetensors` — [Alissonerdx/Minimax-H3-ComfyUI](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI)\n- `h3-realism-people-r34l1sm-1.0 strong 0.6-0.8 light.safetensors` — [fal/MiniMax-H3-Realism-People-LoRA](https://huggingface.co/fal/MiniMax-H3-Realism-People-LoRA)（原文件名 `h3-realism-people-t2v-i2v-r2v.safetensors`，触发词 `r34l1sm`）\n- `MiniMaxH3_Enhancer_0.5-1.0_3432130_epoch_10.safetensors` — [Civitai: MiniMaxH3 Enhancers](https://civitai.com/models/3025511/minimaxh3enhancers)\n- `H3_Combat_V2.safetensors` — [JOKER141/MiniMax-H3-Combat-Base-V2](https://huggingface.co/JOKER141/MiniMax-H3-Combat-Base-V2/tree/main)\n- `H3_speed_slider_1.1.safetensors` — **只给名称：请到 Civitai 搜索。作者的模型不是免费的，请支持原作者。**（本工作流默认关闭）\n\n**model_patches**（动作复刻 / 深度控制）\n- [minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors](https://huggingface.co/Comfy-Org/MiniMax-H3/blob/main/model_patches/minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors)\n\n**深度与抠人（H3MD Depth Control 自动调用）**\n- `depth_anything_v2_vitl.pth` — 由 comfyui_controlnet_aux 首次使用时自动下载\n- `sam3.1_multiplex_fp16.safetensors` — ComfyUI 核心 SAM3.1，放 `checkpoints/` — [Comfy-Org/sam3.1 › checkpoints](https://huggingface.co/Comfy-Org/sam3.1/tree/main/checkpoints)\n\n## 模型存放位置 Model Storage Location\n\n```\nComfyUI/\n├── models/\n│   ├── diffusion_models/\n│   │   └── minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors\n│   ├── text_encoders/\n│   │   ├── qwen3vl_32b_minimax_h3_int8_convrot.safetensors\n│   │   └── qwen3vl_4b_fp8_scaled.safetensors        (省显存方案)\n│   ├── clip_projections/\n│   │   └── mmh3-4b-ClipProj-v3.1-mlp.safetensors    (省显存方案)\n│   ├── vae/\n│   │   ├── minimax_h3_video_vae_fp16.safetensors\n│   │   └── minimax_h3_audio_vae_fp32.safetensors\n│   ├── latent_upscale_models/\n│   │   └── h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors\n│   ├── loras/\n│   │   └── (上面列出的 LoRA)\n│   ├── model_patches/\n│   │   └── minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors\n│   └── checkpoints/\n│       └── sam3.1_multiplex_fp16.safetensors\n└── custom_nodes/\n    └── ComfyUI-H3MD-Director/\n```\n\n## 问题反馈 Report Issue\n- 先把 ComfyUI 更新到最新版，并确认模型都放对了文件夹。\n- H3MD 节点问题：GitHub `1113800942/comfy-h3md-director` › Issues\n- 基于 H3MD，作者 YJ（AGPL-3.0-or-later + 署名条款）\n"
       ],
       "widgets_values_named": {
-        "text": "Guide: H3MD Director README（ComfyUI-H3MD-Director）\n\n## 模型下载 Model Links\n\n**官方 ComfyUI 版（Comfy-Org）**\n- [Hugging Face: Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3)\n\n**diffusion_models**\n- `minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors` — [smhfacct/Minimax-H3-fl2va-ref2va-hybrid-models](https://huggingface.co/smhfacct/Minimax-H3-fl2va-ref2va-hybrid-models)（fl2va 画质 + ref2va 参考通路；推荐 b25-49）\n\n**text_encoders**（二选一）\n- `qwen3vl_32b_minimax_h3_int8_convrot.safetensors` — [Comfy-Org/MiniMax-H3 › text_encoders](https://huggingface.co/Comfy-Org/MiniMax-H3/tree/main/text_encoders)（约 25 GB，提示词理解最准）\n- 省显存方案：`qwen3vl_4b_fp8_scaled.safetensors` — [Comfy-Org/Krea-2 › text_encoders](https://huggingface.co/Comfy-Org/Krea-2/tree/main/text_encoders) ＋ 投影 `mmh3-4b-ClipProj-v3.1-mlp.safetensors` — [NicoLab28/ClipProj-MiniMax-H3](https://huggingface.co/NicoLab28/ClipProj-MiniMax-H3)（放 `clip_projections/`，节点 [ComfyUI-ClipProj](https://github.com/nicolab28/ComfyUI-ClipProj)）\n\n**vae**\n- [minimax_h3_video_vae_fp16.safetensors](https://huggingface.co/Comfy-Org/MiniMax-H3/tree/main/vae)\n- [minimax_h3_audio_vae_fp32.safetensors](https://huggingface.co/Comfy-Org/MiniMax-H3/blob/main/vae/minimax_h3_audio_vae_fp32.safetensors)\n\n**latent_upscale_models**（H3MD Loop 的 upscaler_model）\n- `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors` — [Alissonerdx/Minimax-H3-ComfyUI › latent_upscaler](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI/tree/main/latent_upscaler)\n\n**loras**（本工作流实际开启的）\n- `minimax_h3_DMAD_4step_full_lora_avg_rank_39_bf16.safetensors` — [Kijai/MiniMax-H3-experimental › loras](https://huggingface.co/Kijai/MiniMax-H3-experimental/tree/main/loras)\n- `minimax_h3_fl2v_turbo_4step_v1.3_768p_comfyui_bf16.safetensors` — LightX2V 加速 LoRA — [lightx2v/Minimax-h3-Turbo](https://huggingface.co/lightx2v/Minimax-h3-Turbo/tree/main)\n- `minimax_h3_turbo_v4_step600_ema_DasiwaREF2VAHybridV1_0_curveproj1025_compat_v001.safetensors` — [t8star/minimax_h3_turbo_v4_step600_ema_DasiwaREF2VAHybridV1_0_curveproj1025_compat_v001](https://huggingface.co/t8star/minimax_h3_turbo_v4_step600_ema_DasiwaREF2VAHybridV1_0_curveproj1025_compat_v001/tree/main)\n- `minimax_h3_turbo_4step_10ErosMax_test4_pruned_curveproj1025_exp_v001-T8.safetensors` — [t8star/minimax_h3_turbo_4step_10ErosMax_test4_pruned_curveproj1025_T8](https://huggingface.co/t8star/minimax_h3_turbo_4step_10ErosMax_test4_pruned_curveproj1025_T8)（原文件名没有 `-T8`）\n- `minimax_h3_lms_v1.0_r64.safetensors` — [Alissonerdx/Minimax-H3-ComfyUI](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI)\n- `h3-realism-people-r34l1sm-1.0 strong 0.6-0.8 light.safetensors` — [fal/MiniMax-H3-Realism-People-LoRA](https://huggingface.co/fal/MiniMax-H3-Realism-People-LoRA)（原文件名 `h3-realism-people-t2v-i2v-r2v.safetensors`，触发词 `r34l1sm`）\n- `MiniMaxH3_Enhancer_0.5-1.0_3432130_epoch_10.safetensors` — [Civitai: MiniMaxH3 Enhancers](https://civitai.com/models/3025511/minimaxh3enhancers)\n- `H3_Combat_V2.safetensors` — [JOKER141/MiniMax-H3-Combat-Base-V2](https://huggingface.co/JOKER141/MiniMax-H3-Combat-Base-V2/tree/main)\n- `H3_speed_slider_1.1.safetensors` — **只给名称：请到 Civitai 搜索。作者的模型不是免费的，请支持原作者。**（本工作流默认关闭）\n\n**model_patches**（动作复刻 / 深度控制）\n- [minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors](https://huggingface.co/Comfy-Org/MiniMax-H3/blob/main/model_patches/minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors)\n\n**深度与抠人（H3MD Depth Control 自动调用）**\n- `depth_anything_v2_vitl.pth` — 由 comfyui_controlnet_aux 首次使用时自动下载\n- `sam3.1_multiplex_fp16.safetensors` — ComfyUI 核心 SAM3.1，放 `checkpoints/` — [Comfy-Org/sam3.1 › checkpoints](https://huggingface.co/Comfy-Org/sam3.1/tree/main/checkpoints)\n\n## 模型存放位置 Model Storage Location\n\n```\nComfyUI/\n├── models/\n│   ├── diffusion_models/\n│   │   └── minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors\n│   ├── text_encoders/\n│   │   ├── qwen3vl_32b_minimax_h3_int8_convrot.safetensors\n│   │   └── qwen3vl_4b_fp8_scaled.safetensors        (省显存方案)\n│   ├── clip_projections/\n│   │   └── mmh3-4b-ClipProj-v3.1-mlp.safetensors    (省显存方案)\n│   ├── vae/\n│   │   ├── minimax_h3_video_vae_fp16.safetensors\n│   │   └── minimax_h3_audio_vae_fp32.safetensors\n│   ├── latent_upscale_models/\n│   │   └── h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors\n│   ├── loras/\n│   │   └── (上面列出的 LoRA)\n│   ├── model_patches/\n│   │   └── minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors\n│   └── checkpoints/\n│       └── sam3.1_multiplex_fp16.safetensors\n└── custom_nodes/\n    └── ComfyUI-H3MD-Director/\n```\n\n## 问题反馈 Report Issue\n- 先把 ComfyUI 更新到最新版，并确认模型都放对了文件夹。\n- H3MD 节点问题：GitHub `1113800942/comfy-h3md-director` › Issues\n- 基于 H3MD，作者 YJ（AGPL-3.0-or-later + 署名条款）\n"
+        "text": "Guide: H3MD Director README（ComfyUI-H3MD-Director）\n\n## 模型下载 Model Links\n\n**官方 ComfyUI 版（Comfy-Org）**\n- [Hugging Face: Comfy-Org/MiniMax-H3](https://huggingface.co/Comfy-Org/MiniMax-H3)\n\n**diffusion_models**\n- `minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors` — [smhfacct/Minimax-H3-fl2va-ref2va-hybrid-models](https://huggingface.co/smhfacct/Minimax-H3-fl2va-ref2va-hybrid-models)（fl2va 画质 + ref2va 参考通路；推荐 b25-49）\n\n**text_encoders**（二选一）\n- `qwen3vl_32b_minimax_h3_int8_convrot.safetensors` — [Comfy-Org/MiniMax-H3 › text_encoders](https://huggingface.co/Comfy-Org/MiniMax-H3/tree/main/text_encoders)（约 25 GB，提示词理解最准）\n- 省显存方案：`qwen3vl_4b_fp8_scaled.safetensors` — [Comfy-Org/Krea-2 › text_encoders](https://huggingface.co/Comfy-Org/Krea-2/tree/main/text_encoders) ＋ 投影 `mmh3-4b-ClipProj-v3.1-mlp.safetensors` — [NicoLab28/ClipProj-MiniMax-H3](https://huggingface.co/NicoLab28/ClipProj-MiniMax-H3)（放 `clip_projections/`，节点 [ComfyUI-ClipProj](https://github.com/nicolab28/ComfyUI-ClipProj)）\n\n**vae**\n- [minimax_h3_video_vae_fp16.safetensors](https://huggingface.co/Comfy-Org/MiniMax-H3/tree/main/vae)\n- [minimax_h3_audio_vae_fp32.safetensors](https://huggingface.co/Comfy-Org/MiniMax-H3/blob/main/vae/minimax_h3_audio_vae_fp32.safetensors)\n\n**latent_upscale_models**（H3MD Loop 的 upscaler_model）\n- `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors` — [Alissonerdx/Minimax-H3-ComfyUI › latent_upscaler](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI/tree/main/latent_upscaler)\n\n**loras**（本工作流实际开启的）\n- `minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors` — LightX2V 768 加速 LoRA（唯一的加速 LoRA，1.0） — [lightx2v/Minimax-h3-Turbo](https://huggingface.co/lightx2v/Minimax-h3-Turbo/tree/main)\n- `minimax_h3_lms_v1.0_r64.safetensors` — [Alissonerdx/Minimax-H3-ComfyUI](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI)\n- `h3-realism-people-r34l1sm-1.0 strong 0.6-0.8 light.safetensors` — [fal/MiniMax-H3-Realism-People-LoRA](https://huggingface.co/fal/MiniMax-H3-Realism-People-LoRA)（原文件名 `h3-realism-people-t2v-i2v-r2v.safetensors`，触发词 `r34l1sm`）\n- `MiniMaxH3_Enhancer_0.5-1.0_3432130_epoch_10.safetensors` — [Civitai: MiniMaxH3 Enhancers](https://civitai.com/models/3025511/minimaxh3enhancers)\n- `H3_Combat_V2.safetensors` — [JOKER141/MiniMax-H3-Combat-Base-V2](https://huggingface.co/JOKER141/MiniMax-H3-Combat-Base-V2/tree/main)\n- `H3_speed_slider_1.1.safetensors` — **只给名称：请到 Civitai 搜索。作者的模型不是免费的，请支持原作者。**（本工作流默认关闭）\n\n**model_patches**（动作复刻 / 深度控制）\n- [minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors](https://huggingface.co/Comfy-Org/MiniMax-H3/blob/main/model_patches/minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors)\n\n**深度与抠人（H3MD Depth Control 自动调用）**\n- `depth_anything_v2_vitl.pth` — 由 comfyui_controlnet_aux 首次使用时自动下载\n- `sam3.1_multiplex_fp16.safetensors` — ComfyUI 核心 SAM3.1，放 `checkpoints/` — [Comfy-Org/sam3.1 › checkpoints](https://huggingface.co/Comfy-Org/sam3.1/tree/main/checkpoints)\n\n## 模型存放位置 Model Storage Location\n\n```\nComfyUI/\n├── models/\n│   ├── diffusion_models/\n│   │   └── minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors\n│   ├── text_encoders/\n│   │   ├── qwen3vl_32b_minimax_h3_int8_convrot.safetensors\n│   │   └── qwen3vl_4b_fp8_scaled.safetensors        (省显存方案)\n│   ├── clip_projections/\n│   │   └── mmh3-4b-ClipProj-v3.1-mlp.safetensors    (省显存方案)\n│   ├── vae/\n│   │   ├── minimax_h3_video_vae_fp16.safetensors\n│   │   └── minimax_h3_audio_vae_fp32.safetensors\n│   ├── latent_upscale_models/\n│   │   └── h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors\n│   ├── loras/\n│   │   └── (上面列出的 LoRA)\n│   ├── model_patches/\n│   │   └── minimax_h3_fun_controlnet_union_pruned_int8_convrot.safetensors\n│   └── checkpoints/\n│       └── sam3.1_multiplex_fp16.safetensors\n└── custom_nodes/\n    └── ComfyUI-H3MD-Director/\n```\n\n## 问题反馈 Report Issue\n- 先把 ComfyUI 更新到最新版，并确认模型都放对了文件夹。\n- H3MD 节点问题：GitHub `1113800942/comfy-h3md-director` › Issues\n- 基于 H3MD，作者 YJ（AGPL-3.0-or-later + 署名条款）\n"
       },
       "color": "#432",
       "bgcolor": "#000"
@@ -487,17 +511,17 @@
         "[{\"key\": \"combat\", \"lora\": \"H3_Combat_V2.safetensors\", \"on\": true, \"strength\": 0.49}, {\"key\": \"realism\", \"lora\": \"h3-realism-people-r34l1sm-1.0 strong 0.6-0.8 light.safetensors\", \"on\": true, \"strength\": 0.6}, {\"key\": \"weapon\", \"lora\": \"H3-Bunny_weapon_combatV1.safetensors\", \"on\": false, \"strength\": 0.6}, {\"key\": \"fightflow\", \"lora\": \"H3_Fight_Flow_V1-Unarmed combat interaction Melee weapon interaction Gun-fu interaction 一采 0.65 - 二采 0.25.safetensors\", \"on\": false, \"strength\": 0.25}, {\"key\": \"motion_repair\", \"lora\": \"H3 Motion_Repair_V2.safetensors\", \"on\": true, \"strength\": 0.25}, {\"key\": \"cinematic\", \"lora\": \"Minimax H3 电影感0.1 cinematic texture.safetensors\", \"on\": true, \"strength\": 0.2}, {\"key\": \"lms\", \"lora\": \"minimax_h3_lms_v1.0_r64.safetensors\", \"on\": true, \"strength\": 0.2}, {\"key\": \"vbvr\", \"lora\": \"H3-Licon-VBVR-I2V-1pass1.0-2pass0.3.safetensors\", \"on\": true, \"strength\": 0.5}]"
       ],
       "widgets_values_named": {
-        "width": 1088,
-        "height": 1920,
-        "interpolate": false,
-        "fps": 24,
+        "width": 1664,
+        "height": 960,
+        "interpolate": true,
+        "fps": 48,
         "face_refine": false,
         "seed": 0,
         "control_after_generate": "randomize",
         "segments_to_run": "",
-        "style": "balanced",
-        "lora_low": "[{\"key\":\"dasiwa\",\"lora\":\"minimax_h3_turbo_v4_step600_ema_DasiwaREF2VAHybridV1_0_curveproj1025_compat_v001.safetensors\",\"on\":true,\"strength\":0.9},{\"key\":\"turbo\",\"lora\":\"minimax_h3_turbo_4step_10ErosMax_test4_pruned_curveproj1025_exp_v001-T8.safetensors\",\"on\":true,\"strength\":0.5},{\"key\":\"weapon\",\"lora\":\"H3-Bunny_weapon_combatV1.safetensors\",\"on\":false,\"strength\":0.45},{\"key\":\"fightflow\",\"lora\":\"H3_Fight_Flow_V1-Unarmed combat interaction Melee weapon interaction Gun-fu interaction 一采 0.65 - 二采 0.25.safetensors\",\"on\":false,\"strength\":0.65},{\"key\":\"motion_repair\",\"lora\":\"H3 Motion_Repair_V2.safetensors\",\"on\":true,\"strength\":0.75},{\"key\":\"speed\",\"lora\":\"H3_speed_slider_1.1.safetensors\",\"on\":true,\"strength\":3},{\"key\":\"cinematic\",\"lora\":\"Minimax H3 电影感0.1 cinematic texture.safetensors\",\"on\":true,\"strength\":0.5},{\"key\":\"vbvr\",\"lora\":\"H3-Licon-VBVR-I2V-1pass1.0-2pass0.3.safetensors\",\"on\":true,\"strength\":1},{\"key\":\"enhancer\",\"lora\":\"MiniMaxH3_Enhancer_0.5-1.0_3432130_epoch_10.safetensors\",\"on\":true,\"strength\":0.55}]",
-        "lora_high": "[{\"key\":\"dasiwa\",\"lora\":\"minimax_h3_turbo_v4_step600_ema_DasiwaREF2VAHybridV1_0_curveproj1025_compat_v001.safetensors\",\"on\":true,\"strength\":0.5},{\"key\":\"turbo\",\"lora\":\"minimax_h3_turbo_4step_10ErosMax_test4_pruned_curveproj1025_exp_v001-T8.safetensors\",\"on\":true,\"strength\":0.7},{\"key\":\"realism\",\"lora\":\"h3-realism-people-r34l1sm-1.0 strong 0.6-0.8 light.safetensors\",\"on\":true,\"strength\":0.6},{\"key\":\"weapon\",\"lora\":\"H3-Bunny_weapon_combatV1.safetensors\",\"on\":false,\"strength\":0.6},{\"key\":\"fightflow\",\"lora\":\"H3_Fight_Flow_V1-Unarmed combat interaction Melee weapon interaction Gun-fu interaction 一采 0.65 - 二采 0.25.safetensors\",\"on\":false,\"strength\":0.25},{\"key\":\"motion_repair\",\"lora\":\"H3 Motion_Repair_V2.safetensors\",\"on\":true,\"strength\":0.25},{\"key\":\"cinematic\",\"lora\":\"Minimax H3 电影感0.1 cinematic texture.safetensors\",\"on\":true,\"strength\":0.2},{\"key\":\"lms\",\"lora\":\"minimax_h3_lms_v1.0_r64.safetensors\",\"on\":true,\"strength\":0.2},{\"key\":\"vbvr\",\"lora\":\"H3-Licon-VBVR-I2V-1pass1.0-2pass0.3.safetensors\",\"on\":true,\"strength\":0.5}]"
+        "style": "remake",
+        "lora_low": "[{\"key\": \"combat\", \"lora\": \"H3_Combat_V2.safetensors\", \"on\": true, \"strength\": 0.7}, {\"key\": \"weapon\", \"lora\": \"H3-Bunny_weapon_combatV1.safetensors\", \"on\": false, \"strength\": 0.45}, {\"key\": \"fightflow\", \"lora\": \"H3_Fight_Flow_V1-Unarmed combat interaction Melee weapon interaction Gun-fu interaction 一采 0.65 - 二采 0.25.safetensors\", \"on\": false, \"strength\": 0.65}, {\"key\": \"motion_repair\", \"lora\": \"H3 Motion_Repair_V2.safetensors\", \"on\": true, \"strength\": 0.75}, {\"key\": \"speed\", \"lora\": \"H3_speed_slider_1.1.safetensors\", \"on\": true, \"strength\": 3.0}, {\"key\": \"cinematic\", \"lora\": \"Minimax H3 电影感0.1 cinematic texture.safetensors\", \"on\": true, \"strength\": 0.5}, {\"key\": \"vbvr\", \"lora\": \"H3-Licon-VBVR-I2V-1pass1.0-2pass0.3.safetensors\", \"on\": true, \"strength\": 1.0}, {\"key\": \"enhancer\", \"lora\": \"MiniMaxH3_Enhancer_0.5-1.0_3432130_epoch_10.safetensors\", \"on\": true, \"strength\": 0.55}]",
+        "lora_high": "[{\"key\": \"combat\", \"lora\": \"H3_Combat_V2.safetensors\", \"on\": true, \"strength\": 0.49}, {\"key\": \"realism\", \"lora\": \"h3-realism-people-r34l1sm-1.0 strong 0.6-0.8 light.safetensors\", \"on\": true, \"strength\": 0.6}, {\"key\": \"weapon\", \"lora\": \"H3-Bunny_weapon_combatV1.safetensors\", \"on\": false, \"strength\": 0.6}, {\"key\": \"fightflow\", \"lora\": \"H3_Fight_Flow_V1-Unarmed combat interaction Melee weapon interaction Gun-fu interaction 一采 0.65 - 二采 0.25.safetensors\", \"on\": false, \"strength\": 0.25}, {\"key\": \"motion_repair\", \"lora\": \"H3 Motion_Repair_V2.safetensors\", \"on\": true, \"strength\": 0.25}, {\"key\": \"cinematic\", \"lora\": \"Minimax H3 电影感0.1 cinematic texture.safetensors\", \"on\": true, \"strength\": 0.2}, {\"key\": \"lms\", \"lora\": \"minimax_h3_lms_v1.0_r64.safetensors\", \"on\": true, \"strength\": 0.2}, {\"key\": \"vbvr\", \"lora\": \"H3-Licon-VBVR-I2V-1pass1.0-2pass0.3.safetensors\", \"on\": true, \"strength\": 0.5}]"
       }
     },
     {
@@ -522,7 +546,8 @@
           "name": "VAE",
           "type": "VAE",
           "links": [
-            218
+            218,
+            239
           ]
         },
         {
@@ -531,7 +556,8 @@
           "name": "VAE_1",
           "type": "VAE",
           "links": [
-            215
+            215,
+            237
           ]
         },
         {
@@ -539,7 +565,8 @@
           "name": "clip",
           "type": "CLIP",
           "links": [
-            217
+            217,
+            235
           ]
         },
         {
@@ -548,7 +575,8 @@
           "name": "MODEL",
           "type": "MODEL",
           "links": [
-            212
+            212,
+            233
           ]
         },
         {
@@ -1228,6 +1256,38 @@
       339,
       2,
       "H3MD_PLAN"
+    ],
+    [
+      233,
+      338,
+      3,
+      304,
+      6,
+      "MODEL"
+    ],
+    [
+      235,
+      338,
+      2,
+      304,
+      7,
+      "CLIP"
+    ],
+    [
+      237,
+      338,
+      1,
+      304,
+      8,
+      "VAE"
+    ],
+    [
+      239,
+      338,
+      0,
+      304,
+      9,
+      "VAE"
     ]
   ],
   "groups": [
@@ -1253,7 +1313,7 @@
         "state": {
           "lastGroupId": 6,
           "lastNodeId": 349,
-          "lastLinkId": 226,
+          "lastLinkId": 239,
           "lastRerouteId": 0
         },
         "revision": 0,
@@ -1349,6 +1409,54 @@
             "pos": [
               1125.66015625,
               894
+            ]
+          },
+          {
+            "id": "h3md06-redraw_model",
+            "name": "redraw_model",
+            "type": "MODEL",
+            "linkIds": [
+              232
+            ],
+            "pos": [
+              1125.66015625,
+              1014
+            ]
+          },
+          {
+            "id": "h3md06-redraw_clip",
+            "name": "redraw_clip",
+            "type": "CLIP",
+            "linkIds": [
+              234
+            ],
+            "pos": [
+              1125.66015625,
+              1034
+            ]
+          },
+          {
+            "id": "h3md06-redraw_vae",
+            "name": "redraw_vae",
+            "type": "VAE",
+            "linkIds": [
+              236
+            ],
+            "pos": [
+              1125.66015625,
+              1054
+            ]
+          },
+          {
+            "id": "h3md06-redraw_audio_vae",
+            "name": "redraw_audio_vae",
+            "type": "VAE",
+            "linkIds": [
+              238
+            ],
+            "pos": [
+              1125.66015625,
+              1074
             ]
           }
         ],
@@ -1903,6 +2011,34 @@
                   "name": "drift_strength"
                 },
                 "link": null
+              },
+              {
+                "localized_name": "redraw_model",
+                "name": "redraw_model",
+                "shape": 7,
+                "type": "MODEL",
+                "link": 232
+              },
+              {
+                "localized_name": "redraw_clip",
+                "name": "redraw_clip",
+                "shape": 7,
+                "type": "CLIP",
+                "link": 234
+              },
+              {
+                "localized_name": "redraw_vae",
+                "name": "redraw_vae",
+                "shape": 7,
+                "type": "VAE",
+                "link": 236
+              },
+              {
+                "localized_name": "redraw_audio_vae",
+                "name": "redraw_audio_vae",
+                "shape": 7,
+                "type": "VAE",
+                "link": 238
               }
             ],
             "outputs": [
@@ -2212,6 +2348,38 @@
             "target_id": 269,
             "target_slot": 0,
             "type": "H3MD_SEGMENTS"
+          },
+          {
+            "id": 232,
+            "origin_id": -10,
+            "origin_slot": 6,
+            "target_id": 269,
+            "target_slot": 57,
+            "type": "MODEL"
+          },
+          {
+            "id": 234,
+            "origin_id": -10,
+            "origin_slot": 7,
+            "target_id": 269,
+            "target_slot": 58,
+            "type": "CLIP"
+          },
+          {
+            "id": 236,
+            "origin_id": -10,
+            "origin_slot": 8,
+            "target_id": 269,
+            "target_slot": 59,
+            "type": "VAE"
+          },
+          {
+            "id": 238,
+            "origin_id": -10,
+            "origin_slot": 9,
+            "target_id": 269,
+            "target_slot": 60,
+            "type": "VAE"
           }
         ],
         "extra": {
@@ -2224,7 +2392,7 @@
         "state": {
           "lastGroupId": 6,
           "lastNodeId": 349,
-          "lastLinkId": 229,
+          "lastLinkId": 239,
           "lastRerouteId": 0
         },
         "revision": 0,
@@ -2365,7 +2533,7 @@
                 "name": "MODEL",
                 "type": "MODEL",
                 "links": [
-                  152
+                  228
                 ]
               }
             ],
@@ -2395,180 +2563,6 @@
               "unet_name": "minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors",
               "weight_dtype": "default"
             }
-          },
-          {
-            "id": 293,
-            "type": "H3MDLowVRAMLoraLoader",
-            "pos": [
-              -750,
-              90
-            ],
-            "size": [
-              550,
-              140
-            ],
-            "flags": {},
-            "order": 6,
-            "mode": 4,
-            "inputs": [
-              {
-                "localized_name": "model",
-                "name": "model",
-                "type": "MODEL",
-                "link": 152
-              },
-              {
-                "localized_name": "lora_name",
-                "name": "lora_name",
-                "type": "COMBO",
-                "widget": {
-                  "name": "lora_name"
-                },
-                "link": null
-              },
-              {
-                "localized_name": "strength_model",
-                "name": "strength_model",
-                "type": "FLOAT",
-                "widget": {
-                  "name": "strength_model"
-                },
-                "link": null
-              },
-              {
-                "localized_name": "stack_mode",
-                "name": "stack_mode",
-                "shape": 7,
-                "type": "COMBO",
-                "widget": {
-                  "name": "stack_mode"
-                },
-                "link": null
-              },
-              {
-                "localized_name": "chunk_tokens",
-                "name": "chunk_tokens",
-                "shape": 7,
-                "type": "INT",
-                "widget": {
-                  "name": "chunk_tokens"
-                },
-                "link": null
-              }
-            ],
-            "outputs": [
-              {
-                "localized_name": "MODEL",
-                "name": "MODEL",
-                "type": "MODEL",
-                "links": [
-                  153
-                ]
-              }
-            ],
-            "properties": {
-              "Node name for S&R": "H3MDLowVRAMLoraLoader"
-            },
-            "widgets_values": [
-              "minimax_h3_DMAD_4step_full_lora_avg_rank_39_bf16.safetensors",
-              1,
-              "replace_like_comfy",
-              8192
-            ],
-            "widgets_values_named": {
-              "lora_name": "minimax_h3_DMAD_4step_full_lora_avg_rank_39_bf16.safetensors",
-              "strength_model": 1,
-              "stack_mode": "replace_like_comfy",
-              "chunk_tokens": 8192
-            },
-            "title": "停用 DMAD (unused since 0.3.4)"
-          },
-          {
-            "id": 294,
-            "type": "H3MDLowVRAMLoraLoader",
-            "pos": [
-              -750,
-              280
-            ],
-            "size": [
-              550,
-              130
-            ],
-            "flags": {},
-            "order": 7,
-            "mode": 4,
-            "inputs": [
-              {
-                "localized_name": "model",
-                "name": "model",
-                "type": "MODEL",
-                "link": 153
-              },
-              {
-                "localized_name": "lora_name",
-                "name": "lora_name",
-                "type": "COMBO",
-                "widget": {
-                  "name": "lora_name"
-                },
-                "link": null
-              },
-              {
-                "localized_name": "strength_model",
-                "name": "strength_model",
-                "type": "FLOAT",
-                "widget": {
-                  "name": "strength_model"
-                },
-                "link": null
-              },
-              {
-                "localized_name": "stack_mode",
-                "name": "stack_mode",
-                "shape": 7,
-                "type": "COMBO",
-                "widget": {
-                  "name": "stack_mode"
-                },
-                "link": null
-              },
-              {
-                "localized_name": "chunk_tokens",
-                "name": "chunk_tokens",
-                "shape": 7,
-                "type": "INT",
-                "widget": {
-                  "name": "chunk_tokens"
-                },
-                "link": null
-              }
-            ],
-            "outputs": [
-              {
-                "localized_name": "MODEL",
-                "name": "MODEL",
-                "type": "MODEL",
-                "links": [
-                  228
-                ]
-              }
-            ],
-            "properties": {
-              "Node name for S&R": "H3MDLowVRAMLoraLoader"
-            },
-            "widgets_values": [
-              "minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors",
-              1,
-              "replace_like_comfy",
-              8192
-            ],
-            "widgets_values_named": {
-              "lora_name": "minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors",
-              "strength_model": 1,
-              "stack_mode": "replace_like_comfy",
-              "chunk_tokens": 8192
-            },
-            "title": "停用 768 shared (unused since 0.3.4)"
           },
           {
             "id": 295,
@@ -3041,8 +3035,8 @@
               8192
             ],
             "widgets_values_named": {
-              "lora_name": "minimax_h3_DMAD_4step_full_lora_avg_rank_39_bf16.safetensors",
-              "strength_model": 1,
+              "lora_name": "minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors",
+              "strength_model": 1.0,
               "stack_mode": "replace_like_comfy",
               "chunk_tokens": 8192
             },
@@ -3130,8 +3124,8 @@
               8192
             ],
             "widgets_values_named": {
-              "lora_name": "minimax_h3_DMAD_4step_full_lora_avg_rank_39_bf16.safetensors",
-              "strength_model": 1,
+              "lora_name": "minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors",
+              "strength_model": 0.5,
               "stack_mode": "replace_like_comfy",
               "chunk_tokens": 8192
             },
@@ -3389,22 +3383,6 @@
         "groups": [],
         "links": [
           {
-            "id": 152,
-            "origin_id": 292,
-            "origin_slot": 0,
-            "target_id": 293,
-            "target_slot": 0,
-            "type": "MODEL"
-          },
-          {
-            "id": 153,
-            "origin_id": 293,
-            "origin_slot": 0,
-            "target_id": 294,
-            "target_slot": 0,
-            "type": "MODEL"
-          },
-          {
             "id": 155,
             "origin_id": 343,
             "origin_slot": 0,
@@ -3494,7 +3472,7 @@
           },
           {
             "id": 228,
-            "origin_id": 294,
+            "origin_id": 292,
             "origin_slot": 0,
             "target_id": 343,
             "target_slot": 0,
@@ -3519,7 +3497,7 @@
         "state": {
           "lastGroupId": 6,
           "lastNodeId": 349,
-          "lastLinkId": 231,
+          "lastLinkId": 239,
           "lastRerouteId": 0
         },
         "revision": 0,
@@ -5049,13 +5027,6 @@
         "url": "https://huggingface.co/JOKER141/MiniMax-H3-Combat-Base-V2/resolve/main/H3_Combat_V2.safetensors",
         "directory": "loras",
         "hash": "5b3edb09e9d6029439badf9bc9db4ba4a355ae679b0810888de82c4793c0bac8",
-        "hash_type": "sha256"
-      },
-      {
-        "name": "minimax_h3_DMAD_4step_full_lora_avg_rank_39_bf16.safetensors",
-        "url": "https://huggingface.co/Kijai/MiniMax-H3-experimental/resolve/main/loras/minimax_h3_DMAD_4step_full_lora_avg_rank_39_bf16.safetensors",
-        "directory": "loras",
-        "hash": "ddfdd94f4c9a0f32bf3649bb8e98ca20db572e4db6bcd9cca546a5b33ea32d11",
         "hash_type": "sha256"
       },
       {

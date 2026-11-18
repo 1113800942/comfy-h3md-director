@@ -50,13 +50,6 @@
    "hash_type": "sha256"
   },
   {
-   "name": "minimax_h3_DMAD_4step_full_lora_avg_rank_39_bf16.safetensors",
-   "url": "https://huggingface.co/Kijai/MiniMax-H3-experimental/resolve/main/loras/minimax_h3_DMAD_4step_full_lora_avg_rank_39_bf16.safetensors",
-   "directory": "loras",
-   "hash": "ddfdd94f4c9a0f32bf3649bb8e98ca20db572e4db6bcd9cca546a5b33ea32d11",
-   "hash_type": "sha256"
-  },
-  {
    "name": "minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors",
    "url": "https://huggingface.co/lightx2v/Minimax-h3-Turbo/resolve/main/minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors",
    "directory": "loras",
