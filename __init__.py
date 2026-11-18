@@ -58,6 +58,10 @@ def _m_h3md_window():
     from . import h3md_window as m
     return m
 
+def _m_h3md_keyframe_nodes():
+    from . import h3md_keyframe_nodes as m
+    return m
+
 def _m_h3md_director_refmod():
     from . import h3md_director_refmod as m
     return m
@@ -77,6 +81,7 @@ for _name, _load in (
         ("h3md_depth_control", _m_h3md_depth_control),
         ("h3md_control_panel", _m_h3md_control_panel),
         ("h3md_window", _m_h3md_window),
+        ("h3md_keyframe_nodes", _m_h3md_keyframe_nodes),
         ("h3md_director_refmod", _m_h3md_director_refmod),
 ):
     try:
@@ -97,6 +102,12 @@ try:  # v0.2.0 plan export / import routes; never blocks node loading
     _plan_io.register()
 except Exception as _exc:
     logging.warning("[H3MD] plan export/import routes not loaded: %s", _exc)
+
+try:  # 0.5.0 diagnostic report route (Director "Report" button); never blocks node loading
+    from . import h3md_report as _report
+    _report.register()
+except Exception as _exc:
+    logging.warning("[H3MD] diagnostic report route not loaded: %s", _exc)
 
 def _read_version():
     """Version from pyproject.toml (the one source of truth), shown on the Director node so the installed build is

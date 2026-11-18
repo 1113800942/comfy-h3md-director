@@ -1,7 +1,7 @@
 [project]
 name = "comfyui-h3md-director"
 description = "H3MD Director: long multi-shot MiniMax H3 video - visual Director, seamless long takes with Chained Context Windows (CCW, ComfyUI 0.44+), redraw just a few seconds, disk cache and resume, streamed save with optional RIFE interpolation."
-version = "0.4.4"
+version = "0.5.0"
 license = { text = "AGPL-3.0-or-later" }
 authors = [{ name = "YJ" }]
 requires-python = ">=3.10"
@@ -18,5 +18,5 @@ Repository = "https://github.com/1113800942/comfy-h3md-director"
 #  Used by Comfy Registry https://registry.comfy.org
 [tool.comfy]
 PublisherId = "yj1113800942"
-DisplayName = "H3MD Director (H3MD 导演台)"
+DisplayName = "H3MD Director (H3MD å¯¼æ¼”å°)"
 Icon = "https://raw.githubusercontent.com/1113800942/comfy-h3md-director/main/docs/media/icon.png"

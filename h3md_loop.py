@@ -48,6 +48,7 @@ try:
     from . import h3md_lowres_anchor as LA        # H3MD low-res anchor (2026-10-30)
     from . import h3md_window as WIN              # window-exp branch (2026-11-07)
     from . import h3md_progress as PROG           # window-exp: per-step progress cache
+    from . import h3md_remake_engine as SWAP      # 2026-11-14 multi-person swap engine
 except ImportError:  # flat import (tests)
     import h3md_director as D
     import h3md_sampler as S
@@ -61,6 +62,7 @@ except ImportError:  # flat import (tests)
     import h3md_lowres_anchor as LA
     import h3md_window as WIN
     import h3md_progress as PROG
+    import h3md_remake_engine as SWAP
 
 LOG = logging.getLogger("H3MD")
 _TAG = "[H3MD Loop]"
@@ -278,12 +280,15 @@ def segment_range(plan: dict, stop_after: int = 0):
     return list(range(stop if stop > 0 else n))
 
 
-def model_lora_sig(low, high) -> dict:
+def model_lora_sig(low, high, remake=None) -> dict:
     """0.3.4: LoRAs recorded on the models by H3MD LowVRAM LoRA Loader / H3MD Control Panel (model_options
     'h3md_lora_sig').  Changing one of them now changes the segment cache keys (before, a resume reused the old
     segments).  Core loaders are not recorded.  Empty -> {} (keys exactly as before)."""
     out = {}
-    for name, m in (("low", low), ("high", high)):
+    items = [("low", low), ("high", high)]
+    if remake is not None:
+        items.append(("remake", remake))
+    for name, m in items:
         sig = ((getattr(m, "model_options", None) or {}).get("h3md_lora_sig")) if m is not None else None
         if sig:
             out[name] = sig
@@ -351,6 +356,34 @@ def plan_segments_to_run(text: str, segs: list, cache, beta: bool):
     line = (f"segments_to_run '{text}': run up to segment {stop}; listed: {one(sel)} (cached, generated again: "
             f"{one(forced)}); missing earlier segments generated too: {one(missing)}; the rest from the cache")
     return stop, rerun, line
+
+
+def plan_trial(text: str, segs: list, cache, beta: bool):
+    """0.4.5 试镜 (trial) in window mode: '2' / '1, 3' -> (indices, rerun list, log line).
+    Only the listed parts run; a part that starts with a continuation (overlapIn > 0: a long take with no hard cut
+    inside the group limit) also needs the part before it (taken from the cache, or generated when missing).
+    Parts after a hard cut are independent (cache key "prev": "cut"), so a trial take is the same take the full run
+    makes and is reused by it.  Listed parts that are cached are generated again (a new take); when every other part
+    is cached, the whole video is kept (a repair inside a finished video)."""
+    sel = parse_segments(text, len(segs))
+    if not sel:
+        return None
+    need = set(sel)
+    for k in sel:
+        j = k
+        while j > 0 and int(segs[j]["overlapIn"]) > 0:
+            j -= 1
+            need.add(j)
+    forced = [k for k in sel if cache_usable(cache, k, segs, beta)]
+    missing = sorted(k for k in need if k not in sel and not cache_usable(cache, k, segs, beta))
+    others_cached = all(cache_usable(cache, k, segs, beta) for k in range(len(segs)) if k not in sel)
+    indices = list(range(len(segs))) if (forced and others_cached) else sorted(need)
+    rerun = sorted(set(sel) | set(missing)) if forced else []
+    one = lambda ks: ", ".join(str(k + 1) for k in ks) or "-"   # noqa: E731
+    line = (f"试镜 / trial '{text}': parts {one(sel)}; needed before them (a long take continues): "
+            f"{one(sorted(need - set(sel)))} (missing, generated: {one(missing)}); cached and taken again: {one(forced)}; "
+            f"output = parts {one(indices)}")
+    return indices, rerun, line
 
 
 def describe_rerun(selected: list, indices: list, segs: list, tail_from: dict) -> str:
@@ -760,6 +793,16 @@ class H3MDLoopSampler:
             "只用于单一场景的长视频，和 lowres_anchor 一起用：每个续接段的高清结果会钉住下一段的高清开头，细小的颜色、"
             "清晰度变化也会一段段累积（3 分钟长镜头实测：只开 lowres_anchor 时饱和度 +8%、锐度 -15%）。开了以后，每个续接段"
             "新生成的高清 latent（不含重叠部分）在解码前、下一段接续前，把 24 个通道的均值和幅度拉回本镜头第一段。0 = 关，1 = 全量。"})
+        # Remake isolated low-res model, appended LAST (old workflows load; not connected = remake off / error if on)
+        opt["remake_model"] = ("MODEL", {"tooltip":
+            "Required when the plan has swapEngine: remake. Isolated MODEL for the LOW-res pass only. "
+            "viggle_remake_swap/edit_comfyui.safetensors are LoRA adapters, even under diffusion_models — "
+            "do not load them with a UNET/diffusion loader. Load fl2va, apply the LoRA with bypass "
+            "(Load LoRA Bypass, Model Only), connect that MODEL here. No Turbo, not the original low/high base. "
+            "Not connected: clear error, no silent fallback. High-res keeps high_res_model.\n"
+            "计划开启 swapEngine: remake 时必接：仅用于低清。viggle_remake_* 即使在 diffusion_models 里也是 LoRA，"
+            "不要用 UNET 加载；先加载 fl2va，再用 bypass LoRA 套上后接到这里。不要 Turbo、不要原底座。"
+            "不接则报错，不会回落原模型。高清仍用 high_res_model。"})
         # v0.3 H3MD Control Panel, appended LAST: one box for "which segments" (empty / not connected = old widgets)
         opt["segments_to_run"] = ("STRING", {"default": "", "tooltip":
             "Type here or connect H3MD Control Panel. Empty: run everything (cached segments reused). '2' / '1-2' / '3, 6-7, 9': "
@@ -870,7 +913,16 @@ class H3MDLoopSampler:
             users = images_used_downstream(prompt, unique_id)
             if users:  # once per run
                 LOG.warning("%s %s (node(s) %s use 'images').", _TAG, IMAGES_PLACEHOLDER_WARNING, ", ".join(users))
-        if run_text:   # v0.3 segments_to_run: decide rerun vs. normal resume from what is really in the cache
+        if run_text and isinstance(plan, dict) and plan.get("windowMode"):   # 0.4.5 试镜: only the chosen parts
+            t_indices, selected, line = plan_trial(run_text, segs, cache if resume_from_cache else None,
+                                                   continue_lowres_prefix == BETA)
+            LOG.info("%s %s", _TAG, line)
+            if t_indices != indices:
+                indices = t_indices
+                pbar = progress_bar(len(indices), unique_id)
+            if selected and not (decode_output and cache_mode == "disk" and resume_from_cache):
+                selected = []
+        elif run_text:   # v0.3 segments_to_run: decide rerun vs. normal resume from what is really in the cache
             planned = plan_segments_to_run(run_text, segs, cache if resume_from_cache else None,
                                            continue_lowres_prefix == BETA)
             _stop, selected, line = planned
@@ -915,10 +967,12 @@ class H3MDLoopSampler:
              decode_output, audio_crossfade_ms, release_vram_between_segments, high_res_model,
              highres_tiling, unique_id, sampler_kwargs, resume, delete_cache, unload_before_merge,
              lowres_prefix_mode=BETA, rerun=None, rerun_new_seed=True):
+        remake_model = sampler_kwargs.pop("remake_model", None)
         prev_tail = None  # decoded frames of the previous segment's tail (disk-cache mode), for the low-res prefix
         prev_low = None   # Beta: previous segment's low-res stage endpoint (native low-res grid, CPU)
         ctx_clips = int(getattr(self, "_ctx_clips", 0) or 0)  # H3MD-Exp seam_decode_context
-        lora_sig = model_lora_sig(low_res_model, high_res_model)   # 0.3.4: {} = old keys unchanged
+        lora_sig = model_lora_sig(low_res_model, high_res_model,
+                                  remake_model if SWAP.engine(plan) else None)   # 0.3.4: {} = old keys unchanged
         ctx_prevs = []    # H3MD-Exp: previous final latent per entry of `finals` (None = no decode context)
         depth = getattr(self, "_depth", None) or DC.LoopDepth(None, {"segments": []})  # H3MD depth (inactive = no-op)
         beta = lowres_prefix_mode == BETA
@@ -1078,6 +1132,8 @@ class H3MDLoopSampler:
                     enc_plan = DC.without_video(enc_plan, k, _ref["id"])
                     LOG.warning("%s %s: depth video '%s' not used for this segment (no control, and a depth video "
                                 "has no <Video N>)", _TAG, where, _ref["id"])
+            if SWAP.engine(plan):   # 2026-11-14 swap engine: the low-res canvas
+                enc_plan = dict(enc_plan, _lowresScale=float(sampler_kwargs.get("lowres_scale", 0.5)))
             positive, negative, latent, _p, _l, length, overlap, _w, _h, locked = encoder.encode(
                 enc_plan, k, clip, vae, audio_vae, ref_image_size)
             del enc_plan
@@ -1148,18 +1204,34 @@ class H3MDLoopSampler:
                 extra["h3md_low_only"] = True
             nxt_ov = segs[indices[step + 1]]["overlapIn"] if step + 1 < len(indices) else 0
             try:
+                remake_src = SWAP.require_remake_model(remake_model, model, high_res_model) if SWAP.engine(plan) else None
                 if dseg is not None:  # H3MD depth: int8 patch loaded now, on a CLONE of the low-res model only
                     high_model = high_res_model if high_res_model is not None else model  # unpatched (= old None path)
-                    low_model, dctl = depth.attach(model, dseg, latent,
+                    low_src = remake_src if remake_src is not None else model
+                    low_model, dctl = depth.attach(low_src, dseg, latent,
                                                    low_res_hw(S._unbind(latent["samples"])[0].shape[-2:],
                                                               sampler_kwargs.get("lowres_scale", 0.5)), where)
                     DC.assert_no_fun_control(high_model, "high-res model")
                     if dctl is not None:
                         extra["h3md_on_lowres_end"] = dctl.release
+                elif remake_src is not None:
+                    low_model = remake_src
+                    high_model = high_res_model if high_res_model is not None else model
+                call_sigmas, call_kwargs = sigmas, sampler_kwargs
+                if SWAP.engine(plan):   # Remake official 6-step on low only; high-res schedule/model untouched
+                    low_model = SWAP.keyframe_until(low_model)
+                    extra["h3md_sigmas_low"] = SWAP.low_sigmas(plan)
+                    extra["h3md_sigmas_high"] = SWAP.high_sigmas_from(
+                        sigmas, int((sampler_kwargs or {}).get("transition_step", 6)))
+                    extra["h3md_remake_low_complete"] = True
+                    LOG.info("%s %s: swap engine '%s' - official 6-step on low only %s, high-res schedule unchanged, "
+                             "keyframes released below sigma %.2f",
+                             _TAG, where, SWAP.engine(plan),
+                             [round(float(s), 6) for s in extra["h3md_sigmas_low"]], SWAP.KEYFRAME_UNTIL)
                 res = sampler_node.sample(low_res_model=low_model, positive=positive, negative=negative, vae=vae,
-                                          latent_image=latent, sampler=sampler, sigmas=sigmas, seed=seg_seed,
+                                          latent_image=latent, sampler=sampler, sigmas=call_sigmas, seed=seg_seed,
                                           high_res_model=high_model, highres_tiling=tiling, unique_id=unique_id,
-                                          **extra, **sampler_kwargs)
+                                          **extra, **call_kwargs)
             finally:
                 if redraw:
                     WIN.set_active([low_res_model, high_res_model], None)

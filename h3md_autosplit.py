@@ -266,6 +266,19 @@ def split_segment(D, seg: dict, media: dict, contents: list) -> list:
         if p.get("audios"):
             base = dict(p.get("audioStarts") or {})
             p["audioStarts"] = {a: round(float(base.get(a, 0.0)) + (start - s0) / fps, 6) for a in p["audios"]}
+        if seg.get("keyframes"):   # 0.4.9: part frame 0 = shot frame (start - s0); keep the part's own new frames
+            kfs = [{"image": k["image"], "frame": int(k["frame"]) - (start - s0)} for k in seg["keyframes"]]
+            kfs = [k for k in kfs if ov <= k["frame"] < p["length"]]
+            if kfs:
+                p["keyframes"] = kfs
+                p.pop("keyframesNear", None)
+            else:
+                p.pop("keyframes", None)
+                # 2026-11-15 review: a part without a keyframe of its own keeps the shot's nearest one, so the swap
+                # engine can use it as a plain (un-pinned) reference instead of stopping the whole run
+                mid = (start - s0) + p["length"] / 2.0
+                near = min(seg["keyframes"], key=lambda k: abs(int(k["frame"]) - mid))
+                p["keyframesNear"] = [{"image": near["image"], "frame": int(near["frame"]) - (start - s0)}]
         p["shotIndex"] = seg["index"]
         p["autoPart"], p["autoParts"] = j, len(contents)
         p["labels"] = D.compute_labels(p, media)
@@ -365,7 +378,7 @@ def preview(plan_json, width: int = 0, height: int = 0) -> dict:
         report = []
         plan = D.parse_plan(raw, int(width or 0), int(height or 0), True, motion=D.make_motion(raw), sizes=sizes,
                             extra_tokens=extra, report=report)
-        return {"ok": True, "budget": plan.get("tokenBudget"), "budgetInfo": plan.get("tokenBudgetInfo"),
+        return {"ok": True, "trial": plan.get("trial"), "budget": plan.get("tokenBudget"), "budgetInfo": plan.get("tokenBudgetInfo"),
                 "width": plan["width"], "height": plan["height"], "segments": len(plan["segments"]),
                 "totalFrames": plan["total_frames"], "shots": report}
     except Exception as exc:

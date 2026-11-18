@@ -55,7 +55,19 @@ Problems are listed and nothing is changed for you: a length that is not 5 + 17n
   (`[8s] ...` or `At 00:07.9 ...`). `"preview": true` = low-res only; `"redraw": [[20, 24]]` = render seconds 20–24 of
   a finished run again with a new seed (the node H3MD Redraw / Preview writes both for you, between the Director and the
   Loop). Details: [technical reference](technical-reference.md).
+* Keyframes (0.4.9): `"keyframes": [{"image": "<media image id>", "at": 9.0}]` in a shot pins that picture at that
+  second of the shot (seconds from the shot's frame 0; not inside a continued shot's overlap). The picture is a painted
+  frame of the wanted result - e.g. a frame of the guide video with each person replaced by their character - and is
+  listed in `media.images` but not in the shot's `images` (it is not a `<Picture N>` reference). It steers the low-res
+  pass only (composition and who stands where); the high-res pass refines. Needs an fl2va or fl2va/ref2va hybrid
+  model. Use it for multi-person swaps: one keyframe after each place change where people cross.
 
+* Multi-person swap (0.5.0): `"swapEngine": "remake"` at plan level and `"autoSplit": true`. One shot for the
+  whole clip (`overlapIn: 0`, length 5+17n, not past the source's end) with the source as its only video
+  (`<Video 1>`, `useSoundtrack: false`), `audioMode: "locked"` with `locked.source: "video:<id>"`, and the keyframes as
+  above (painted frames of the result; each autosplit part uses up to 4 of its own). The character pictures are not
+  passed to Remake, so the shot needs no `images`. Size 1664x960 or 960x1664 (or 2560x1472). The Loop needs a
+  `remake_model` (example workflow `H3MD Director Remake.json`). Prompt rules: `skills/h3md-prompt` section 12d.
 ## Plan .zip written by an agent
 
 An agent that can create files should hand over a `.zip` instead of a bare `.json`, so the pictures and songs come

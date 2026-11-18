@@ -1,8 +1,8 @@
 {
  "id": "ae199950-ee64-4d60-918b-94513d88482f",
  "revision": 0,
- "last_node_id": 347,
- "last_link_id": 230,
+ "last_node_id": 356,
+ "last_link_id": 231,
  "nodes": [
   {
    "id": 226,
@@ -818,6 +818,262 @@
     false,
     ""
    ]
+  },
+  {
+   "id": 348,
+   "type": "Label (rgthree)",
+   "pos": [
+    -1500,
+    10
+   ],
+   "size": [
+    1786,
+    120
+   ],
+   "flags": {
+    "allow_interaction": true
+   },
+   "order": 10,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "H3MD Director 导演台 Simple",
+   "properties": {
+    "fontSize": 120,
+    "fontFamily": "Arial",
+    "fontColor": "#ffff00",
+    "textAlign": "left",
+    "backgroundColor": "transparent",
+    "padding": 0,
+    "borderRadius": 0,
+    "angle": 0
+   },
+   "color": "#fff0",
+   "bgcolor": "#fff0"
+  },
+  {
+   "id": 349,
+   "type": "Label (rgthree)",
+   "pos": [
+    306,
+    90
+   ],
+   "size": [
+    75,
+    30
+   ],
+   "flags": {
+    "allow_interaction": true
+   },
+   "order": 11,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "by YJ",
+   "properties": {
+    "fontSize": 30,
+    "fontFamily": "Arial",
+    "fontColor": "#ffffff",
+    "textAlign": "center",
+    "backgroundColor": "transparent",
+    "padding": 0,
+    "borderRadius": 0,
+    "angle": 0
+   },
+   "color": "#fff0",
+   "bgcolor": "#fff0"
+  },
+  {
+   "id": 350,
+   "type": "Label (rgthree)",
+   "pos": [
+    -1490,
+    160
+   ],
+   "size": [
+    798,
+    40
+   ],
+   "flags": {
+    "allow_interaction": true
+   },
+   "order": 12,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "https://huggingface.co/yj0942/H3MD-Director",
+   "properties": {
+    "fontSize": 40,
+    "fontFamily": "Arial",
+    "fontColor": "#ffffff",
+    "textAlign": "left",
+    "backgroundColor": "transparent",
+    "padding": 0,
+    "borderRadius": 0,
+    "angle": 0
+   },
+   "color": "#fff0",
+   "bgcolor": "#fff0"
+  },
+  {
+   "id": 351,
+   "type": "Label (rgthree)",
+   "pos": [
+    -570,
+    160
+   ],
+   "size": [
+    921,
+    40
+   ],
+   "flags": {
+    "allow_interaction": true
+   },
+   "order": 13,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "https://github.com/1113800942/comfy-h3md-director",
+   "properties": {
+    "fontSize": 40,
+    "fontFamily": "Arial",
+    "fontColor": "#ffffff",
+    "textAlign": "left",
+    "backgroundColor": "transparent",
+    "padding": 0,
+    "borderRadius": 0,
+    "angle": 0
+   },
+   "color": "#fff0",
+   "bgcolor": "#fff0"
+  },
+  {
+   "id": 352,
+   "type": "Label (rgthree)",
+   "pos": [
+    -1420,
+    260
+   ],
+   "size": [
+    690,
+    40
+   ],
+   "flags": {
+    "allow_interaction": true
+   },
+   "order": 14,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "https://civitai.com/user/1113800942188",
+   "properties": {
+    "fontSize": 40,
+    "fontFamily": "Arial",
+    "fontColor": "#ffffff",
+    "textAlign": "left",
+    "backgroundColor": "transparent",
+    "padding": 0,
+    "borderRadius": 0,
+    "angle": 0
+   },
+   "color": "#fff0",
+   "bgcolor": "#fff0"
+  },
+  {
+   "id": 353,
+   "type": "Label (rgthree)",
+   "pos": [
+    -440,
+    260
+   ],
+   "size": [
+    898,
+    40
+   ],
+   "flags": {
+    "allow_interaction": true
+   },
+   "order": 15,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "B站：YJ0942, https://space.bilibili.com/299509194",
+   "properties": {
+    "fontSize": 40,
+    "fontFamily": "Arial",
+    "fontColor": "#ffffff",
+    "textAlign": "left",
+    "backgroundColor": "transparent",
+    "padding": 0,
+    "borderRadius": 0,
+    "angle": 0
+   },
+   "color": "#fff0",
+   "bgcolor": "#fff0"
+  },
+  {
+   "id": 354,
+   "type": "Label (rgthree)",
+   "pos": [
+    -1490,
+    360
+   ],
+   "size": [
+    940,
+    40
+   ],
+   "flags": {
+    "allow_interaction": true
+   },
+   "order": 16,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "Youtube: YJ0942, https://www.youtube.com/@yj0942",
+   "properties": {
+    "fontSize": 40,
+    "fontFamily": "Arial",
+    "fontColor": "#ffffff",
+    "textAlign": "left",
+    "backgroundColor": "transparent",
+    "padding": 0,
+    "borderRadius": 0,
+    "angle": 0
+   },
+   "color": "#fff0",
+   "bgcolor": "#fff0"
+  },
+  {
+   "id": 355,
+   "type": "Label (rgthree)",
+   "pos": [
+    -500,
+    360
+   ],
+   "size": [
+    864,
+    40
+   ],
+   "flags": {
+    "allow_interaction": true
+   },
+   "order": 17,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "https://www.runninghub.ai?inviteCode=aolwbd1n",
+   "properties": {
+    "fontSize": 40,
+    "fontFamily": "Arial",
+    "fontColor": "#ffffff",
+    "textAlign": "left",
+    "backgroundColor": "transparent",
+    "padding": 0,
+    "borderRadius": 0,
+    "angle": 0
+   },
+   "color": "#fff0",
+   "bgcolor": "#fff0"
   }
  ],
  "links": [
@@ -974,7 +1230,21 @@
    "H3MD_PLAN"
   ]
  ],
- "groups": [],
+ "groups": [
+  {
+   "id": 1,
+   "title": "",
+   "bounding": [
+    -1560,
+    -60,
+    2186,
+    520
+   ],
+   "color": "#3f789e",
+   "font_size": 24,
+   "flags": {}
+  }
+ ],
  "definitions": {
   "subgraphs": [
    {
@@ -3224,8 +3494,8 @@
     "version": 1,
     "state": {
      "lastGroupId": 6,
-     "lastNodeId": 340,
-     "lastLinkId": 226,
+     "lastNodeId": 356,
+     "lastLinkId": 231,
      "lastRerouteId": 0
     },
     "revision": 0,
@@ -4385,6 +4655,13 @@
          "name": "resume_from_cache"
         },
         "link": null
+       },
+       {
+        "localized_name": "remake_model",
+        "name": "remake_model",
+        "shape": 7,
+        "type": "MODEL",
+        "link": 231
        }
       ],
       "outputs": [
@@ -4470,6 +4747,48 @@
        "delete_cache": false,
        "resume_from_cache": true
       }
+     },
+     {
+      "id": 356,
+      "type": "UNETLoader",
+      "pos": [
+       1210,
+       1560
+      ],
+      "size": [
+       520,
+       82
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 4,
+      "title": "Remake model 换人模型（选「多人互换」风格时自动打开 / switched on by the 多人互换 style）",
+      "inputs": [],
+      "outputs": [
+       {
+        "localized_name": "MODEL",
+        "name": "MODEL",
+        "type": "MODEL",
+        "links": [
+         231
+        ]
+       }
+      ],
+      "properties": {
+       "Node name for S&R": "UNETLoader",
+       "h3md_role": "remake_model",
+       "models": [
+        {
+         "name": "viggle_remake_swap_pruned_int8_convrot.safetensors",
+         "directory": "diffusion_models",
+         "url": "https://huggingface.co/Viggle/Viggle-Remake"
+        }
+       ]
+      },
+      "widgets_values": [
+       "viggle_remake_swap_pruned_int8_convrot.safetensors",
+       "default"
+      ]
      }
     ],
     "groups": [],
@@ -4609,6 +4928,14 @@
       "target_id": -20,
       "target_slot": 0,
       "type": "H3MD_SEGMENTS"
+     },
+     {
+      "id": 231,
+      "origin_id": 356,
+      "origin_slot": 0,
+      "target_id": 227,
+      "target_slot": 29,
+      "type": "MODEL"
      }
     ],
     "extra": {

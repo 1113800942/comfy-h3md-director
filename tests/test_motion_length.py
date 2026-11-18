@@ -48,5 +48,26 @@ class MotionLength(unittest.TestCase):
         self.assertIn("Duration: 12.96 s (311 frames; the first 39 frames continue the previous shot).", p)
 
 
+
+class HoldLastFrames(unittest.TestCase):
+    """0.4.6: a guide video up to 16 frames shorter than its (rounded-up) shot keeps its last frame to the shot length."""
+
+    def test_hold(self):
+        import torch
+        v = torch.arange(488, dtype=torch.float32).reshape(488, 1, 1, 1).expand(488, 2, 2, 3).clone()
+        out, held = D.hold_last_frames(v, 498)              # 20.33 s video, 20.75 s shot (YJ 11-11)
+        self.assertEqual((out.shape[0], held), (498, 10))
+        self.assertTrue(bool((out[488:] == v[-1]).all()) and bool((out[:488] == v).all()))
+
+    def test_no_hold(self):
+        import torch
+        v = torch.zeros(488, 2, 2, 3)
+        for length in (488, 480, 504 + 1):                  # same / longer video / gap of 17 frames: unchanged
+            out, held = D.hold_last_frames(v, length)
+            self.assertEqual(held, 0)
+            self.assertEqual(out.shape[0], 488)
+        out, held = D.hold_last_frames(v, 504)              # gap of exactly 16: held
+        self.assertEqual((out.shape[0], held), (504, 16))
+
 if __name__ == "__main__":
     unittest.main()

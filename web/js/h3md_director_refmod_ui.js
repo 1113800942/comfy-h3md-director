@@ -9,6 +9,7 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import * as M from "./h3md_plan.js";
+import { setPanelsFromRemake } from "./h3md_control_panel.js";
 import { PERF_CSS, videoThumb, attachHoverPlay, installMoveWatch, watchNode, unwatchNode } from "./h3md_director_perf.js";
 import { hideWidgets } from "./h3md_hide_widgets.js";
 
@@ -435,7 +436,13 @@ function injectStyles() {
 .h3md-note{white-space:normal;line-height:1.35;margin:0 0 4px 0;color:#b8c4d6}
 .h3md-sub.gl{border-left:4px solid #3fa07a;background:rgba(63,160,122,.08)}
 .h3md-sub.gl>h4{color:#9fdcc0}
-.h3md-root button.clr{color:#f0a0a0}`;
+.h3md-root button.clr{color:#f0a0a0}
+.h3md-remake{border:1px solid rgba(200,140,80,.35);background:rgba(200,140,80,.06);padding:6px 8px;border-radius:6px;margin:4px 0}
+.h3md-remake-help{white-space:normal;line-height:1.45;margin:4px 0 0 0;color:#d4c4a8}
+.h3md-remake-kfs{border:1px solid rgba(200,140,80,.3);background:rgba(200,140,80,.05);padding:6px;border-radius:5px;margin:6px 0}
+.h3md-remake-kf{flex-wrap:wrap;gap:6px;align-items:center;margin:3px 0}
+.h3md-remake-kf select{max-width:220px}
+.h3md-remake-kf input[type=number]{width:72px}`;
   document.head.append(h("style", { id: "h3md-editor-css" }, css + PERF_CSS));
 }
 
@@ -681,7 +688,7 @@ class DirectorEditor {
     }
     this.val = this.validation();
     // the global prompt lives inside the Shots section, directly under the shot card
-    this.root.append(this.renderBins(), this.renderWindowMode(), this.renderRefVideoHeight(), this.renderTimeline(), this.renderSegments());
+    this.root.append(this.renderBins(), this.renderWindowMode(), this.renderRemakeModule(), this.renderRefVideoHeight(), this.renderTimeline(), this.renderSegments());
     if (this.statOpen) this.root.append(this.renderStatPop());
     this.renderStatus();
     this.applyAutoSplitUI();
@@ -729,7 +736,38 @@ class DirectorEditor {
       h("button", { disabled: !can || st.busy, title: tip || "Plan, all node settings and the pictures / songs it uses, in one .zip (for yourself)",
         onclick: () => this.exportPlan(true) }, "Export plan + media"),
       h("button", { disabled: !can || st.busy, title: tip || "Plan and all node settings, no pictures / songs (to share)",
-        onclick: () => this.exportPlan(false) }, "Export plan (no media)"));
+        onclick: () => this.exportPlan(false) }, "Export plan (no media)"),
+      h("label", { class: "h3md-small", title: "Leave the prompts in the report (needed to check them against the prompt skill rules). 报告里带上提示词（检查是否符合 skill 要用）" },
+        h("input", { type: "checkbox", checked: st.reportPrompts !== false, onchange: (e) => { st.reportPrompts = e.target.checked; } }),
+        " prompts"),
+      h("button", { disabled: st.busy, title: "Diagnostic report for a bug report: environment (GPU, VRAM, versions), settings, plan check against the prompt skill, the last runs' H3MD log and errors. No user / computer names, no folders, no pictures / videos / audio; saved to output/H3MD_reports and downloaded, never sent anywhere. 诊断报告：报错时附上这个 zip",
+        onclick: () => this.makeReport() }, "Report 诊断报告"));
+  }
+  async makeReport() {
+    const st = this.planIO;
+    if (st.busy) return;
+    st.busy = true; this.setPlanIOMsg("writing report…");
+    try {
+      const wf = (await app.graphToPrompt()).workflow;
+      const r = await api.fetchApi("/h3md/report", { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ plan_json: this.plan ? M.serializePlan(this.plan) : "{}", workflow: wf,
+          include_prompts: st.reportPrompts !== false }) });
+      if (!r.ok) { const j = await r.json().catch(() => ({})); throw new Error(j.error || `HTTP ${r.status}`); }
+      const blob = await r.blob();
+      const cd = r.headers.get("Content-Disposition") || "";
+      const m = String(cd).match(/filename\*=UTF-8''([^;]+)/);
+      const name = m ? decodeURIComponent(m[1]) : "H3MD_report.zip";
+      const a = h("a", { href: URL.createObjectURL(blob), download: name });
+      document.body.append(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(a.href), 30000);
+      let c = {};
+      try { c = JSON.parse(r.headers.get("X-H3MD-Findings") || "{}"); } catch { /* ignore */ }
+      this.setPlanIOMsg(`report saved (${r.headers.get("X-H3MD-Saved") || name}) · ${c.error || 0} errors, ${c.warn || 0} warnings - attach it to your GitHub issue`, !!c.error);
+    } catch (e) {
+      this.setPlanIOMsg(`report failed: ${e.message || e}`, true);
+    } finally {
+      st.busy = false;
+    }
   }
   setPlanIOMsg(msg, bad = false) {
     const st = this.planIO || (this.planIO = { busy: false, msg: "", size: null, big: [], withBig: false });
@@ -952,12 +990,97 @@ class DirectorEditor {
         this.commit();
       } });
     box.checked = !!p.windowMode;
+    const remakeOn = M.remakeOn(p);
+    if (remakeOn) box.disabled = true;
     return h("div", { class: "h3md-sec", "data-window-mode": "1" },
       h("div", { class: "h3md-row" },
         h("label", { title: "Window mode: continued shots are sampled together on one timeline (no continuation seams); " +
-            "hard cuts stay cuts. Long plans are split into groups only at hard cuts. About 25% slower." },
+            "hard cuts stay cuts. Long plans are split into groups only at hard cuts. About 25% slower." +
+            (remakeOn ? " Unavailable while Remake Swap is on (the backend already turns window mode off)." : "") },
           box, h("b", {}, " Seamless long video 无接缝长视频（窗口模式）")),
-        h("span", { class: "h3md-small" }, "续接的分镜一起生成、没有接缝；硬切照常；太长时只在硬切处分组 · 约慢 25%")));
+        h("span", { class: "h3md-small" }, remakeOn
+          ? "换人模块打开时不可用（后端会关闭窗口模式）"
+          : "续接的分镜一起生成、没有接缝；硬切照常；太长时只在硬切处分组 · 约慢 25%")));
+  }
+
+  // Remake Swap module (2026-11-15, experimental): plan.swapEngine "remake" or key absent.
+  // Default off. Turning the switch off must not strip segments[].keyframes or other saved fields.
+  renderRemakeModule() {
+    const p = this.plan;
+    const on = M.remakeOn(p);
+    const box = h("input", { type: "checkbox", "data-key": "remake-swap",
+      onchange: (e) => {
+        M.setRemake(p, e.target.checked);
+        this.commit();
+        try { setPanelsFromRemake(e.target.checked); } catch (err) { console.warn("[H3MD] sync control panel 多人互换", err); }
+      } });
+    box.checked = on;
+    const helpOff = "默认关闭。打开后低清走 Remake 换人（需另接专用模型）。关闭时旧流程与存盘不变，不会覆盖或删除原有字段。Default off. When on, the low pass uses Remake swap; wire a dedicated remake_model on the Loop. Turning it off leaves the old flow and saved fields unchanged.";
+    const helpOn = "需在 H3MD Loop 单独接入 remake_model；本开关不会自动加载模型，也不会验证所接 MODEL 是否为 Remake 底模。未接线就开启会报错，不会回落到原底座或 Turbo。接法：先加载 FL2VA 底模，再用 Load LoRA (Bypass, Model Only) 套上 viggle_remake_swap_comfyui.safetensors（该文件即使位于 diffusion_models 也是 LoRA，不要用 UNET / 扩散模型加载器），把得到的 MODEL 接到 Loop 的 remake_model。低清六步与本机已有示例工作流「H3MD MultiSwap (exp).json」中 ManualSigmas 一致（1.0, 0.990476, 0.965243, 0.923077, 0.8, 0.631579, 0.0）。高清仍用原模型与原日程。低清走完到 0 后的高清再噪声交接尚未经 GPU 验证。不支持 edit 模式，此处不提供 edit 选项。打开本模块会关闭「无接缝长视频」窗口模式（换人仍按现有分段，不改自动拆段逻辑）。";
+    return h("div", { class: "h3md-sec h3md-remake", "data-remake-module": on ? "on" : "off" },
+      h("div", { class: "h3md-row" },
+        h("label", { title: "Remake Swap: when checked, the low-res pass uses the Remake path. Requires a separately wired remake_model. Default off. This switch does not auto-load or verify a base model." },
+          box, h("b", {}, " Remake Swap 换人模块")),
+        h("span", { class: "h3md-small" }, on ? "已打开（总控台「多人互换」） · 需另接 remake_model · 不会自动加载或验证底模" : "默认关闭；总控台入口是「多人互换」")),
+      h("p", { class: "h3md-note h3md-remake-help" }, on ? helpOn : helpOff));
+  }
+
+  renderRemakeKeyframes(s, i) {
+    const p = this.plan;
+    const images = (p.media && p.media.images) || [];
+    const kfs = Array.isArray(s.keyframes) ? s.keyframes : [];
+    const len = M.segmentLength(s) || 0;
+    const maxAt = Math.max(0, (Math.max(len, 1) - 1) / M.FPS);
+    const ov = Math.trunc(M.num(s.overlapIn || 0, 0));
+    const ovSec = ov / M.FPS;
+    const rows = kfs.map((kf, k) => {
+      const sel = h("select", { "data-key": `remake-kf-img-${i}-${k}`,
+        onchange: (e) => {
+          M.updateShotKeyframe(p, i, k, { image: e.target.value });
+          this.commit();
+        } },
+        images.length
+          ? images.map((it) => h("option", { value: it.id, selected: it.id === kf.image ? "selected" : null },
+              it.id + (it.file ? `  (${String(it.file).split(/[\\/]/).pop()})` : "")))
+          : [h("option", { value: "", selected: "selected" }, "（请先在上方「图片 Images」添加素材）")]);
+      const at = h("input", { type: "number", min: "0", max: String(maxAt), step: "0.01",
+        "data-key": `remake-kf-at-${i}-${k}`, value: kf.at == null ? "" : String(kf.at),
+        title: `seconds from the start of this shot (0–${maxAt.toFixed(2)} s)`,
+        onchange: (e) => {
+          M.updateShotKeyframe(p, i, k, { at: Number(e.target.value) });
+          this.commit();
+        } });
+      const notes = [];
+      M.normalizeKeyframeEntry(p, s, kf, notes);
+      return h("div", { class: "h3md-row h3md-remake-kf", "data-remake-kf": `${i}-${k}` },
+        h("span", { class: "h3md-small" }, `#${k + 1}`),
+        sel,
+        h("label", { class: "h3md-small" }, " at ", at, " s"),
+        h("button", { type: "button", title: "remove this keyframe", onclick: () => { M.removeShotKeyframe(p, i, k); this.commit(); } }, "×"),
+        notes.length ? h("span", { class: "h3md-bad h3md-small" }, notes.join("; ")) : null);
+    });
+    const canAdd = images.length > 0 && kfs.length < M.REMAKE_MAX_KEYFRAMES;
+    const add = h("button", { type: "button", "data-key": `remake-kf-add-${i}`, disabled: canAdd ? null : "disabled",
+      title: !images.length ? "Add an image in the 图片 Images library first" : (kfs.length >= M.REMAKE_MAX_KEYFRAMES ? "At most 4 keyframes" : "Add a swap keyframe"),
+      onclick: () => {
+        const used = new Set(kfs.map((x) => String(x.image)));
+        const pick = images.find((it) => !used.has(it.id)) || images[0];
+        const start = Math.max(ovSec, 0);
+        const taken = new Set(kfs.map((x) => Math.trunc(M.pyRound(Number(x.at) * M.FPS))));
+        let at = start;
+        for (let f = Math.trunc(M.pyRound(start * M.FPS)); f < len; f++) {
+          if (!taken.has(f)) { at = f / M.FPS; break; }
+        }
+        M.addShotKeyframe(p, i, pick.id, at);
+        this.commit();
+      } }, "+ 添加关键帧");
+    const hint = !images.length
+      ? "请先在上方「图片 Images」素材库添加图片，然后从下拉框选择。不会新建素材 ID，也不用手填路径。"
+      : `从「图片 Images」选择已添加的图，填写从本分镜 0 秒起的时间（0–${maxAt.toFixed(2)} s）。最多 ${M.REMAKE_MAX_KEYFRAMES} 张。重叠区内的针会被后端跳过。自动拆段逻辑保持不变。`;
+    return h("div", { class: "h3md-remake-kfs", "data-remake-kfs": i },
+      h("div", { class: "h3md-row" }, h("b", {}, "换位关键帧 Keyframes（本分镜）"), add),
+      h("p", { class: "h3md-note h3md-small" }, hint),
+      ...rows);
   }
 
   // reference-video resolution row (between the media library's 图片 box and the shots); native removes the key
@@ -1965,6 +2088,7 @@ class DirectorEditor {
     if (rpx) refs.style.height = `${rpx}px`;
     this.trackResize(refs, "shot-refs");
     card.append(refs);
+    if (M.remakeOn(p)) card.append(this.renderRemakeKeyframes(s, i));
     // labels + prompt
     const ta = this.promptField({ rows: 6, key: `prompt-${i}`, sizeKey: "prompt", value: s.prompt || "", strict: true,
       placeholder: (p.globalPrompt ? "shot prompt (the global prompt below is prepended) " : "shot prompt ") + "– type @ to insert a reference label",

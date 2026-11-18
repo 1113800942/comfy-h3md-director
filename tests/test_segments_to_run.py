@@ -47,6 +47,35 @@ def test_only_new_segment_after_cached():
     assert stop == 5 and rerun == []           # 5 not cached, 4 missing: normal resume up to 5
 
 
+# 0.4.5 试镜 (window mode): parts 1-5; part 3 continues part 2 (a long take), the others start after a hard cut
+TSEGS = [{"length": 56, "overlapIn": ov} for ov in (0, 0, 8, 0, 0)]
+
+
+def test_trial_single_part_after_cut():
+    idx, rerun, line = L.plan_trial("4", TSEGS, FakeCache([]), True)
+    assert idx == [3] and rerun == [], idx         # only part 4: nothing before it is needed
+
+
+def test_trial_part_that_continues():
+    idx, rerun, _ = L.plan_trial("3", TSEGS, FakeCache([]), True)
+    assert idx == [1, 2] and rerun == []           # part 3 continues part 2: part 2 runs (or comes from the cache)
+
+
+def test_trial_several_parts():
+    idx, rerun, _ = L.plan_trial("1, 5", TSEGS, FakeCache([]), True)
+    assert idx == [0, 4] and rerun == []
+
+
+def test_trial_redo_in_finished_video():
+    idx, rerun, _ = L.plan_trial("4", TSEGS, FakeCache(range(5)), True)
+    assert idx == [0, 1, 2, 3, 4] and rerun == [3]   # all cached: a new take of part 4, whole video kept
+
+
+def test_trial_redo_cached_part_others_missing():
+    idx, rerun, _ = L.plan_trial("3", TSEGS, FakeCache([2]), True)
+    assert idx == [1, 2] and rerun == [1, 2]        # part 3 cached (taken again), part 2 missing: generated
+
+
 def test_input_on_main_node_last():
     main, opts = LS.split_spec(L.H3MDLoopSampler.INPUT_TYPES())
     assert list(main["optional"])[-1] == "segments_to_run"

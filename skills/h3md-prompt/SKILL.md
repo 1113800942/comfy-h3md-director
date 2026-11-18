@@ -168,7 +168,7 @@ non_diegetic_music:
   thumbnails; ask if unsure). Map person, outfit and location to the picture that really contains them; don't use a
   fixed template like "`<Picture 1>` is the person, `<Picture 2>` is the face". A location picture: say it is the set of
   the whole shot, unchanged from the first frame to the last.
-- Person swap: the reference video gives motion and position, the person becomes `<Subject N>`, `attribute_transfer`.
+- Person swap: the reference video gives motion and position, the person becomes `<Subject N>`, `attribute_transfer`. Several people with the Remake engine: section 12d.
 - **Motion copy (TARA): write what the guide video really shows** (0.4.4, measured 11-09). The prompt must match the
   guide; a dance-only template ("locked-off, dances in <scene>, the place stays the same") on a guide whose camera
   moves made the second window jump back to the scene words.
@@ -247,7 +247,8 @@ non_diegetic_music:
   `continue_lowres_prefix = native_lowres_carry`). Each segment's low-res result is pulled back to the color statistics
   of the shot's first segment, so colors don't deepen and faces don't age. Leave it 0 for stories whose colors should
   change; after a hard cut the new shot's first segment becomes the reference.
-- 1080p medium shots are sharp enough straight out; face refine is usually not needed except for small, distant faces.
+- 1080p medium close-ups (face about 1/5 of the frame height) are sharp straight out; no face refine needed. Small,
+  distant faces are not rescued by face refine either: fix them with framing (see 10b).
 
 ## 10b. Singing, framing and camera (measured on a 160 s music video)
 - **Sing only in medium and close shots.** In a wide shot the face is too small to show lips, so H3 inserts a
@@ -257,6 +258,22 @@ non_diegetic_music:
 - **Face size decides sharpness.** At 1920×1088 a knees-up shot gives a face of about 110 px (soft, blotchy skin; face
   refine cannot rescue it). Waist-up or closer, or a portrait 1088×1920 frame, gives 200+ px and a clear face. Where a
   face would be small, show her from behind, in profile far away, or in details (hair, hands, gown).
+- **Where the face must be read, design the shot for a face of about 1/5 of the frame height (measured 11-13).** Same
+  shot, same seed, same references, only the framing changed from medium-wide to medium close-up: the face went from
+  about 100 px (under 1/10 of the frame height) to about 260 px (about 1/5) and was clear with face refine off, at the
+  same render time. Nothing done afterwards to the small face was enough: standard face refine, Plus stitching,
+  enlarge-and-redraw, other restore models (VOSR2 / SeedVR2) only moved it from "very soft" to "just watchable"; the
+  doubled eyes and soft hair stayed, and it cost extra time. So:
+  - Singing, speaking, acting with the face: medium close-up or closer, with the framing spelled out, e.g.
+    `Medium close-up locked-off shot, framed from the chest up: the head and shoulders of <Subject 1> fill the frame and her face takes up about one fifth of the frame height.`
+  - Wide shots only where the face need not be read (establishing, from behind, silhouette), short, placed between
+    medium close-ups, or joined to one by a push-in / pull-out.
+  - A music video is mostly medium close-ups; plan the framing first, then the content.
+- **Give the character one face close-up plus one half-body outfit photo, and state each picture's role correctly.**
+  e.g. `<Subject 1> is the woman shown in <Picture 2> and <Picture 3>. <Picture 2> is her identity and outfit reference. <Picture 3> is a close-up portrait of the face of <Subject 1>.`
+  Never say the subject is in the location picture (the original Water plan did). Better references with the framing
+  unchanged raised sharpness only about 17%, which does not solve it; and more reference pictures are slower (a 15 s
+  segment went from about 9.5 to 14-15 minutes), so attach only what is needed.
 - **The face close-up photo only in medium and close shots.** Attached to a wide shot, the model may copy the photo as
   a shot of its own (its framing and its background).
 - **Timed lyrics need one segment per shot.** Write `At 00:07.3 she sings: <d>[English] ...</d>` in the shot's own
@@ -386,6 +403,143 @@ instead; **Import plan…** unpacks the media to `input/H3MD_plans/<name>/` and 
 - Example of a full pack (exported by H3MD, with a workflow): `plans/H3MD_demo_eve_mv.zip` on
   huggingface.co/yj0942/H3MD-Director.
 
+## 12d. Multi-person swap (Remake): the agent paints the keyframes, the Director makes the video
+
+Use this when people in a real video are to be replaced by the user's characters (H3MD 0.5.0+, `swapEngine:
+"remake"`). The Director makes the video; **you make the keyframes and the prompt and hand over a plan .zip (or a
+picture list)**. Remake follows the keyframes: a person moved, resized or swapped wrongly in a keyframe moves the video
+with it. Every keyframe must pass the self-check in step 5; redraw failures, never hand them over. Do not use TARA,
+depth or H3 mask repaint for this.
+
+**Local users: no agent needed.** `example_workflows/Qwen Image 2.1 Keyframe.json` (nodes H3MD Keyframe 1: Prepare
+and 2: Assemble) does route A in one run - numbering, moments, crops, any image-edit model, colour match, paste back,
+the step-6 prompt and the plan .zip. Point the user there first; the routes below are for agents doing it by hand or
+fixing single keyframes.
+
+**Two routes** - pick the one you can do; the other steps are shared.
+- **Route A: you can run code** (Claude Code, Codex, Cursor, or a local ComfyUI): crop -> edit -> paste back ->
+  colour-match. The composition cannot change; far shots with small people and crowded frames work. **Prefer A.**
+- **Route B: you can only chat and generate images** - use **ChatGPT** (its image model is the gpt-image the Remake author uses; Grok failed our test: it redrew everyone, swapped the wrong people and the characters did not match): the whole frame goes to the image
+  editor. Whole-frame edits often enlarge or move people, or add / drop one, so route B has stricter rules for picking
+  frames and checking (steps 2, 4, 5). The user gives you the source frames (or has a route-A agent extract them).
+
+**Real people**: online editors (Grok, GPT-image, Doubao ...) usually refuse to edit photos of real people, and almost
+always refuse famous ones. Use footage you have the right to use; real-people footage needs route A with a local
+editor. Never use this to pass someone off as a real person.
+
+**Image editor**: locally Qwen Image 2.1 Edit (route A); in a chat, ChatGPT (route B). It must be one that takes two or more
+images (source frame + character pictures) and can keep or set the output size.
+
+### 1. Who is who: number by position, the number never changes
+- The user names people by position, e.g. "picture 1 replaces the 2nd from the left". Number the performers **left to
+  right at the first frame where all of them are clearly visible**; that number is the person's identity for the whole
+  video, even after they change places.
+- Write one line on each performer's look (hat, hair, clothes) to recognise them later. If two look alike or you are not
+  sure who is who, stop and ask.
+- Character pictures: one clear full or half-body picture each; write down each character's look.
+
+### 2. Pick the keyframe moments
+- Watch the whole clip; list the cuts (scene detection + your own eyes), and per shot where each numbered person is,
+  who enters, leaves, turns or changes places.
+- **Every replaced person needs at least one large, clear keyframe** (mid shot, face clearly visible, front or three-quarter). Someone only seen small, at the back or half hidden gives the model no face, and the video drifts back towards the original performer (measured: with only small pictures of David, his singing shots got a European face).
+- **One per shot**; **one more** where people change places, enter, or turn from back to front; **at most about 6 s**
+  between two.
+- Each autosplit part (up to 345 frames, ~14 s) uses at most **4** of its own, so 2-3 per 14 s is enough.
+- Pick a frame where the people to replace are **clearly visible**: not blurred, not mostly cut by the frame edge, not
+  mostly hidden behind someone.
+- **No keyframe on a close-up**: when only the person from the thighs up is in frame and they fill most of it, the crop
+  is nearly the whole frame and the editor shrinks or moves them (full-body people are fine however tall). Paint the **mid shot** before it instead (person 1/4 to 1/2 of the frame
+  height): a mid-shot keyframe carries the identity into the close-up that follows (measured).
+- **Route B only**: when the people to replace are small (under ~1/5 of the frame height), a whole-frame edit easily
+  adds, drops or enlarges people. Skip such far shots (the next mid-shot keyframe carries them) or have a route-A agent
+  paint that one.
+- For each keyframe write down: source time (s), frame number (= time x 24), each person's number and place, who is
+  replaced.
+
+### 3. Take the source frame at the output's aspect
+- Use **the source frame itself** (not a thumbnail or a screenshot).
+- Centre-crop it to the output's aspect, then scale to the output size: portrait **960x1664**, landscape **1664x960**
+  (or 2560x1472) - the same cover crop Remake applies to the source. Example, a 1080x1920 portrait source: cut 24 px top
+  and bottom -> 1080x1872 -> scale to 960x1664. A keyframe at another aspect gets stretched by Remake.
+- Route B: the user gives you these frames; your result must have the same size.
+
+### 4. Paint the keyframe
+**Route A (code): one person at a time, only their region changes.**
+1. Box the person (full body) and grow it: +45% of the box width left and right, +12% of its height on top, +8% below;
+   not narrower than 1:2; clip to the frame.
+2. Crop it, scale to ~1.6 MP (sides multiples of 32), send it with the character picture to the editor (template below).
+3. Scale the result back to the crop size; **colour-match** it: on the ring around the person (the crop minus the
+   person's box) take each channel's mean and standard deviation before and after, and shift the whole result to the
+   source's; paste it back with an ~8% feather on the sides that are inside the frame.
+4. Several people in one frame: one after the other, each crop taken from the already pasted frame.
+5. Everything outside the crops is pixel-identical to the source, so the composition cannot change.
+
+**Route B (chat only): whole frame, one at a time.**
+1. Send one source frame + the character pictures it needs; ask for an output of exactly the same size.
+2. Many people to replace, or a first result with a wrong person: switch to **one person per edit**, feeding the result
+   back for the next one.
+3. Check every result at once (step 5); regenerate failures (new seed, or a more precise position in the prompt).
+
+**Prompt template for the editor** (image 1 = the frame or the crop, image 2+ = character pictures):
+> Use image 1 as the base. Keep its composition, camera, background, light, colours and sharpness, and every person's
+> position, size, pose, motion, facing and occlusion exactly as they are. Only replace [position + look, e.g. the man
+> second from the left in a white cap and white tracksuit] in image 1 with [character look, e.g. the woman in image 2:
+> long wavy blonde hair, white ribbed tank top, black jeans, white sneakers]; she keeps his stance and motion, and what
+> was hidden stays hidden. Everyone else and the background stay unchanged. No beautifying, no colour grading, no
+> filter; a realistic photo like image 1.
+
+For a route-A crop start with "Image 1 is part of a photo; replace the [...] in the middle of image 1 with ...".
+
+### 5. Self-check (every keyframe, both routes)
+Compare the keyframe with the source frame side by side, or flip between them overlaid:
+- [ ] Size equals the output size (960x1664 or 1664x960).
+- [ ] Same number of people: nobody added, nobody missing.
+- [ ] Every person in the same place and at the same size (top of head, feet, left and right edges line up); background,
+      floor, sky and buildings have not moved.
+- [ ] The clothes are entirely the character's: no jacket, coat or hat of the original performer is left (measured: a keyframe that kept the performer's jacket made the video keep it too).
+- [ ] The right person replaced by the right character; face, hair and clothes match the character picture.
+- [ ] People not replaced are unchanged: face, hat, glasses, clothes (a common error: the character's hat or clothes
+      painted onto the neighbour).
+- [ ] Hands and faces intact, no extra fingers, no visible seams; colour and brightness match the source (no lighter
+      or tinted patch).
+Any failure: redraw that keyframe (route A: only the failed crop).
+
+### 6. The prompt (one for the whole clip, six fields, Remake style)
+Inside Remake `<Picture N>` is the N-th keyframe of the part, not a character picture, so **never bind a Subject to a
+Picture number**. Define each Subject by look and by the performer it replaces; say the pictures are redrawn frames:
+- `subject_definitions`: `<Video 1> is the source video with 5 performers: it supplies the motion, gestures, head and
+  lip movement, poses, positions, place changes, timing, the camera, the surroundings, the lighting and the
+  soundtrack.` / `The <Picture> images are redrawn frames of this same run: each shows the people at that moment with
+  their final look, in the positions and poses they hold then; together they fix who is who as the performers change
+  places, leave and come back, and in close-ups.` / `<Subject 1> is a woman with long wavy blonde hair in a white ribbed
+  tank top, black jeans and white sneakers; this subject replaces the second performer counted from the left at the
+  start.` (one line per character). **Give every Subject an ethnicity, a rough age and a face** (face shape, eyes, skin, beard or not), not only hair and clothes, e.g. `<Subject 3> is an East Asian man in his late twenties with a clean-shaven face, dark almond-shaped eyes and short black hair ...` (measured: with only "short black hair, black T-shirt" the East Asian character came out European)
+- `summary`: `The target video is an edited version of <Video 1>. [video editing + reference generation + audio reuse]
+  Recast 3 of the 5 performers with a fixed mapping the whole time, counted from left to right at the start: ...; the
+  other performers stay themselves, with their own faces, hair and outfits.`
+- `retention_analysis`: `<Video 1>: partially_preserved - motion, posture, lip and jaw movement, timing, camera,
+  framing, scene, lighting and colour grade are retained; the face, hair and outfit of the recast performers are not
+  carried over.`; per Subject `fully_preserved - ..., identical in every moment, including close-ups and group shots.`;
+  `Source audio: fully_copy - the original soundtrack and its synchronisation are kept.`
+- `detailed_description`: one continuous take matching `<Video 1>` (source cuts written as `[Ns cut]` at the source's
+  times), who stands where from left to right at the start, each recast person moves exactly like their performer and
+  keeps their own face, hair and clothes in every frame; five fingers per hand.
+- `overall_soundscape`: `Keep the source soundtrack; do not invent dialogue.`; `non_diegetic_music`: the music of
+  `<Video 1>` unchanged.
+
+### 7. Hand over
+- **Route A: a plan .zip** (section 12c) with the source video and the keyframes in `media/`: `"swapEngine": "remake"`,
+  `"autoSplit": true`, the output size, one segment `{"length": 5+17n (not past the source's end), "overlapIn": 0,
+  "videos": [{"id": "src", "trimStart": <s>, "useSoundtrack": false, "depth": false}], "audioMode": "locked",
+  "locked": {"source": "video:src", "offset": 0}, "keyframes": [{"image": "kf1", "at": <s>}, ...], "prompt": "..."}`.
+  Keyframe images are listed in `media.images` only, not in the segment's `images`; `at` = seconds from the segment
+  start (= source time - trimStart); the character pictures are not needed (Remake does not read them).
+- **Route B: a list**: per keyframe the file name, the source time (s) and who was replaced, plus the prompt from step
+  6. The user turns on "Remake 换人" in the Director, adds the pictures to its keyframe list with their times and pastes
+  the prompt - or gives the list to a route-A agent to pack.
+- Ask the user to run only the first part, low-res, in the example workflow `H3MD Director Remake.json`, and
+  to look at it before the whole clip.
+
 ## 13. Self-check before output
 - [ ] It really is an H3MD task (otherwise use `h3-prompt-writing`).
 - [ ] Format and field order right; field names exact.
@@ -404,6 +558,9 @@ instead; **Import plan…** unpacks the media to `input/H3MD_plans/<name>/` and 
 - [ ] Every shot has composition, positions, location and light, action, camera and sound; dialogue and lyrics in
       `<d>` in their own language; unknown lyrics → she does not sing.
 - [ ] Singing only in medium / close shots; wide shots say she does not sing; face photo only in medium / close shots.
+- [ ] Shots where the face must be read are medium close-ups or closer (face about 1/5 of the frame height, 200+ px at
+      1080p) with the framing written out; wide shots are short and not relied on for the face; no small face left for
+      face refine to fix.
 - [ ] Locked camera where a large ground is in view; no "slowly" words; reference images match the output orientation.
 - [ ] With a reference photo: no face / skin / makeup / light / colour / style description - only camera, action,
       timing and sound.

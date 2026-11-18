@@ -480,6 +480,9 @@ def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = Fa
     legacy = [k for k in ("maxSegmentLength", "subOverlap") if raw.get(k) is not None]
     # window-exp (2026-11-07): window mode = one sampling run per shot with core context windows (no autosplit)
     window_mode = WIN.normalize_window_mode(raw.get("windowMode"))
+    if window_mode is not None and raw.get("swapEngine") not in (None, "", "off", "none"):
+        notes.append("swapEngine: window mode off (the swap engine renders segments of 90-345 frames)")
+        window_mode = None
     if window_mode is not None and not (isinstance(raw.get("windowMode"), dict) and raw["windowMode"].get("groupLength")):
         window_mode["groupLength"], why = WIN.auto_group_length(w, h)   # 11-07: RAM, not VRAM, limits a group
         notes.append(f"window mode: groups up to {window_mode['groupLength']} frames "
@@ -667,6 +670,10 @@ def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = Fa
                     notes.append(f"segment {n}: hard cuts at frames {seg['windowCuts']} (windows end / start there)")
                 notes.append(f"segment {n}: time marks -> {len(auto)} window prompts (actions per window: "
                              + ", ".join(str(a["events"]) for a in auto) + ")")
+        if s.get("keyframes"):   # 0.4.9: pictures pinned at moments of the shot
+            kfs = normalize_keyframes(s.get("keyframes"), n, length, overlap, media, notes)
+            if kfs:
+                seg["keyframes"] = kfs
         seg["labels"] = compute_labels(seg, media)
         n_soundtracks = sum(1 for lab in seg["labels"] if lab["kind"] == "video_soundtrack")
         if n_soundtracks > MAX_VIDEOS:
@@ -721,6 +728,31 @@ def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = Fa
     }
     if window_mode is not None:
         out["windowMode"] = window_mode
+    SWAP = _swap_engine()   # 2026-11-14 multi-person swap engine (experimental)
+    swap = SWAP.normalize(raw, notes)
+    if swap is not None:
+        out[SWAP.KEY] = swap
+        mode = SWAP.normalize_mode(raw, notes)
+        if mode is not None:
+            out[SWAP.MODE_KEY] = mode
+    out["trial"] = trial_parts(segments)
+    return out
+
+
+def trial_parts(segments: list) -> list:
+    """0.4.5 试镜: what each number in the Control Panel's 试镜 box means - [{n, shots: [first, last] (1-based),
+    start, end (seconds), after: "cut" | "continue"}].  In window mode a part is a group of shots; otherwise a
+    segment (an auto-split part keeps its shot number)."""
+    out = []
+    for i, seg in enumerate(segments):
+        if "shotRange" in seg:
+            a, b = seg["shotRange"]
+        else:
+            a = b = int(seg.get("shotIndex", seg.get("shot", seg.get("index", i))))
+        start = int(seg.get("startFrame") or 0)
+        out.append({"n": i + 1, "shots": [a + 1, b + 1], "start": round(start / FPS, 2),
+                    "end": round((start + int(seg["length"])) / FPS, 2),
+                    "after": "continue" if int(seg.get("overlapIn") or 0) > 0 else "cut"})
     return out
 
 
@@ -790,7 +822,10 @@ def group_window_segments(segments: list, window_mode: dict, notes: list, contin
     out, drift = [], 0
     for gi, parts in enumerate(groups):
         if len(parts) == 1:
-            out.append(_shifted(parts[0], drift))
+            one = _shifted(parts[0], drift)
+            si = int(parts[0].get("shotIndex", parts[0]["index"]))
+            one = dict(one, shotRange=[si, si])
+            out.append(one)
             continue
         g0 = parts[0]["startFrame"]
         length = parts[-1]["startFrame"] + parts[-1]["length"] - g0
@@ -817,6 +852,7 @@ def group_window_segments(segments: list, window_mode: dict, notes: list, contin
                            "images": [images.index(im) for im in p["images"]], "seg": p})
         g = dict(parts[0])
         g.update({"length": length, "images": images, "videos": [], "audios": [], "groupParts": gparts,
+                  "shotRange": [int(parts[0].get("shotIndex", parts[0]["index"])), int(parts[-1].get("shotIndex", parts[-1]["index"]))],
                   "windowCuts": sorted({17 * round(gp["origin"] / 17) for gp in gparts if gp["cut"]} |
                                        {17 * round((gp["origin"] + c) / 17) for gp in gparts
                                         for c in gp["seg"].get("windowCuts") or () if 0 < c < gp["end"] - gp["origin"]}),
@@ -824,6 +860,7 @@ def group_window_segments(segments: list, window_mode: dict, notes: list, contin
                                      "images": gp["images"]} for gp in gparts]})
         g["windowPrompts"][0]["start"] = 0
         g.pop("windowPromptsAuto", None)
+        g.pop("keyframes", None)   # 0.4.9: a group's keyframes are its parts' (segment_keyframes)
         out.append(_shifted(g, drift))
         drift += pad
         notes.append(f"window mode: shots {parts[0]['index'] + 1}-{parts[-1]['index'] + 1} -> one timeline "
@@ -970,6 +1007,127 @@ def resolve_media_path(file: str) -> str:
     raise FileNotFoundError(f"H3MD: media file not found: '{file}' (looked in {base})")
 
 
+# ----------------------------------------------------------------------------
+# Keyframes (0.4.9): a picture pinned at one moment of a shot
+# ----------------------------------------------------------------------------
+# Plan: segments[].keyframes = [{"image": "<media image id>", "at": <seconds from the shot's frame 0>}].
+# The picture is a painted frame of the target video (e.g. a guide frame with each person replaced), not a reference:
+# it does not take a <Picture N> slot.  Core MiniMaxH3AddGuide puts it on the target grid at that frame (needs an
+# fl2va or fl2va/ref2va hybrid model).  Idea from Viggle Remake's pinned frames (multi-person swaps keep who is where
+# through crossings); H3MD's own code.  The keyframes only steer the low-res pass (KEYFRAME_TAG, dropped by the
+# two-pass engine for the high-res pass), so the composition and "who is where" are fixed early and the high-res pass
+# only refines - the painted picture is not pasted into the final frames.
+KEYFRAME_TAG = "h3md_low_only"
+
+
+def normalize_keyframes(value, n, length: int, overlap: int, media: dict, notes: list) -> list:
+    """Plan 'keyframes' -> sorted [{"image": id, "frame": int}] (frames of this shot).  Bad entries are skipped
+    with a note; one picture per frame (the later entry wins)."""
+    if not isinstance(value, list):
+        raise ValueError(f"H3MD Director: segment {n} keyframes must be a list of {{image, at}}")
+    by_frame = {}
+    for e in value:
+        if not isinstance(e, dict) or e.get("image") is None or _num(e.get("at")) is None:
+            notes.append(f"WARNING segment {n}: keyframe {e!r} needs 'image' and 'at' (seconds) - skipped")
+            continue
+        image = str(e["image"])
+        if image not in media["images"]:
+            notes.append(f"WARNING segment {n}: keyframe image '{image}' is not in media.images - skipped")
+            continue
+        frame = int(round(float(_num(e["at"])) * FPS))
+        if frame < 0 or frame >= int(length):
+            notes.append(f"WARNING segment {n}: keyframe '{image}' at {float(_num(e['at'])):.2f} s is outside the "
+                         f"shot (0-{(int(length) - 1) / FPS:.2f} s) - skipped")
+            continue
+        if frame < int(overlap):
+            notes.append(f"WARNING segment {n}: keyframe '{image}' at {frame / FPS:.2f} s is inside the carried "
+                         f"overlap (first {int(overlap)} frames come from the previous shot) - skipped")
+            continue
+        if frame in by_frame:
+            notes.append(f"segment {n}: two keyframes at frame {frame} - '{image}' replaces '{by_frame[frame]}'")
+        by_frame[frame] = image
+    out = [{"image": by_frame[f], "frame": f} for f in sorted(by_frame)]
+    if out:
+        notes.append(f"segment {n}: keyframes at " + ", ".join(f"{k['frame'] / FPS:.2f} s ({k['image']})"
+                                                               for k in out))
+    return out
+
+
+def segment_keyframes(seg: dict) -> list:
+    """Keyframes on this segment's own frames; a window-mode group maps each part's keyframes onto its timeline."""
+    if seg.get("groupParts"):
+        out = []
+        for gp in seg["groupParts"]:
+            for kf in gp["seg"].get("keyframes") or ():
+                f = int(gp["origin"]) + int(kf["frame"])
+                if 0 <= f < int(seg["length"]):
+                    out.append({"image": kf["image"], "frame": f})
+        return out
+    return list(seg.get("keyframes") or ())
+
+
+def add_keyframes(core, positive, latent, plan: dict, seg: dict, vae):
+    """Pin the segment's keyframes on every conditioning entry (core MiniMaxH3AddGuide), tagged low-res only."""
+    kfs = segment_keyframes(seg)
+    if not kfs:
+        return positive
+    lat = latent if isinstance(latent, dict) else {"samples": latent}
+    done = []
+    for kf in kfs:
+        img = load_keyframe(plan["media"]["images"][kf["image"]]["file"])
+        try:
+            try:
+                out = core.MiniMaxH3AddGuide.execute(positive=positive, latent=lat, frame_idx=int(kf["frame"]),
+                                                     vae=vae, image=img)
+            except ValueError:
+                if img.shape[0] == 1:
+                    raise
+                img = img[:1]   # a short clip that does not fit before the end: pin its first frame only
+                out = core.MiniMaxH3AddGuide.execute(positive=positive, latent=lat, frame_idx=int(kf["frame"]),
+                                                     vae=vae, image=img)
+        except ValueError as exc:
+            LOG.warning("[H3MD Keyframes] segment %d: keyframe '%s' at frame %d skipped (%s)", seg["index"] + 1,
+                        kf["image"], kf["frame"], exc)
+            continue
+        positive = _unwrap_node_output(out)[0]
+        done.append(f"{kf['frame']} ({kf['image']})")
+    if done:
+        tagged = []
+        for c in positive:
+            d = dict(c[1])
+            d["minimax_keyframes"] = [dict(k, **{KEYFRAME_TAG: True}) for k in d.get("minimax_keyframes") or ()]
+            tagged.append([c[0], d])
+        positive = tagged
+        LOG.info("[H3MD Keyframes] segment %d: pinned at frames %s on %d conditioning(s) - low-res pass only",
+                 seg["index"] + 1, ", ".join(done), len(positive))
+    return positive
+
+
+
+KEYFRAME_CLIP_EXT = (".mp4", ".webm", ".mov", ".mkv")
+KEYFRAME_CLIP_FRAMES = 5   # 2026-11-13 multiswap: a lone picture pinned mid-video leaves a 1-frame smear there;
+#                            a 5-frame clip (the model's shortest clip) blends in. Core AddGuide anchors 5/22/39 frames.
+
+
+def load_keyframe(file: str) -> torch.Tensor:
+    """Keyframe media: a picture -> [1,H,W,3]; a short video clip -> its first KEYFRAME_CLIP_FRAMES frames."""
+    if not str(file).lower().endswith(KEYFRAME_CLIP_EXT):
+        return load_image(file)
+    import av
+    import numpy as np
+    frames = []
+    with av.open(resolve_media_path(file)) as c:
+        for fr in c.decode(c.streams.video[0]):
+            frames.append(fr.to_ndarray(format="rgb24"))
+            if len(frames) >= KEYFRAME_CLIP_FRAMES:
+                break
+    if not frames:
+        raise ValueError(f"H3MD Director: keyframe clip '{file}' has no frames")
+    if len(frames) < KEYFRAME_CLIP_FRAMES:
+        frames = frames[:1]
+    return torch.from_numpy(np.stack(frames).astype(np.float32) / 255.0)
+
+
 def load_image(file: str) -> torch.Tensor:
     from PIL import Image, ImageOps
     import numpy as np
@@ -1073,6 +1231,21 @@ def load_video_window(file: str, start: float, duration: float, max_frames: int 
         raise ValueError(f"H3MD: decoded only {len(out)} frames from '{file}' window {start:.2f}+{duration:.2f}s")
     arr = np.stack(out).astype(np.float32) / 255.0
     return torch.from_numpy(arr)
+
+
+MAX_HOLD_FRAMES = 16   # a video-following shot is rounded UP to 5+17n: at most 16 frames longer than its video
+
+
+def hold_last_frames(frames, length: int, max_short: int = MAX_HOLD_FRAMES):
+    """0.4.6: a reference video that ends up to `max_short` frames before its shot does (the shot length was rounded up
+    to 5+17n) gets its last frame held to the shot length, so a native-temporal guide (TARA) and the output have the
+    same temporal grid.  Longer gaps and longer videos are returned unchanged.  -> (frames, held frame count)"""
+    n = int(frames.shape[0])
+    short = int(length) - n
+    if n < 1 or short <= 0 or short > max_short:
+        return frames, 0
+    tail = frames[-1:].expand(short, *frames.shape[1:])
+    return torch.cat([frames, tail], 0), short
 
 
 def load_audio_window(file: str, start: float, duration: float | None) -> dict | None:
@@ -1182,6 +1355,23 @@ REF_VIDEO_TIERS = ((768, 1344), (640, 1120), (512, 896), (480, 840))
 # Middle-leaning-conservative pick between the largest clean total (~215055) and the first bad one (216168).
 # The gap is <1 %, so this total is only a rough proxy (per-tile fixed rows matter more); not a measured limit.
 REF_VIDEO_AUTO_TOKEN_LIMIT = 215000
+# 0.4.8: second auto limit - the reference media alone (ref videos + ref images + RefMods, DiT tokens).  These rows
+# are FIXED in the high-res pass: every high-res strip carries all of them, so more strips do not shrink them.  The
+# total above can be fine while the references alone fill a strip (11-13: a 1088x1664 guide kept at tier1 = 63,936
+# video tokens -> 81,880 fixed rows per strip, 12 strips + OOM warning, ~5.5 min per window step; the same machine ran
+# a 480p guide in 4 strips).  45k keeps every 480p guide up to ~15 s (~43k) untouched; 11-13 at tier2 was 48k.
+# Scaled with the total limit (plan tokenBudget / REF_VIDEO_AUTO_TOKEN_LIMIT, i.e. by the GPU's VRAM).
+REF_VIDEO_AUTO_FIXED_LIMIT = 45000
+
+
+def ref_fixed_limit(limit: int) -> int:
+    """Reference-media limit that goes with a total limit (same VRAM scaling as the plan's token budget)."""
+    return int(round(REF_VIDEO_AUTO_FIXED_LIMIT * float(limit) / REF_VIDEO_AUTO_TOKEN_LIMIT))
+
+
+def ref_fixed_tokens(est: dict) -> int:
+    """Reference-media part of an estimate_segment_tokens() breakdown (rows fixed in every high-res strip)."""
+    return int(est["videos"]) + int(est["images"]) + int(est["refmods"])
 
 
 def normalize_ref_video_height(value):
@@ -1287,14 +1477,19 @@ def plan_ref_video_sizes(mode, width, height, length, videos, images, ref_image_
         return {"sizes": sizes, "tier": None, "est": est, "over": False, "mode": mode}
     flags = list(depth) if depth else [False] * len(native)
     low = REF_VIDEO_TIERS[-1]
+    fixed_limit = ref_fixed_limit(limit)
     for tier, (smax, lmax) in enumerate(REF_VIDEO_TIERS):
         sizes = [ref_video_fit(w, h, *(low if d else (smax, lmax))) for (w, h), d in zip(native, flags)]
         est = estimate_segment_tokens(width, height, length, [(sw, sh, n) for (sw, sh), (_w, _h, n) in
                                                               zip(sizes, videos)], images, ref_image_size,
                                       extra_tokens)
-        if est["total"] <= limit:
-            return {"sizes": sizes, "tier": tier, "est": est, "over": False, "mode": mode}
-    return {"sizes": sizes, "tier": len(REF_VIDEO_TIERS) - 1, "est": est, "over": True, "mode": mode}
+        reasons = ([] if est["total"] <= limit else ["total"]) + \
+                  ([] if ref_fixed_tokens(est) <= fixed_limit else ["references"])
+        if not reasons:
+            return {"sizes": sizes, "tier": tier, "est": est, "over": False, "mode": mode,
+                    "fixed_limit": fixed_limit, "reasons": []}
+    return {"sizes": sizes, "tier": len(REF_VIDEO_TIERS) - 1, "est": est, "over": True, "mode": mode,
+            "fixed_limit": fixed_limit, "reasons": reasons}
 
 
 def resize_video_frames(frames: torch.Tensor, w: int, h: int, chunk: int = 16) -> torch.Tensor:
@@ -1333,9 +1528,13 @@ def apply_ref_video_height(plan: dict, seg: dict, result: dict, ref_image_size="
     if mode == "auto":
         smax, lmax = REF_VIDEO_TIERS[pick["tier"]]
         head = (f"[H3MD RefVideo] segment {seg['index'] + 1}: refVideoHeight=auto -> tier{pick['tier'] + 1} "
-                f"{smax}x{lmax}{' (depth videos: lowest tier)' if depth and any(depth) else ''} | {parts} vs limit {limit:,}")
+                f"{smax}x{lmax}{' (depth videos: lowest tier)' if depth and any(depth) else ''} | {parts} vs limit {limit:,}"
+                f" | references {ref_fixed_tokens(est):,} vs limit {pick['fixed_limit']:,}")
         if pick["over"]:
-            LOG.warning("%s | still over the limit at the lowest tier - reference kept | %s", head, "; ".join(changes))
+            what = " and ".join("the total" if r == "total" else "the reference media" for r in pick["reasons"])
+            LOG.warning("%s | %s still over the limit at the lowest tier - reference kept (the high-res pass will "
+                        "need more strips; a shorter shot or fewer reference pictures helps) | %s",
+                        head, what, "; ".join(changes))
             return
     else:
         head = f"[H3MD RefVideo] segment {seg['index'] + 1}: refVideoHeight={mode} | {parts}"
@@ -1376,6 +1575,11 @@ def pick_media_for(plan: dict, seg: dict, ref_image_size: str = "match", extra_t
                 raise ValueError(
                     f"H3MD: video '{ref['id']}' has no audio track; set useSoundtrack=false or hasAudio=false "
                     f"(label numbering depends on it)")
+        frames, held = hold_last_frames(frames, seg["length"])   # 0.4.6: guide shorter than its (rounded-up) shot
+        if held:
+            LOG.info("[H3MD RefVideo] segment %d: video '%s' ends %d frame(s) before the shot (%d frames): its last "
+                     "frame is held so the guide and the output have the same length", seg["index"] + 1, ref["id"],
+                     held, seg["length"])
         result["videos"].append(frames)
         result["video_audios"].append(soundtrack)
     apply_ref_video_height(plan, seg, result, ref_image_size, extra_tokens)   # refVideoHeight (native = no-op)
@@ -1400,6 +1604,14 @@ def pick_media_for(plan: dict, seg: dict, ref_image_size: str = "match", extra_t
 # ----------------------------------------------------------------------------
 # Core encoder call
 # ----------------------------------------------------------------------------
+
+def _swap_engine():
+    try:
+        from . import h3md_remake_engine as SWAP
+    except ImportError:   # flat import (tests)
+        import h3md_remake_engine as SWAP
+    return SWAP
+
 
 def _core_h3():
     from comfy_extras import nodes_minimax_h3
@@ -2010,7 +2222,7 @@ def _window_video(plan, parts, media, k, j, frames, snd, a, b, ref_image_size):
             sl.append(trail[0])
             aud.append((trail[1] if trail[1] is not None else _silence(snd, b - s1)) if snd is not None else None)
             note.append(f"last {b - s1} frames from shot {k + 2}")
-        elif n >= int(parts[k]["seg"]["length"]) - 1:
+        elif n >= int(parts[k]["seg"]["length"]) - MAX_HOLD_FRAMES:
             # a timeline video that covers its whole shot (a guide) and the window runs on into a shot without it:
             # hold the last frame, so the guide keeps the window's length (a native-temporal guide must match it)
             sl.append(sl[-1][-1:].expand(b - s1, *sl[-1].shape[1:]))
@@ -2136,6 +2348,13 @@ class H3MDSegmentEncode:
         core = _core_h3()
         kwargs = build_core_kwargs(picked)
         wps = window_prompts_for(plan, seg) if not (prompt_override or "").strip() else None
+        SWAP = _swap_engine()
+        if SWAP.engine(plan):   # 2026-11-14 multi-person swap: Remake's conditioning for the low-res pass
+            positive, latent = SWAP.encode(plan, seg, picked, prompt, clip, vae, audio_vae, segment_keyframes(seg),
+                                           load_keyframe, float(plan.get("_lowresScale", 0.5)))
+            negative = zero_out_conditioning(positive)
+            return (positive, negative, latent, prompt, json.dumps(seg["labels"], ensure_ascii=False), seg["length"],
+                    seg["overlapIn"], plan["width"], plan["height"], picked["locked_audio"])
         if seg.get("groupParts") and not (prompt_override or "").strip():
             positive, latent, prompt = encode_group_windows(core, plan, seg, picked, clip, vae, audio_vae,
                                                             ref_image_size)
@@ -2167,6 +2386,7 @@ class H3MDSegmentEncode:
                 clip=clip, prompt=prompt, width=plan["width"], height=plan["height"], length=seg["length"],
                 ref_image_size=ref_image_size, vae=vae, audio_vae=audio_vae, **kwargs)
             positive, latent = _unwrap_node_output(out)[:2]
+        positive = add_keyframes(core, positive, latent, plan, seg, vae)   # 0.4.9 (no-op without keyframes)
         latent = {"samples": latent["samples"]}
         negative = zero_out_conditioning(positive)
         labels = json.dumps(seg["labels"], ensure_ascii=False)

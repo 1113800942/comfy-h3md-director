@@ -3,6 +3,11 @@ description: Something does not work as expected / 运行出错或结果不对
 labels: ["bug"]
 body:
   - type: textarea
+    id: report
+    attributes:
+      label: Diagnostic report / 诊断报告
+      description: "Easiest: in the H3MD Director click **Report 诊断报告** (next to Export plan) and drag the zip from output/H3MD_reports here. It has the GPU / VRAM, versions, settings, a plan check and the last error - no user or computer names, no pictures or videos. 最省事：在导演台点 **Report 诊断报告**，把 output/H3MD_reports 里的 zip 拖到这里。"
+  - type: textarea
     id: what
     attributes:
       label: What happened? / 发生了什么？

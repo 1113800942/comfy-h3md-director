@@ -2,6 +2,108 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.5.0] - 2026-11-15
+* **New / 新功能: multi-person swap with Viggle Remake** (plan `"swapEngine": "remake"`). Replace several people of a
+  real video with your own characters; motion, camera, lip movement, timing and the soundtrack stay. The low-res pass
+  runs Viggle Remake's swap model (its RemakeConditioning, the official 6 sigmas, keyframes held while sigma >= 0.9);
+  the high-res pass is H3MD's usual one. The keyframes (0.4.9 `segments[].keyframes`) are painted frames of the result;
+  every autosplit part takes up to 4 of its own, and a part without one borrows the nearest keyframe as an un-pinned
+  reference instead of stopping the run. Needs ComfyUI-Viggle-Remake and
+  `viggle_remake_swap_pruned_int8_convrot.safetensors` (Hugging Face `Viggle/Viggle-Remake`, install them yourself)
+  wired to the Loop's `remake_model`; output 1664x960 / 960x1664 (or 2560x1472); 90-345 frames per part; window mode
+  is turned off. Control Panel: 4th style **多人换人**; Director: **Remake 换人** switch with a keyframe list. The simple / full / Remake example workflows all carry a 'Remake model' loader wired to the Loop's
+  `remake_model`; the 多人换人 style switches it on, every other style bypasses it (never loaded otherwise). New
+  example workflow `H3MD Director Remake.json`. The keyframes are painted by your own agent or image editor:
+  `skills/h3md-prompt` section 12d says how. Plans without `swapEngine` run and cache exactly as before.
+  多人换人:导演台低清这一遍改用 Viggle Remake 换人模型,高清照旧;关键帧(画好的结果帧)由你自己的智能体或修图工具画,
+  打成计划包导入;需要自装 ComfyUI-Viggle-Remake 节点和 Remake int8 模型,接到 Loop 的 `remake_model`。
+* **New / 新增: keyframe workflow for the multi-person swap** - nodes **H3MD Keyframe 1: Prepare** and **H3MD
+  Keyframe 2: Assemble**, example `Qwen Image 2.1 Keyframe.json`. One local run: core SAM3.1 tracks the people,
+  numbers them left to right at the start ("图1换左二" / "picture 1 -> left 2"), picks keyframe moments at most ~5 s
+  apart where the people stand apart, crops each recast person (skill 12d route A), lets any image-edit model redraw
+  the crops (the example: Qwen Image 2.1 Edit + 2-step LoRA + official prompt enhancer), colour-matches and pastes them
+  back (the people around keep their source pixels), writes the Remake plan (prompt per skill 12d step 6, length not
+  past the source) and saves a plan .zip to `output/H3MD_plans/` for the Director's Import plan (local or RunningHub).
+  Measured on our 26 s five-person demo (3 people recast).
+  多人换人关键帧工作流:本地一次运行认人编号、挑关键帧、裁人、修图(修图模型自选)、对色贴回、写计划、打计划包。
+* **New / 新增: diagnostic report** - Director button **Report 诊断报告**: one .zip for a bug report with the
+  environment (GPU, VRAM and the run's peak, ComfyUI / torch / CUDA / H3MD versions, a fixed list of related node
+  packs, models found or not), the node settings, a plan check (format, the Director's notes, prompt-skill rules:
+  5+17n, window handoffs and windows without a timed action, Remake sizes / parts / keyframes, VRAM budget) and the
+  last runs' H3MD log and errors, ranked as environment / settings / plan / skill / run problems. Privacy by
+  whitelist: no user or computer names, folders, environment variables or media; paths cut to file names; prompts
+  optional. Saved to `output/H3MD_reports/`, never sent. The GitHub bug form asks for it first.
+  诊断报告：导演台一键生成，附在 issue 里；只收诊断必需的信息，不含个人信息和素材。
+* **Keyframes now have a Director UI** (inside the Remake module) and are kept per part by autosplit.
+  关键帧在导演台里可以直接编辑。
+
+## [0.4.9] — 2026-11-13
+* **New / 新增: keyframes - pin a picture at a moment of a shot** (plan field `segments[].keyframes`:
+  `[{"image": "<media image id>", "at": <seconds from the shot's frame 0>}]`; no Director UI yet). The picture is a
+  painted frame of the wanted result (e.g. a frame of the guide with each person replaced), placed with core
+  `MiniMaxH3AddGuide` (needs an fl2va or fl2va/ref2va hybrid model). It steers only the low-res pass: the composition
+  and who stands where are fixed early, the high-res pass only refines. Made for multi-person swaps, where people who
+  cross each other could swap identities (11-13 test: three people, the second side-by-side swap came out with the
+  wrong people). Works in segment mode, autosplit (each part keeps its own keyframes), window mode and multi-shot
+  timelines. Plans without keyframes behave and cache exactly as before. Idea from Viggle Remake's pinned frames.
+  新增关键帧：计划里给镜头加 `keyframes`（图片 id + 第几秒），把一张画好的帧钉在那一刻（需要 fl2va 或混合模型）；只在低清
+  阶段起作用，定住构图和"谁在哪"，高清阶段只细化。用于多人换人（交错换位时不再对错人）。暂时没有导演台界面。
+
+## [0.4.8] — 2026-11-13
+* **Fix / 修复: `refVideoHeight: auto` now also limits the size of the reference media itself.** Before, auto only
+  checked the shot's token total, so a large guide video (e.g. a 1088x1664 H3MD render used as `<Video 1>`) stayed at
+  the top tier when the total fit; in the high-res pass every strip carries all reference rows, so the strips could
+  not shrink (11-13: 12 strips, OOM warning, ~5.5 min per window step). Auto now also keeps the reference media
+  (videos + pictures + RefMods) under 45,000 tokens (scaled with the GPU budget like the total) and steps the video
+  down until both fit; the log shows both numbers and why it stepped down. 480p guides (up to ~15 s) are unchanged;
+  `native` / `480` / `576` / `720` are unchanged. 参考视频自动缩小（auto）新增第二条限制：参考素材本身（视频 + 图片 +
+  RefMod）不超过 45,000 token（按显存比例缩放），超了就继续降档；日志写明两项数值和降档原因。480p 原片（约 15 秒以内）和手动指定高度不受影响。
+* **Fix / 修复: window mode high-res strips counted the whole guide video.** Window mode crops a timeline-aligned
+  guide (and its soundtrack) to each window, but the strip planner counted all of its frames, so every strip looked
+  bigger than it is (11-13: 72 latent frames counted, 52 used -> 12 strips). It now counts the window's share.
+  无接缝（窗口）模式：高清分块估算原来按整段原片算参考视频，实际每个窗口只带自己那一段；现在按窗口长度算，分块数不再虚高。
+
+## [0.4.7] — 2026-11-13
+* **Face refine save node: optional H3 Face Stitch Plus and Face Flow Lock** (ComfyUI-H3-FaceRefine-Plus by AnniCodex,
+  MIT; install it yourself, it is not bundled). Two new optional inputs at the end of
+  `H3MD Save Video Face Refine And Interp`: `stitch_mode` (`standard` = as before / `plus` = H3 Face Stitch Plus:
+  antialiased paste, light and colour from the original frame, detail from the refined face; `colour_match` 0 = no
+  tone transfer) and `flow_lock` (H3 Face Flow Lock after every pasted chunk, per frame, so it fits the chunked save).
+  Old workflows open unchanged; if the Plus pack (or opencv-python) is missing the node falls back / skips and says so
+  in the report. 修脸保存节点新增两个可选输入：`stitch_mode`（standard / plus）和 `flow_lock`；需要自己装
+  ComfyUI-H3-FaceRefine-Plus；没装就退回原样并在报告里说明；旧工作流不受影响。
+* **`example_plans/h3md_silver_warrior_1min_v3.zip`**: a 1-minute fight demo plan (9 shots) to import in the Director.
+  新增 1 分钟打斗示范计划。
+
+## [0.4.6] — 2026-11-13
+* **Fix / 修复: motion copy no longer fails when the guide video is a few frames shorter than the shot.** A shot that
+  follows its video is rounded up to 5+17n; without `motion_transfer:` in the prompt it was not rounded down, so the
+  last window needed more guide frames than the video had (TARA: "Native temporal guide and output must have identical
+  temporal grids", after minutes of sampling). Now a guide that ends up to 16 frames before its shot keeps its last
+  frame to the shot length - segment mode and window mode - and the log says so (`[H3MD RefVideo] ... last frame is
+  held`). 动作复刻：原片比镜头短不超过 16 帧时，用最后一帧补齐（分段 / 窗口模式都一样），不再跑到最后一个窗口才报 TARA 的
+  "identical temporal grids"，日志会写明补了几帧。
+* **Control Panel style "motion copy" adds `motion_transfer:` for you.** When the plan has the trigger neither in the
+  global nor in a shot prompt, the plan sent to the server gets it at the start of the global prompt (done when the
+  workflow is queued; the workflow and the editor keep your text). 总控台选「动作复刻」，计划里没写 `motion_transfer:`
+  时，排队时自动加在全局提示词最前面（工作流和编辑器里的文字不变）。
+* **High motion style = one weapon LoRA per pass.** Low-res `H3-Bunny_weapon_combatV1` 0.85, high-res 0.5, every other
+  row off (the rows stay in the list; the high-res 768 turbo strength stays 1.0). Measured by a 1-minute fight (11-12).
+  高动态风格：低清、高清各只开一个 weapon（低 0.85 / 高 0.5），其余行关闭但保留在清单里；高清 768 加速强度仍是 1.0。
+
+## [0.4.5] — 2026-11-09
+* **试镜 / Trial** (the Control Panel box that was "which segments"): with **Seamless long video** on, a number now
+  means a part of the timeline, shown as buttons under the box — `试镜 2 · 镜头 5–9 · 0:58–1:52` (shots and seconds).
+  Click a button to render only that part (shift-click adds more); any part can be tried, not just the first. A part
+  after a hard cut runs on its own and is the same take the full run makes (the full run reuses it); a part that
+  continues a long take (no hard cut inside ~60 s) also uses / renders the part before it. When every other part is
+  cached, a tried part is a new take inside the finished video. Without Seamless long video the box works as before
+  (segments). The internal input name `segments_to_run` is unchanged, so old workflows open as they are.
+  控制台的"跑哪几段"改名**试镜**。开了无接缝长视频时，框下面一排按钮列出每一段（哪几个镜头、几秒到几秒），点一下就只跑那段，
+  任何一段都能单独试，不只第一段；硬切后面的段单独跑，结果和整片里的一样，出整片时直接复用；接着长镜头的段会先用 / 先补跑上一段。
+  没开无接缝时照旧按分段算。旧工作流照常打开。
+* The Director's preview (`/h3md/autosplit`) and the parsed plan carry a `trial` list (parts → shots, seconds).
+
 ## [0.4.4] — 2026-11-09
 * **Fix / 修复: `delete_cache_after_save` now really deletes the run cache.** The save nodes refused every run folder
   ("holds non-H3MD files") because of the run's own `run.json` (its base seed), so the cache was always kept. Folders

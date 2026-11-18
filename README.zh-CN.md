@@ -19,6 +19,8 @@
 | <img src="docs/media/mv_1080p_singing.gif" width="420"> | <img src="docs/media/mv_1080p_everest.gif" width="420"> |
 
 ## 亮点
+- **多人换人(0.5.0)**:把真人视频里的几个人换成你的角色,动作、镜头、口型和声音都保留。导演台里直接跑
+  Viggle Remake;你(或你的智能体)画几张关键帧即可。
 - **无接缝长视频（0.4.0，CCW）**：导演台上勾一个开关，续接的镜头用接续窗口（Chained Context Windows）在同一条时间线上
   一起生成——没有续接接缝、不漂移、不重影；硬切照常是干净的硬切。
 - **一次生成长视频**：1080p 2–3 分钟（实测：2 分 20 秒 MV，1920×1088，RTX 5090 用时 2 小时 18 分）。
@@ -45,7 +47,7 @@
 2. ComfyUI 需要支持 MiniMax H3 的版本（0.43 或更新；**无接缝长视频需要 0.44 或更新**）。
 3. 打开示例工作流：ComfyUI **模板 / Templates** → `ComfyUI-H3MD-Director`，或者把
    [`example_workflows/`](example_workflows) 里的文件拖进 ComfyUI。**第一次用请先开 `H3MD Director simple`（v0.3 清爽版）**：
-   画布上只有三样——**总控台**（尺寸、帧数 / 插帧、修脸、种子、跑哪几段、风格按钮 均衡 / 高动态 / 动作复刻、低清和高清两张
+   画布上只有三样——**总控台**（尺寸、帧数 / 插帧、修脸、种子、试镜（只跑哪几段）、风格按钮 均衡 / 高动态 / 动作复刻、低清和高清两张
    LoRA 表）、**导演台**（素材、分镜、提示词）和成片预览。模型、采样、保存的设置都收在子图里（点开就能改）。
    `H3MD Director` 是以前的完整平铺版。
    硬件：40 / 50 系显卡，**显存最低 16 GB，推荐 24 GB 以上**（在 RTX 5090 上实测；16 / 24 GB 的实测反馈欢迎告诉我们）。
@@ -115,6 +117,39 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
 * 每次局部重绘，这一组的旧版本会挪到同一个文件夹里的 `_replaced_<时间>/`（整组一份：1920×1088、53 秒一组约 15 GB）。选定之后把这些文件夹删掉。
 * H3MD 自己从不删缓存：在 H3MD Save Video Interp 上打开 `delete_cache_after_save`，或者成片定稿后手动删掉 `resume_...` 文件夹。
 
+## 多人换人(0.5.0,Viggle Remake)
+
+把真人视频里的几个人换成你自己的角色(例如"图1换左二"),动作、镜头、口型和原声都保留。导演台低清这一遍用 Viggle Remake
+的换人模型,高清这一遍照常用 H3MD 自己的。
+
+1. **关键帧 + 计划包,本地一次跑完**:打开 `example_workflows/Qwen Image 2.1 Keyframe.json`。原片放进 input 文件夹,
+   接上角色图,写"图1换左二"(人按开头第一帧清楚的画面从左到右编号,看「认人表」核对),每张图写一行外貌描述。
+   **H3MD Keyframe 1: Prepare 准备关键帧** 用 ComfyUI 自带的 SAM3.1 跟踪每个人,挑关键帧时刻(相邻不超过约 5 秒,
+   避开人贴在一起),把每个要换的人裁出来;中间用任何修图模型重画(示例是 Qwen Image 2.1 编辑 + 2 步 LoRA + 官方
+   提示词增强,也可以换 Flux 等);**H3MD Keyframe 2: Assemble 打包计划** 对色、贴回、写 Remake 计划,计划包存到
+   `output/H3MD_plans/`。看「关键帧总览」,姿势或手不对就换种子重跑。也可以不用这个工作流,让智能体画关键帧、
+   写计划(`skills/h3md-prompt` 第 12d 节)。Remake 很听关键帧的话,关键帧画得好不好直接决定成片。
+2. **计划**:在导演台(本地或 RunningHub)导入这个 zip。
+3. **运行**:打开 `example_workflows/H3MD Director Remake.json`(总控台风格 **多人换人**,Loop 的 `remake_model`
+   已接好 Remake 模型)。先只跑第一段低清,满意了再跑全片。
+   **Remake 模型和原来的主模型都要开着,不冲突**:低清这一遍用 Remake 模型(人在这一遍换掉),高清这一遍用原来的
+   H3 主模型(只补细节)。两个轮流用显卡,关掉任何一个都会出错。清爽版和完整版里也有同一个「Remake model 换人模型」节点,
+   已接到 Loop:总控台选 **多人互换** 风格会自动打开它,选其他风格自动关闭(平时不会加载这个模型)。
+
+需要自己安装:节点包 **ComfyUI-Viggle-Remake** 和模型 `viggle_remake_swap_pruned_int8_convrot.safetensors`(放
+`models/diffusion_models`),都在 Hugging Face [Viggle/Viggle-Remake](https://huggingface.co/Viggle/Viggle-Remake)(许可见
+其模型卡)。限制:成片 1664x960 或 960x1664(或 2560x1472);每段 90-345 帧(自动分段会处理);每段最多 4 张关键帧;
+这类计划不能开无接缝长视频。被换的人和角色的发型长短、体型、性别接近时效果最好;差很多时(如男换女、长短发差很多)
+不完美,但能用。关键帧工作流按位置跟人:人走出画面再回来可能被当成新的人(info 里会提醒)。感谢 Viggle 开源 Remake。
+
+## 反馈问题
+
+在导演台点 **Report 诊断报告**（在 Export plan 旁边），把 `output/H3MD_reports/` 里的 zip 附到 [GitHub issue](../../issues)。
+里面是我们查问题要用的：显卡、显存（和上次运行的峰值）、ComfyUI / torch / H3MD 和相关节点包的版本、模型找没找到、
+节点设置、按提示词 skill 规则对计划的检查（长度、窗口交接、Remake 关键帧……），以及最近几次运行的 H3MD 日志和报错。
+不含用户名、电脑名、文件夹（路径只留文件名），也不含任何图片、视频、音频；不想带提示词就取消勾选 **prompts**。
+报告只存在你自己的电脑上。
+
 ## 更多内容（点开查看）
 
 <details>
@@ -147,8 +182,11 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
 
 **示例工作流**
 * `H3MD Director simple.json`（清爽版，**推荐从这里开始**）：总控台 + 导演台 + 预览，模型 / 采样 / 保存收在子图里；不用
-  rgthree、Crystools、easy-use、LayerStyle、TE-Speed 这些节点。小显存：把 32B 编码器换成 4B + ClipProj（完整版里 ClipProj 节点默认旁路，见下面“文本编码器怎么选”）。
+  Crystools、easy-use、LayerStyle、TE-Speed 这些节点（rgthree 只用来画顶上的标题横幅，没装也只是横幅不显示）。小显存：把 32B 编码器换成 4B + ClipProj（完整版里 ClipProj 节点默认旁路，见下面“文本编码器怎么选”）。
+* `example_plans/h3md_silver_warrior_1min_v3.zip`——可直接导入的 **1 分钟打斗**示范计划（9 个镜头，1280×704，不带素材）：
+  导演台点 **Import plan…**，选这个 zip，选"只导入计划"。配合总控台"高动态"风格（每条线只开一个 weapon LoRA）。
 * `H3MD Director.json`（完整版）——样片用的完整设置，多了修脸、RIFE 补帧到 48 fps、多 1 步精修和几个方便的小工具。
+* `H3MD Director Remake.json` + `Qwen Image 2.1 Keyframe.json`——多人换人(0.5.0):后者出关键帧和计划包,前者出片(见"多人换人")。
 
 | 节点包 | 在工作流里做什么 | 要不要装 | 不装会怎样 |
 |---|---|---|---|
@@ -158,6 +196,7 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
 | [ComfyUI-ClipProj](https://github.com/nicolab28/ComfyUI-ClipProj) | 4B 文本编码器投影，省 10 GB 以上显存 | 只有用 4B 编码器时需要 | 改用 32B 编码器 |
 | [ComfyUI-VFI](https://github.com/GACLove/ComfyUI-VFI) | `H3MD Save Video Interp` 里的 RIFE 补帧 | 可选 | `interpolate` 保持关，输出 24 fps |
 | [ComfyUI-VOSR2](https://github.com/ylchen333/ComfyUI-VOSR2)（清爽版）/ TE-Speed-VOSR2（完整版） | `H3MD Save Video Interp` 里的修脸 | 可选 | `face_refine` 保持关（默认就是关） |
+| [ComfyUI-H3-FaceRefine-Plus](https://github.com/AnniCodex/ComfyUI-H3-FaceRefine-Plus)（AnniCodex，MIT）+ ComfyUI-H3-FaceRefine | 修脸保存节点的可选输入 `stitch_mode = plus`（去锯齿贴回，光影取原图、细节取修复图）和 `flow_lock`（把修复后的五官用光流钉回原位，减少脸抖动），需要 opencv-python | 可选 | 两项保持默认（`standard` / 关）；没装 Plus 包时节点自动退回并在报告里说明 |
 | [ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler) | 修脸选 `refine_model = SeedVR2` 时用：它的 DiT / VAE 加载节点接保存节点的 `seedvr2_model` / `seedvr2_vae`（TE-Speed 加速版也能接） | 可选 | 用 VOSR2，或 `face_refine` 保持关 |
 | T8 语义桥（MiniMax H3 prompt enhancer T8） | 它的"语义桥 / 模型与设置"或多桥组合可以直接接 Loop 的 `semantic_bridge`（计算和我们自己的语义桥节点一样） | 可选 | 用我们的 H3MD 语义桥节点（示例工作流里已经接好、默认旁路：选中按 Ctrl+B 打开；风格按钮不再自动开桥）。语义桥原作者不建议和参考图、参考音频对口型一起用 |
 | [ComfyUI-YCNodes-MiniMax-H3](https://github.com/yichengup/ComfyUI-YCNodes-MiniMax-H3) | `H3SigmaRefiner`：多 1 步精修 | 可选 | 用普通 `BasicScheduler` |
@@ -430,6 +469,9 @@ MiniMax H3 单次最多十几秒。要做两三分钟的长视频，难点不在
   动作复刻的镜头长度：跟随原片的镜头，长度取原片长度，再对齐到 H3 的 5+17n 帧。提示词里有 `motion_transfer:`
   （用 TARA）时，在原片结尾处**向下取整**（TARA 要求每一帧都有原片对应，所以最多少原片结尾 0.7 秒）；**其他功能**
   照旧**向上取整**。这个长度不用自己设，提示词第一行的 `Duration:` 也会自动改成实际长度。
+  0.4.6 起：原片比镜头短不超过 16 帧（镜头向上取整多出来的那一档）时，用原片最后一帧补到镜头长度（分段和窗口模式都一样），
+  没写 `motion_transfer:` 也不会再报 TARA 的"identical temporal grids"；总控台风格选「动作复刻」时，计划里没有触发词的话，
+  排队时会自动把 `motion_transfer:` 加到全局提示词最前面（工作流里你写的文字不会被改）。
 
 - 参考视频 → Depth Anything V2 深度图 → SAM3 只保留人物 → Fun ControlNet，**只作用在低清阶段**。
 - **实测教训**：把黑底白人形的剪影同时当 `<Video N>` 参考喂进去，模型会把黑底、灰色影棚照搬进画面。现在深度视频只驱动 ControlNet，不当参考。

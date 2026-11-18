@@ -375,11 +375,20 @@ class H3MDSampler:
         segment before the lift (also applied to the captured carry);
         h3md_low_res_base: [1,24,T,h,w] low-grid latent for EVERY kept row (local redraw: the segment's own low-res
         result)."""
+        sigmas_low_override = unknown.pop("h3md_sigmas_low", None)
+        sigmas_high_override = unknown.pop("h3md_sigmas_high", None)
+        remake_low_complete = bool(unknown.pop("h3md_remake_low_complete", False))
         if unknown:
             LOG.warning("%s ignoring unknown inputs %s (removed options?)", _TAG, sorted(unknown))
         self.last_lowres, self.last_tiling, self.last_steps, self.last_anchor = None, None, [], None
         latent_in = sanitize_latent(latent_image)
-        sig_low, sig_high = split_sigmas(sigmas, transition_step)
+        if sigmas_low_override is not None or sigmas_high_override is not None:
+            if sigmas_low_override is None or sigmas_high_override is None:
+                raise ValueError(f"{_TAG} h3md_sigmas_low and h3md_sigmas_high must be provided together")
+            sig_low = torch.as_tensor(sigmas_low_override).flatten().float().cpu()
+            sig_high = torch.as_tensor(sigmas_high_override).flatten().float().cpu()
+        else:
+            sig_low, sig_high = split_sigmas(sigmas, transition_step)
         grid_note = exact_grid_note(latent_in, lowres_scale)
         if grid_note:
             LOG.warning("%s %s", _TAG, grid_note)
@@ -461,7 +470,8 @@ class H3MDSampler:
                 "simple", n_low + n_high, n_low, int(seed), float(cfg), float(cfg), float(lowres_scale),
                 float(rho), float(w_min), float(w_max), latent_lifter=lifter, high_res_model=high,
                 low_res_head=head, sigmas_low=sig_low, sigmas_high=sig_high, lift=lift, low_res_tail=tail,
-                pass1_store=h3md_progress, low_only=bool(h3md_low_only), low_res_base=base)
+                pass1_store=h3md_progress, low_only=bool(h3md_low_only), low_res_base=base,
+                remake_low_complete=remake_low_complete)
         except BaseException as exc:
             if not TILED.is_oom(exc) or isinstance(exc, TILED.HighResOutOfMemory):
                 raise

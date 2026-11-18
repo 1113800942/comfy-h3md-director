@@ -1,15 +1,20 @@
 // H3MD Control Panel (v0.3): style buttons, low/high LoRA tables, "which segments" hint + auto-clear.
+// 2026-11-15: fourth style remake, visible label 「多人互换」; drives plan.swapEngine, does not auto-wire remake_model.
 // The LoRA lists live in two hidden STRING widgets (lora_low / lora_high, JSON); the style in a hidden combo.
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
 const NODE = "H3MDControlPanel";
-const STYLE_LABEL = { balanced: "均衡 Balanced", high_motion: "高动态 High motion", motion_copy: "动作复刻 Motion copy" };
+export const REMAKE_STYLE = "remake";
+export const STYLE_ORDER = ["balanced", "high_motion", "motion_copy", "remake"];
+const STYLE_LABEL = { balanced: "均衡 Balanced", high_motion: "高动态 High motion", motion_copy: "动作复刻 Motion copy", remake: "多人互换" };
 const STYLE_TIP = {
   balanced: "drama, walking, running, dancing (default) · 文戏、跑步、跳舞",
   high_motion: "fights, gunfights, charges · 打斗、枪战",
   motion_copy: "dance / motion transfer from a reference video · 动作复刻",
+  remake: "多人互换：低清用 Remake 换人模型，高清照常用主模型（两个都要开，不冲突）。工作流里的「Remake model 换人模型」节点已接好，选这个风格会自动打开；切回其他风格会自动关闭它，关键帧仍保留。不会自动下载模型。 · Low-res pass on the Remake model, high-res on the usual base (both stay on). The workflow's Remake model node is wired and switched on by this style, off by the others; no download.",
 };
+export function appliesLoraPresets(style) { return style !== REMAKE_STYLE; }
 let presetCache = null;
 async function presets() {
   if (presetCache) return presetCache;
@@ -71,6 +76,23 @@ function roleNodes(role, titleRe) {
   return hits;
 }
 function setMode(n, mode) { if (n.mode !== mode) { n.mode = mode; n.setDirtyCanvas?.(true, true); n.graph?.setDirtyCanvas?.(true, true); } }
+// 0.5.0: the Remake loader (property h3md_role = remake_model, wired to the Loop's remake_model) is on only for the
+// 多人互换 style; bypassed it sends nothing, so other styles never load the Remake model.  A file that is not in the
+// loader's list stays off (a missing model would stop the run) - a note says why.
+export function remakeSwitch(style) {
+  const nodes = roleNodes("remake_model");
+  if (!nodes.length) return "";
+  const want = style === REMAKE_STYLE;
+  let missing = false;
+  for (const n of nodes) {
+    const w = n.widgets?.find((x) => x.name === "unet_name") || n.widgets?.[0];
+    const vals = w?.options?.values;
+    const ok = !Array.isArray(vals) || !vals.length || vals.includes(w.value);
+    if (want && !ok) missing = true;
+    setMode(n, want && ok ? 0 : 4);
+  }
+  return missing ? "Remake 模型没找到（viggle_remake_swap_pruned_int8_convrot.safetensors 放 models/diffusion_models，见 Hugging Face Viggle/Viggle-Remake）：换人模型节点保持关闭 · Remake model not found: the loader stays off" : "";
+}
 export function taraSwitch(style, P) {
   const lora = roleNodes("tara_lora"), temporal = roleNodes("tara_temporal");
   const sageLow = roleNodes("sage_low", /Sage.*(低清|low)/i), sageHigh = roleNodes("sage_high", /Sage.*(高清|high)/i);
@@ -87,7 +109,133 @@ export function taraSwitch(style, P) {
   for (const n of [...lora, ...temporal]) setMode(n, want ? 0 : 4);
   const highMode = sageHigh.length ? sageHigh[0].mode : 0;
   for (const n of sageLow) setMode(n, want ? 4 : highMode);
-  return want ? "动作复刻：TARA 已打开，Sage 低清已旁路（原片当 <Video 1>、不勾 depth，提示词开头写 motion_transfer:） · TARA on, Sage low-res bypassed" : "";
+  return want ? "动作复刻：TARA 已打开，Sage 低清已旁路（原片当 <Video 1>、不勾 depth；提示词里没写 motion_transfer: 的话，排队时自动加在最前面） · TARA on, Sage low-res bypassed; motion_transfer: is added at queue time when the prompt has none" : "";
+}
+
+
+// 0.4.6: motion copy needs the TARA trigger `motion_transfer:` at the start of every prompt.  When the panel's style is
+// motion copy and the plan has no trigger (global or shot prompts), the Director's plan_json goes to the server with
+// it added to the global prompt - at queue time only (the workflow and the editor keep the user's text).
+export const MOTION_TRIGGER = "motion_transfer:";
+export function withMotionTrigger(planText) {
+  let plan;
+  try { plan = typeof planText === "string" ? JSON.parse(planText) : planText; } catch { return planText; }
+  if (!plan || typeof plan !== "object" || Array.isArray(plan)) return planText;
+  const texts = [plan.globalPrompt, ...(Array.isArray(plan.segments) ? plan.segments.map((s) => s?.prompt) : [])];
+  if (texts.some((t) => String(t || "").includes(MOTION_TRIGGER))) return planText;
+  const g = String(plan.globalPrompt || "").trim();
+  plan.globalPrompt = g ? `${MOTION_TRIGGER}\n${g}` : MOTION_TRIGGER;
+  return typeof planText === "string" ? JSON.stringify(plan) : plan;
+}
+export function injectMotionTrigger(output) {
+  if (!output || typeof output !== "object") return 0;
+  const entries = Object.values(output);
+  if (!entries.some((n) => n?.class_type === NODE && n.inputs?.style === "motion_copy")) return 0;
+  let n = 0;
+  for (const node of entries) {
+    if (!String(node?.class_type || "").startsWith("H3MDDirector") || typeof node.inputs?.plan_json !== "string") continue;
+    const next = withMotionTrigger(node.inputs.plan_json);
+    if (next !== node.inputs.plan_json) { node.inputs.plan_json = next; n++; }
+  }
+  return n;
+}
+
+// Drive plan.swapEngine from the control-panel style (same rules as h3md_plan.setRemake).
+// Keyframes are never stripped. Other styles delete swapEngine so Remake cannot stay armed.
+export function applyRemakeForStyle(plan, style) {
+  if (!plan || typeof plan !== "object" || Array.isArray(plan)) return plan;
+  if (style === REMAKE_STYLE) {
+    plan.swapEngine = "remake";
+    if (plan.windowMode !== undefined) delete plan.windowMode;
+  } else {
+    delete plan.swapEngine;
+  }
+  return plan;
+}
+export function injectRemakeEngine(output) {
+  if (!output || typeof output !== "object") return 0;
+  const entries = Object.values(output);
+  const panels = entries.filter((n) => n?.class_type === NODE);
+  if (!panels.length) return 0;   // no panel: leave the Director plan as written
+  const want = panels.some((n) => n.inputs?.style === REMAKE_STYLE);
+  let n = 0;
+  for (const node of entries) {
+    if (!String(node?.class_type || "").startsWith("H3MDDirector") || typeof node.inputs?.plan_json !== "string") continue;
+    let plan;
+    try { plan = JSON.parse(node.inputs.plan_json); } catch { continue; }
+    if (!plan || typeof plan !== "object" || Array.isArray(plan)) continue;
+    const had = plan.swapEngine === "remake";
+    const hadWin = plan.windowMode !== undefined;
+    applyRemakeForStyle(plan, want ? REMAKE_STYLE : "balanced");
+    const has = plan.swapEngine === "remake";
+    if (had !== has || (has && hadWin)) {
+      node.inputs.plan_json = JSON.stringify(plan);
+      n++;
+    }
+  }
+  return n;
+}
+function directorNodes() {
+  const hits = [];
+  for (const g of allGraphs()) for (const n of g._nodes || g.nodes || []) {
+    if (String(n.type || "").startsWith("H3MDDirector")) hits.push(n);
+  }
+  return hits;
+}
+function syncPlanRemake(on) {
+  for (const n of directorNodes()) {
+    const ed = n.__h3md;
+    if (ed && ed.plan) {
+      applyRemakeForStyle(ed.plan, on ? REMAKE_STYLE : "balanced");
+      ed.commit();
+      continue;
+    }
+    const w = n.widgets?.find((x) => x.name === "plan_json");
+    if (!w || typeof w.value !== "string" || !String(w.value).trim()) continue;
+    try {
+      const plan = JSON.parse(w.value);
+      if (!plan || typeof plan !== "object" || Array.isArray(plan)) continue;
+      applyRemakeForStyle(plan, on ? REMAKE_STYLE : "balanced");
+      w.value = JSON.stringify(plan, null, 2);
+      w.callback?.(w.value);
+    } catch { /* leave a broken plan for the Director to report */ }
+  }
+}
+// Director checkbox -> control panel style, without rewriting the plan a second time.
+export function setPanelsFromRemake(on) {
+  for (const n of app.graph?._nodes || []) {
+    if (n.type !== NODE || n.mode === 2 || n.mode === 4) continue;
+    const p = n.__h3mdPanel;
+    if (!p) continue;
+    const cur = W(n, "style")?.value || "balanced";
+    if (on) {
+      if (cur !== REMAKE_STYLE) p.setStyle(REMAKE_STYLE, "plan");
+    } else if (cur === REMAKE_STYLE) {
+      p.setStyle(p.styleBeforeRemake || "balanced", "plan");
+    }
+  }
+}
+function planWantsRemake() {
+  return directorNodes().some((n) => {
+    try {
+      if (n.__h3md?.plan) return n.__h3md.plan.swapEngine === "remake";
+      const text = n.widgets?.find((x) => x.name === "plan_json")?.value;
+      if (typeof text !== "string" || !text.trim()) return false;
+      const plan = JSON.parse(text);
+      return plan && typeof plan === "object" && plan.swapEngine === "remake";
+    } catch { return false; }
+  });
+}
+
+function ensureStyleChoices(node) {
+  const w = W(node, "style");
+  if (!w) return;
+  const vals = STYLE_ORDER.slice();
+  if (w.options) {
+    if (Array.isArray(w.options.values)) w.options.values = vals;
+    else if (Array.isArray(w.options)) { /* some builds store the list on options itself */ w.options.values = vals; }
+  }
+  if (Array.isArray(w.values)) w.values = vals;
 }
 
 function setTurboHigh(v) {
@@ -126,14 +274,32 @@ function totalSegments() {
   return null;
 }
 
+// 0.4.5 试镜: what each number means (from the Director's preview): [{n, shots:[a,b], start, end, after}] or null
+function trialParts() {
+  for (const n of app.graph?._nodes || []) {
+    const a = n.__h3md?.as;
+    if (a && a.ok && Array.isArray(a.trial)) return a.trial;
+  }
+  return null;
+}
+const mmss = (t) => `${Math.floor(t / 60)}:${String(Math.round(t % 60)).padStart(2, "0")}`;
+const shotsZh = (p) => (p.shots[0] === p.shots[1] ? `镜头 ${p.shots[0]}` : `镜头 ${p.shots[0]}–${p.shots[1]}`);
+const partZh = (p) => `${shotsZh(p)}（${mmss(p.start)}–${mmss(p.end)}）`;
+
 function hintText(text, total = totalSegments()) {
+  const parts = trialParts();
+  if (parts) total = parts.length;
   const s = parseSegments(text);
   const all = total ? `共 ${total} 段 · ${total} segment(s)` : "";
   if (s === null) return { bad: true, t: "写法有误 / cannot read it — 例 e.g.  2   1-2   3, 6-7, 9" };
   if (total && s.length && s[s.length - 1] > total)
-    return { bad: true, t: `超出范围：本片只有 ${total} 段（段号按导演台自动拆分后的顺序，和日志一致）· out of range: ${total} segment(s)` };
+    return { bad: true, t: `超出范围：本片只有 ${total} 段试镜· out of range: ${total} segment(s)` };
+  if (parts) {
+    if (!s.length) return { bad: false, t: `试镜空着 = 出整片（共 ${parts.length} 段试镜，点下面的段落只跑那一段）· Empty = the whole video` };
+    return { bad: false, set: true, t: `⚠ 试镜中：只跑 ${s.map((k) => partZh(parts[k - 1])).join("、")}。要出整片请清空 · Trial: only part(s) ${s.join(", ")}. Clear to render everything` };
+  }
   if (!s.length) return { bad: false, t: `全部跑完：有缓存的段直接用${all ? "（" + all + "）" : ""} · Run all (cached segments are reused)` };
-  return { bad: false, set: true, t: `⚠ 已设定：只跑第 ${s.join("、")} 段${all ? "（" + all + "）" : ""}，有缓存的也重新生成。要跑完整片请清空此框 · Set: only segment(s) ${s.join(", ")} (cached ones again too). Clear the box to run everything` };
+  return { bad: false, set: true, t: `⚠ 试镜中：只跑第 ${s.join("、")} 段${all ? "（" + all + "）" : ""}，有缓存的也重新生成。要出整片请清空 · Trial: only segment(s) ${s.join(", ")} (cached ones again too). Clear the box to run everything` };
 }
 
 // a wrong "which segments" box blocks the queue (instead of failing after the models are loaded)
@@ -166,6 +332,7 @@ const CSS = `
 .h3mdcp{font:12px sans-serif;color:#ddd;display:flex;flex-direction:column;gap:6px;padding:2px 2px 6px}
 .h3mdcp .hint{font-size:11px;color:#9ab;padding:0 4px;display:flex;align-items:center;gap:6px}.h3mdcp .hint.bad{color:#fff;background:#8a2a2a;border-radius:4px;padding:4px 6px}
 .h3mdcp .hint.set{color:#1a1a1a;background:#f0a020;border-radius:4px;padding:4px 6px;font-weight:bold}
+.h3mdcp .trials{display:flex;flex-wrap:wrap;gap:4px;padding:2px 4px}.h3mdcp .trials button{font-size:11px;padding:2px 7px;border:1px solid #556;border-radius:10px;background:#2a3540;color:#cde;cursor:pointer}.h3mdcp .trials button.on{background:#f0a020;color:#111;border-color:#f0a020;font-weight:bold}
 .h3mdcp .hint button{margin-left:auto;font-size:11px;padding:1px 6px;border:1px solid #333;border-radius:4px;background:#fff3;color:inherit;cursor:pointer}
 .h3mdcp .styles{display:flex;gap:4px}.h3mdcp .styles button{flex:1;padding:5px 2px;border:1px solid #555;border-radius:5px;background:#2a2a2a;color:#ccc;cursor:pointer;font-size:11px}
 .h3mdcp .styles button.on{background:#2f5d8a;border-color:#4a8bd0;color:#fff}
@@ -188,8 +355,11 @@ class Panel {
       getMinHeight: () => this.minH || 360, getMaxHeight: () => this.minH || 360,
     });
     this.widget.serialize = false;
+    this.styleBeforeRemake = "balanced";
+    ensureStyleChoices(node);
     for (const n of ["style", "lora_low", "lora_high"]) { const w = W(node, n); if (w) w.hidden = true; }
     const seg = W(node, "segments_to_run");
+    if (seg) seg.label = "试镜 trial";
     if (seg) { const cb = seg.callback; seg.callback = (...a) => { const r = cb?.apply(seg, a); this.render(); return r; }; }
     const interp = W(node, "interpolate");
     if (interp) { const cb = interp.callback; interp.callback = (...a) => { const r = cb?.apply(interp, a); this.syncFps(); return r; }; }
@@ -204,13 +374,21 @@ class Panel {
     this.node.setDirtyCanvas?.(true, true);
   }
 
-  setStyle(style) {
+  setStyle(style, origin) {
     const P = presetCache || {};
     const sw = W(this.node, "style");
+    const cur = sw?.value || "balanced";
+    if (style === REMAKE_STYLE && cur !== REMAKE_STYLE) this.styleBeforeRemake = (cur && cur !== REMAKE_STYLE) ? cur : "balanced";
     if (sw) { sw.value = style; sw.callback?.(style); }
-    for (const which of ["low", "high"]) setRows(this.node, which, applyStyle(rowsOf(this.node, which), style, which, P));
-    setTurboHigh(P.turbo_high?.[style]);
+    // 多人互换 leaves the current LoRA lists and high-res 768 turbo as they were (high-res schedule unchanged).
+    if (appliesLoraPresets(style)) {
+      for (const which of ["low", "high"]) setRows(this.node, which, applyStyle(rowsOf(this.node, which), style, which, P));
+      setTurboHigh(P.turbo_high?.[style]);
+    }
     this.taraNote = taraSwitch(style, P);
+    const rmNote = remakeSwitch(style);
+    this.remakeNote = style === REMAKE_STYLE ? [STYLE_TIP.remake, rmNote].filter(Boolean).join(" · ") : "";
+    if (origin !== "plan") syncPlanRemake(style === REMAKE_STYLE);
     this.render();
   }
 
@@ -266,12 +444,32 @@ class Panel {
     return box;
   }
 
+  // 0.4.5 试镜: one button per part (click = only this part; shift-click = add / remove)
+  trialsEl() {
+    const parts = trialParts();
+    const box = el("div", { class: "trials" });
+    if (!parts || parts.length < 2) return box;
+    const sel = parseSegments(W(this.node, "segments_to_run")?.value) || [];
+    for (const p of parts) {
+      box.append(el("button", { class: sel.includes(p.n) ? "on" : null, title: `试镜 ${p.n}：${partZh(p)}${p.after === "continue" ? "（接着上一段的长镜头，会先用 / 先补跑上一段）" : ""}`,
+        onclick: (e) => {
+          const w = W(this.node, "segments_to_run"); if (!w) return;
+          let cur = parseSegments(w.value) || [];
+          cur = e.shiftKey ? (cur.includes(p.n) ? cur.filter((k) => k !== p.n) : [...cur, p.n].sort((a, b) => a - b)) : (cur.length === 1 && cur[0] === p.n ? [] : [p.n]);
+          w.value = cur.join(", "); w.callback?.(w.value); this.render();
+        } }, `试镜 ${p.n} · ${shotsZh(p)} · ${mmss(p.start)}–${mmss(p.end)}`));
+    }
+    return box;
+  }
+
   // cheap refresh of the hint line only (the Director's auto-split count arrives later / changes)
   updateHint() {
     const old = this.root.querySelector(".hint");
     if (!old) return;
     const h = hintText(W(this.node, "segments_to_run")?.value);
     if (old.firstChild?.textContent !== "↑ " + h.t) old.replaceWith(this.hintEl(h));
+    const sig = JSON.stringify(trialParts()) + (W(this.node, "segments_to_run")?.value || "");
+    if (sig !== this.trialSig) { this.trialSig = sig; this.root.querySelector(".trials")?.replaceWith(this.trialsEl()); }
   }
 
   render() {
@@ -280,9 +478,11 @@ class Panel {
     const style = W(this.node, "style")?.value || "balanced";
     this.root.replaceChildren(
       this.hintEl(h),
-      el("div", { class: "styles" }, ...["balanced", "high_motion", "motion_copy"].map((s) =>
+      this.trialsEl(),
+      el("div", { class: "styles" }, ...STYLE_ORDER.map((s) =>
         el("button", { class: s === style ? "on" : "", title: STYLE_TIP[s], onclick: () => this.setStyle(s) }, STYLE_LABEL[s]))),
       ...(this.taraNote ? [el("div", { class: "taranote" }, this.taraNote)] : []),
+      ...(this.remakeNote ? [el("div", { class: "taranote" }, this.remakeNote)] : []),
       this.table("low"), this.table("high"));
     this.fit();
   }
@@ -306,13 +506,25 @@ app.registerExtension({
   name: "H3MD.ControlPanel",
   setup() {
     setInterval(() => { for (const n of app.graph?._nodes || []) if (n.type === NODE) n.__h3mdPanel?.updateHint(); }, 1000);
+    const g2p = app.graphToPrompt;   // 0.4.6: add the TARA trigger to the outgoing plan (see withMotionTrigger)
+    if (typeof g2p === "function") {
+      app.graphToPrompt = async function (...args) {
+        const r = await g2p.apply(app, args);
+        try {
+          if (injectRemakeEngine(r?.output)) console.info("[H3MD] plan.swapEngine synced from control-panel style 多人互换");
+          if (injectMotionTrigger(r?.output)) console.info("[H3MD] motion_transfer: added to the plan's global prompt (motion copy style)");
+        }
+        catch (e) { console.warn("[H3MD] motion trigger", e); }
+        return r;
+      };
+    }
     const original = app.queuePrompt;
     const queue = typeof original === "function" ? (...args) => original.apply(app, args) : null;
     if (queue) {
       app.queuePrompt = async function (...args) {
         const bad = panelProblems();
         if (bad.length) {
-          const msg = "H3MD Control Panel · 跑哪几段: " + bad[0];
+          const msg = "H3MD Control Panel · 试镜: " + bad[0];
           try { app.extensionManager?.toast?.add?.({ severity: "error", summary: "H3MD", detail: msg, life: 6000 }); }
           catch { /* older frontend */ }
           console.warn("[H3MD]", msg);
@@ -335,7 +547,12 @@ app.registerExtension({
     const configure = nodeType.prototype.onConfigure;
     nodeType.prototype.onConfigure = function () {
       const r = configure?.apply(this, arguments);
-      queueMicrotask(() => { this.__h3mdPanel?.syncFps(); this.__h3mdPanel?.render(); });
+      queueMicrotask(() => {
+        ensureStyleChoices(this);
+        const p = this.__h3mdPanel;
+        if (p && planWantsRemake() && (W(this, "style")?.value || "balanced") !== REMAKE_STYLE) p.setStyle(REMAKE_STYLE, "plan");
+        p?.syncFps(); p?.render();
+      });
       return r;
     };
   },

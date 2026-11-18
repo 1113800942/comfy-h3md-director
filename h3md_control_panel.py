@@ -1,7 +1,7 @@
 """H3MD Control Panel (v0.3): the settings people change often, in one node.
 
 Top to bottom: resolution, fps + interpolation, face refine, seed, "which segments", style buttons
-(balanced / high motion / motion copy), low-res LoRA list, high-res LoRA list.
+(balanced / high motion / motion copy / remake 多人互换), low-res LoRA list, high-res LoRA list.
 0.3.4: every row is a normal LoRA; a style button also sets the model subgraph's high-res 768 turbo strength.
 
 The node applies the two LoRA lists to the low-res and high-res models itself (no rgthree / Crystools nodes) and hands
@@ -30,7 +30,10 @@ except ImportError:  # flat import (tests)
 LOG = logging.getLogger("H3MD")
 _TAG = "[H3MD Control Panel]"
 CATEGORY = "MiniMax H3/H3MD"
-STYLES = ["balanced", "high_motion", "motion_copy"]
+STYLES = ["balanced", "high_motion", "motion_copy", "remake"]
+REMAKE_STYLE = "remake"  # visible control-panel label is 「多人互换」; value matches plan.swapEngine
+STYLE_LABELS = {"balanced": "均衡 Balanced", "high_motion": "高动态 High motion",
+                "motion_copy": "动作复刻 Motion copy", "remake": "多人互换"}
 
 # Recommended LoRAs (11-02 measured mix, 0.3.4 rework 2026-11-05). key -> file.  Every panel row is a NORMAL LoRA
 # (ComfyUI LoraLoaderModelOnly): the one bypass speed LoRA (768 turbo) lives in the model subgraph, one per pass, so a
@@ -52,6 +55,7 @@ FILES = {
 # stacked on top of it; both are dropped from saved lists when they run (logged), and by the editor.
 REMOVED = {"dasiwa", "turbo"}
 BYPASS = set()   # no bypass rows any more (kept as a name for old imports)
+BYPASS_STACK = {"remake"}   # exp multiswap: bypass rows stacked on top of the model subgraph's bypass speed LoRA
 ORDER = {   # application order (Combat first, where it sat in the old model subgraph)
     "low": ["combat", "weapon", "fightflow", "motion_repair", "speed", "cinematic", "vbvr", "enhancer"],
     "high": ["combat", "realism", "weapon", "fightflow", "motion_repair", "cinematic", "lms", "vbvr"],
@@ -62,18 +66,23 @@ PRESETS = {
         "low": {"combat": 0.7, "motion_repair": 0.75, "speed": 3.0, "cinematic": 0.5, "vbvr": 1.0, "enhancer": 0.55},
         "high": {"combat": 0.49, "realism": 0.6, "motion_repair": 0.25, "cinematic": 0.2, "lms": 0.2, "vbvr": 0.5},
     },
+    # 0.4.6: one weapon LoRA per pass is enough (YJ's 1-minute fight, 11-12: low 0.85 / high 0.5, nothing else on)
     "high_motion": {
-        "low": {"combat": 0.7, "motion_repair": 0.75, "speed": 6.0, "cinematic": 0.5, "vbvr": 1.0, "fightflow": 0.65,
-                "enhancer": 0.5},
-        "high": {"combat": 0.49, "realism": 0.7, "motion_repair": 0.25, "cinematic": 0.2, "vbvr": 0.5,
-                 "fightflow": 0.25, "lms": 0.2},
+        "low": {"weapon": 0.85},
+        "high": {"weapon": 0.5},
     },
     "motion_copy": {
         "low": {"combat": 0.7, "enhancer": 0.5},
         "high": {"combat": 0.49, "realism": 0.5, "lms": 0.2},
     },
+    # Copy of balanced for API/Reset completeness only. Entering remake in the UI does not
+    # apply these rows (low-res uses remake_model; high-res keeps the previous style's list).
+    "remake": {
+        "low": {"combat": 0.7, "motion_repair": 0.75, "speed": 3.0, "cinematic": 0.5, "vbvr": 1.0, "enhancer": 0.55},
+        "high": {"combat": 0.49, "realism": 0.6, "motion_repair": 0.25, "cinematic": 0.2, "lms": 0.2, "vbvr": 0.5},
+    },
 }
-OFF_STRENGTH = {"low": {"weapon": 0.45, "fightflow": 0.65}, "high": {"weapon": 0.6, "fightflow": 0.25}}
+OFF_STRENGTH = {"low": {"weapon": 0.85, "fightflow": 0.65}, "high": {"weapon": 0.5, "fightflow": 0.25}}
 # style -> strength of the model subgraph's HIGH-res 768 turbo (bypass) LoRA.  The editor writes it into that loader
 # when a style button is clicked (drama 0.5 / high motion 1.0, like the old full workflow's Drama / High Motion switch).
 # The low-res 768 turbo stays 1.0.
@@ -82,7 +91,26 @@ TURBO_FILE = "minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors"
 # style -> semantic bridge (file name fragment, strength), or None.  0.4.0: none for every style (up to 0.3.8:
 # balanced MiniMaxH3_SemanticBridge_v1_T8_Compat 0.12, high_motion BUNNY_H3_ActionLogic_Bridge_V1_T8_Compat 0.12).
 # A bridge is now a bypassed H3MD Semantic Bridge node in the example workflow: un-bypass it to use one.
-BRIDGES = {"balanced": None, "high_motion": None, "motion_copy": None}
+BRIDGES = {"balanced": None, "high_motion": None, "motion_copy": None, "remake": None}
+
+
+def applies_lora_presets(style: str) -> bool:
+    """False for remake: entering 多人互换 must not rewrite low/high LoRA lists or high-res turbo."""
+    return style in STYLES and style != REMAKE_STYLE
+
+
+def apply_remake_for_style(plan: dict, style: str) -> dict:
+    """Drive plan.swapEngine from the control-panel style. Keyframes are never stripped.
+    remake -> swapEngine 'remake' and windowMode dropped; any other style -> delete swapEngine.
+    """
+    if not isinstance(plan, dict):
+        return plan
+    if style == REMAKE_STYLE:
+        plan["swapEngine"] = "remake"
+        plan.pop("windowMode", None)
+    else:
+        plan.pop("swapEngine", None)
+    return plan
 
 
 def preset_rows(style: str, which: str) -> list:
@@ -175,6 +203,13 @@ def apply_rows(model, rows: list, cache: _LoraCache, which: str):
         lora = cache.get(path)
         if r.get("key") in BYPASS:
             model, _, _ = HL.apply_lowvram_bypass(model, lora, r["strength"])
+        elif r.get("key") in BYPASS_STACK:
+            # Remake LoRA must not be stacked on the original/Turbo base; connect remake_model on the Loop.
+            raise ValueError(
+                f"{_TAG} Remake LoRA '{r['lora']}' cannot be stacked onto the original/Turbo {which}-res base. "
+                "Connect a Remake-prepared model (fl2va + Remake LoRA, bypass, no Turbo) to H3MD Loop's remake_model. "
+                "换人 LoRA 不能叠在原底座/Turbo 上：请把专用 Remake 模型接到 Loop 的 remake_model。"
+            )
         else:
             model, _ = comfy.sd.load_lora_for_models(model, None, lora, r["strength"], 0)
         HL.add_lora_sig(model, ("lora", r["lora"], round(float(r["strength"]), 6)))
@@ -232,12 +267,14 @@ class H3MDControlPanel:
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xFFFFFFFFFFFFFFFF, "control_after_generate": True,
                                  "tooltip": "Fixed or random (control after generate). 种子：固定或随机。"}),
                 "segments_to_run": ("STRING", {"default": "", "tooltip":
-                                    "Empty: run everything (cached segments reused). 2 / 1-2 / 3, 6-7, 9: generate "
-                                    "only these (cached ones again too). The box keeps its value (orange banner) until you clear it.\n"
-                                    "空 = 全部跑完；填 2 / 1-2 / 3, 6-7, 9 = 只生成这几段。框里的值会保留（橙色提示），要跑完整片请清空。"}),
+                                    "试镜 / Trial. Empty: render the whole video (cached parts reused). 2 / 1-2 / 3, 6-7: render only "
+                                    "these parts - with Seamless long video a part is one of the buttons under the box "
+                                    "(shots + seconds), otherwise a segment. The box keeps its value (orange banner) until you clear it.\n"
+                                    "试镜：空 = 出整片（有缓存的直接用）；填 2 / 1-2 / 3, 6-7 = 只跑这几段。开了无接缝长视频时，"
+                                    "段 = 框下面那排按钮（写着哪几个镜头、几秒到几秒），点一下就填好；没开时 = 分段。框里的值会保留（橙色提示），出整片请清空。"}),
                 "style": (STYLES, {"default": "balanced", "tooltip":
                           "balanced: drama, walking, dancing · high_motion: fights, gunfights · motion_copy: "
-                          "dance / motion transfer. Sets the recommended LoRAs (no semantic bridge: un-bypass the "
+                          "dance / motion transfer · remake (button 多人互换): low-res Remake swap path, requires remake_model on the Loop (not auto-wired). Sets the recommended LoRAs except remake, which leaves the current LoRA lists in place (no semantic bridge: un-bypass the "
                           "Semantic Bridge node in the workflow to use one)."}),
                 "lora_low": ("STRING", {"default": lo, "multiline": True, "tooltip": "Low-res LoRA list (JSON)."}),
                 "lora_high": ("STRING", {"default": hi, "multiline": True, "tooltip": "High-res LoRA list (JSON)."}),
@@ -249,8 +286,8 @@ class H3MDControlPanel:
                     "seed", "segments_to_run", "semantic_bridge")
     FUNCTION = "run"
     CATEGORY = CATEGORY
-    DESCRIPTION = ("H3MD Control Panel: resolution, fps / interpolation, face refine, seed, which segments to run, "
-                   "style (balanced / high motion / motion copy) and the low-res + high-res LoRA lists in one place.")
+    DESCRIPTION = ("H3MD Control Panel: resolution, fps / interpolation, face refine, seed, 试镜 trial (which parts to run), "
+                   "style (balanced / high motion / motion copy / remake 多人互换) and the low-res + high-res LoRA lists in one place.")
 
     def run(self, low_res_model, high_res_model, width, height, interpolate, fps, face_refine, seed,
             segments_to_run, style, lora_low, lora_high):

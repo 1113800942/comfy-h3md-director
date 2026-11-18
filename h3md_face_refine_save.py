@@ -116,6 +116,58 @@ def _stitch_class():
     return cls
 
 
+PLUS_TOOLS = ("H3FaceStitchPlus", "H3FaceFlowLock")   # ComfyUI-H3-FaceRefine-Plus (AnniCodex, MIT), optional
+PLUS_LOWPASS, PLUS_DETAIL = 0.15, 1.0                 # Plus's recommended freq_sep values
+FLOW_SIGMA_FRAC, FLOW_THRESHOLD = 1.0 / 150.0, 4.0    # Flow Lock's own defaults
+
+
+def _plus_class():
+    """H3 Face Stitch Plus of ComfyUI-H3-FaceRefine-Plus, or None when that pack is not loaded."""
+    return _registry().get("H3FaceStitchPlus")
+
+
+def _flow_class():
+    """H3 Face Flow Lock of ComfyUI-H3-FaceRefine-Plus, or None when that pack is not loaded."""
+    return _registry().get("H3FaceFlowLock")
+
+
+def plus_stitch_kw(stitch_kw):
+    """The H3 Face Stitch Plus arguments for the node's stitch widgets (0.4.7): same-named widgets pass through;
+    colour_match > 0 -> tone_mode freq_sep, 0 -> none (Plus has no strength); no feather_scales_with_crop."""
+    kw = {k: stitch_kw[k] for k in ("paste_region", "mask_dilation", "feather", "blend", "undetected_frames")
+          if k in stitch_kw}
+    kw["tone_mode"] = "freq_sep" if float(stitch_kw.get("colour_match", 1.0) or 0.0) > 0 else "none"
+    kw["lowpass_face_frac"] = PLUS_LOWPASS
+    kw["detail_gain"] = PLUS_DETAIL
+    return kw
+
+
+def resolve_plus(stitch_mode, flow_lock):
+    """(use_plus, use_flow_lock, notes): what can really run.  A missing Plus pack (or opencv for Flow Lock) is a
+    note, not an error: the save falls back to the standard stitch / skips the lock."""
+    use_plus, use_flow, notes = False, False, []
+    if stitch_mode not in ("standard", "plus"):
+        raise ValueError(f"{_TAG} unknown stitch_mode {stitch_mode!r} (standard or plus)")
+    if stitch_mode == "plus":
+        if _plus_class() is None:
+            notes.append("stitch_mode=plus needs ComfyUI-H3-FaceRefine-Plus (H3 Face Stitch Plus): not installed, "
+                         "used the standard stitch")
+        else:
+            use_plus = True
+    if flow_lock:
+        if _flow_class() is None:
+            notes.append("flow_lock needs ComfyUI-H3-FaceRefine-Plus (H3 Face Flow Lock): not installed, skipped")
+        else:
+            try:
+                import cv2  # noqa: F401
+                use_flow = True
+            except ImportError:
+                notes.append("flow_lock needs opencv-python: not installed, skipped")
+    for n in notes:
+        LOG.warning("%s %s", _TAG, n)
+    return use_plus, use_flow, notes
+
+
 def _vosr2_class():
     cls = _registry().get("TESpeedVOSR2Image")
     if cls is None:
@@ -892,7 +944,7 @@ class FaceRefiner:
     """crop -> VOSR2 -> stitch for any range of source frames, driven by the whole-clip transform."""
 
     def __init__(self, fr, transform, vosr2_model, vosr2_settings, seed, stitch_kw, seedvr2_model=None,
-                 seedvr2_vae=None):
+                 seedvr2_vae=None, plus=False, flow_lock=False):
         self.fr = fr
         self.t = transform
         self.cw, self.ch = (int(v) for v in transform["canvas"])
@@ -930,11 +982,17 @@ class FaceRefiner:
             self.orig = orig
         else:
             self.vosr2 = _vosr2_class()()
-        self.stitch = _stitch_class()()
+        self.plus = bool(plus)
+        if self.plus:                # 0.4.7: H3 Face Stitch Plus (ComfyUI-H3-FaceRefine-Plus)
+            self.stitch = _plus_class()()
+            self.stitch_kw = plus_stitch_kw(self.stitch_kw)
+        else:
+            self.stitch = _stitch_class()()
+        self.flow = _flow_class()() if flow_lock else None   # 0.4.7: H3 Face Flow Lock, per frame, after the paste
         self.vbatch = None           # learned VOSR2 sub-batch after an OOM
         self.count = {}              # source frame -> times refined (must stay 1)
         self.events = []
-        self.t_vosr2 = self.t_stitch = 0.0
+        self.t_vosr2 = self.t_stitch = self.t_flow = 0.0
 
     def _upscale(self, crops):
         outs, k = [], 0
@@ -996,8 +1054,13 @@ class FaceRefiner:
         t1 = time.time()
         out = self.stitch.run(base_images=base, refined_crops=refined, transform=slice_transform(self.t, idx, start, n),
                               **self.stitch_kw)[0]
+        t2 = time.time()
         self.t_vosr2 += t1 - t0
-        self.t_stitch += time.time() - t1
+        self.t_stitch += t2 - t1
+        if self.flow is not None:    # base = the frames the face was pasted onto, out = the stitch's result
+            out = self.flow.run(base_images=base, refined_images=out, sigma_frac=FLOW_SIGMA_FRAC,
+                                threshold=FLOW_THRESHOLD, base_offset=0)[0]
+            self.t_flow += time.time() - t2
         for i in idx:
             self.count[i] = self.count.get(i, 0) + 1
         return out
@@ -1170,6 +1233,8 @@ def refined_stream_save(info, path, refiner, interpolate=False, target_fps=S.SOU
               "chunk_sizes": sorted(set(sizes)), "oom_events": state["events"] + refiner.events,
               "refined_frames": len(refiner.count), "refined_twice": len(twice),
               "vosr2_s": round(refiner.t_vosr2, 1), "stitch_s": round(refiner.t_stitch, 1),
+              "flow_s": round(refiner.t_flow, 1) if refiner.flow is not None else None,
+              "stitch_mode": "plus" if refiner.plus else "standard",
               "audio_seconds": round(writer.a_done / writer.sr, 3) if writer.a is not None else None,
               "peak_chunk_mb": round(peak_chunk / 1e6, 1), "cache_dir": src.dir, "elapsed_s": round(time.time() - t0, 1),
               "hard_cuts": cuts, "cut_frames_copied": cut_copies}
@@ -1190,6 +1255,7 @@ TRACK_OPTIONAL = ("identity_track", "identity_threshold", "select", "fallback_de
                   "frame_index")
 STITCH_REQUIRED = ("paste_region", "mask_dilation", "feather", "colour_match", "blend", "undetected_frames")
 STITCH_OPTIONAL = ("feather_scales_with_crop",)
+PLUS_INPUTS = ("stitch_mode", "flow_lock")   # 0.4.7
 CANVAS_DEFAULT = 512
 
 # used only when ComfyUI-H3-FaceRefine is not loaded (the node then shows, but face_refine needs it)
@@ -1304,7 +1370,17 @@ class H3MDSaveVideoFaceRefineInterp:
         opt["refine_model"] = (["VOSR2", "SeedVR2"], {"default": "VOSR2", "tooltip":
                                "Face restore path: VOSR2 uses vosr2_model (+ vosr2_settings); SeedVR2 uses "
                                "seedvr2_model + seedvr2_vae. The other inputs are ignored."})
-        opt.update(S.DRIFT_INPUTS)   # v0.2.0, appended LAST
+        opt.update(S.DRIFT_INPUTS)   # v0.2.0
+        # 0.4.7, appended LAST (optional: old workflows open unchanged). Both need ComfyUI-H3-FaceRefine-Plus.
+        opt["stitch_mode"] = (["standard", "plus"], {"default": "standard", "tooltip":
+                              "standard: H3 Face Stitch Back (as before). plus: H3 Face Stitch Plus of "
+                              "ComfyUI-H3-FaceRefine-Plus (AnniCodex): antialiased paste, light and colour from the "
+                              "original frame, detail from the refined face (colour_match 0 = no tone transfer). "
+                              "Not installed: falls back to standard."})
+        opt["flow_lock"] = ("BOOLEAN", {"default": False, "tooltip":
+                            "After each pasted chunk, H3 Face Flow Lock (ComfyUI-H3-FaceRefine-Plus) pins the "
+                            "refined face features back onto the original frames with smoothed optical flow, so the "
+                            "face does not wobble on the head. Needs opencv-python. Not installed: skipped."})
         return {"required": req, "optional": opt,
                 "hidden": {"prompt": "PROMPT", "extra_pnginfo": "EXTRA_PNGINFO", "unique_id": "UNIQUE_ID"}}
 
@@ -1332,7 +1408,8 @@ class H3MDSaveVideoFaceRefineInterp:
         track, stitch = _fr_specs()
         track_kw = {k: kw.get(k, _spec_default(track[k])) for k in TRACK_REQUIRED + TRACK_OPTIONAL}
         stitch_kw = {k: kw.get(k, _spec_default(stitch[k])) for k in STITCH_REQUIRED + STITCH_OPTIONAL}
-        unknown = sorted(set(kw) - save_keys - set(track_kw) - set(stitch_kw))
+        unknown = sorted(set(kw) - save_keys - set(track_kw) - set(stitch_kw) - set(PLUS_INPUTS))
+        stitch_mode, flow_lock = kw.get("stitch_mode", "standard"), bool(kw.get("flow_lock", False))
         if unknown:
             raise TypeError(f"{_TAG} unexpected inputs {unknown}")
         if not face_refine:
@@ -1355,7 +1432,8 @@ class H3MDSaveVideoFaceRefineInterp:
         try:
             return self._save_refined(segments, vosr2_model, int(vosr2_seed), vosr2_settings, identity_reference,
                                       identity_clip_vision, face_pick, prompt, extra_pnginfo, unique_id, save_kw,
-                                      track_kw, stitch_kw, seedvr2_model, seedvr2_vae, refine_model)
+                                      track_kw, stitch_kw, seedvr2_model, seedvr2_vae, refine_model,
+                                      stitch_mode, flow_lock)
         except NothingToRefine as exc:
             LOG.warning("%s face refine skipped: %s Saving the video WITHOUT face refine.", _TAG, exc)
             res = S.H3MDSaveVideoInterp().save(segments=segments, prompt=prompt, extra_pnginfo=extra_pnginfo,
@@ -1366,7 +1444,7 @@ class H3MDSaveVideoFaceRefineInterp:
 
     def _save_refined(self, segments, vosr2_model, seed, vosr2_settings, identity_reference, identity_clip_vision,
                       face_pick, prompt, extra_pnginfo, unique_id, save_kw, track_kw, stitch_kw, seedvr2_model=None,
-                      seedvr2_vae=None, refine_model="VOSR2"):
+                      seedvr2_vae=None, refine_model="VOSR2", stitch_mode="standard", flow_lock=False):
         g = lambda k, dflt: save_kw.get(k, dflt)  # noqa: E731
         fmt = g("format", "video/h264-mp4")
         removed = sorted(k for k in save_kw if k in S.REMOVED_INPUTS)
@@ -1438,7 +1516,9 @@ class H3MDSaveVideoFaceRefineInterp:
         LOG.info("%s track solved in %.1fs (detect %.1fs):\n%s", _TAG, t2 - t0, t1 - t0, solved["report"])
 
         # ---- pass 2: refine + interpolate + encode, chunk by chunk ---------------------------------------------
-        refiner = FaceRefiner(fr, transform, vosr2_model, vosr2_settings, seed, stitch_kw, seedvr2_model, seedvr2_vae)
+        use_plus, use_flow, plus_notes = resolve_plus(stitch_mode, flow_lock)
+        refiner = FaceRefiner(fr, transform, vosr2_model, vosr2_settings, seed, stitch_kw, seedvr2_model, seedvr2_vae,
+                              plus=use_plus, flow_lock=use_flow)
         path, file, subfolder, kind = S.save_path(g("filename_prefix", "video/H3MD"), g("output_folder", ""), W, H,
                                                   S.EXTENSIONS[fmt], temp=not g("save_output", True))
         meta = None
@@ -1478,10 +1558,14 @@ class H3MDSaveVideoFaceRefineInterp:
         report = "\n".join([
             f"saved {rep['frames']} frames @ {rep['fps']:g} fps ({rep['seconds']}s) -> {path}",
             f"face refine: {rep['refined_frames']}/{B} frames refined at {refiner.cw}x{refiner.ch} "
-            f"(VOSR2 {rep['vosr2_s']}s, stitch {rep['stitch_s']}s), {rep['chunks']} chunk(s) "
+            f"(VOSR2 {rep['vosr2_s']}s, stitch {rep['stitch_s']}s"
+            + (" [plus]" if use_plus else "")
+            + (f", flow lock {rep['flow_s']}s" if use_flow else "")
+            + f"), {rep['chunks']} chunk(s) "
             f"{rep['chunk_sizes']}, track solve {t2 - t0:.1f}s, total {time.time() - t0:.1f}s"
             + (f", refined twice: {rep['refined_twice']}" if rep["refined_twice"] else ""),
             f"interpolated: {rep['interpolated']}  oom events: {rep['oom_events'] or 'none'}  cache: {state}",
+            *plus_notes,
             "--- track ---",
             solved["report"],
         ])

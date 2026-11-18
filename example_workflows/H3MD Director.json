@@ -1,8 +1,8 @@
 {
  "id": "ae199950-ee64-4d60-918b-94513d88482f",
  "revision": 0,
- "last_node_id": 337,
- "last_link_id": 195,
+ "last_node_id": 346,
+ "last_link_id": 196,
  "nodes": [
   {
    "id": 75,
@@ -1566,6 +1566,13 @@
       "name": "resume_from_cache"
      },
      "link": null
+    },
+    {
+     "localized_name": "remake_model",
+     "name": "remake_model",
+     "shape": 7,
+     "type": "MODEL",
+     "link": 196
     }
    ],
    "outputs": [
@@ -3868,6 +3875,304 @@
     false,
     ""
    ]
+  },
+  {
+   "id": 338,
+   "type": "Label (rgthree)",
+   "pos": [
+    -3740,
+    -700
+   ],
+   "size": [
+    1324,
+    120
+   ],
+   "flags": {
+    "allow_interaction": true
+   },
+   "order": 53,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "H3MD Director 导演台",
+   "properties": {
+    "fontSize": 120,
+    "fontFamily": "Arial",
+    "fontColor": "#ffff00",
+    "textAlign": "left",
+    "backgroundColor": "transparent",
+    "padding": 0,
+    "borderRadius": 0,
+    "angle": 0
+   },
+   "color": "#fff0",
+   "bgcolor": "#fff0"
+  },
+  {
+   "id": 339,
+   "type": "Label (rgthree)",
+   "pos": [
+    -2396,
+    -620
+   ],
+   "size": [
+    75,
+    30
+   ],
+   "flags": {
+    "allow_interaction": true
+   },
+   "order": 54,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "by YJ",
+   "properties": {
+    "fontSize": 30,
+    "fontFamily": "Arial",
+    "fontColor": "#ffffff",
+    "textAlign": "center",
+    "backgroundColor": "transparent",
+    "padding": 0,
+    "borderRadius": 0,
+    "angle": 0
+   },
+   "color": "#fff0",
+   "bgcolor": "#fff0"
+  },
+  {
+   "id": 340,
+   "type": "Label (rgthree)",
+   "pos": [
+    -3730,
+    -550
+   ],
+   "size": [
+    798,
+    40
+   ],
+   "flags": {
+    "allow_interaction": true
+   },
+   "order": 55,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "https://huggingface.co/yj0942/H3MD-Director",
+   "properties": {
+    "fontSize": 40,
+    "fontFamily": "Arial",
+    "fontColor": "#ffffff",
+    "textAlign": "left",
+    "backgroundColor": "transparent",
+    "padding": 0,
+    "borderRadius": 0,
+    "angle": 0
+   },
+   "color": "#fff0",
+   "bgcolor": "#fff0"
+  },
+  {
+   "id": 341,
+   "type": "Label (rgthree)",
+   "pos": [
+    -2810,
+    -550
+   ],
+   "size": [
+    921,
+    40
+   ],
+   "flags": {
+    "allow_interaction": true
+   },
+   "order": 56,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "https://github.com/1113800942/comfy-h3md-director",
+   "properties": {
+    "fontSize": 40,
+    "fontFamily": "Arial",
+    "fontColor": "#ffffff",
+    "textAlign": "left",
+    "backgroundColor": "transparent",
+    "padding": 0,
+    "borderRadius": 0,
+    "angle": 0
+   },
+   "color": "#fff0",
+   "bgcolor": "#fff0"
+  },
+  {
+   "id": 342,
+   "type": "Label (rgthree)",
+   "pos": [
+    -3660,
+    -450
+   ],
+   "size": [
+    690,
+    40
+   ],
+   "flags": {
+    "allow_interaction": true
+   },
+   "order": 57,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "https://civitai.com/user/1113800942188",
+   "properties": {
+    "fontSize": 40,
+    "fontFamily": "Arial",
+    "fontColor": "#ffffff",
+    "textAlign": "left",
+    "backgroundColor": "transparent",
+    "padding": 0,
+    "borderRadius": 0,
+    "angle": 0
+   },
+   "color": "#fff0",
+   "bgcolor": "#fff0"
+  },
+  {
+   "id": 343,
+   "type": "Label (rgthree)",
+   "pos": [
+    -2680,
+    -450
+   ],
+   "size": [
+    898,
+    40
+   ],
+   "flags": {
+    "allow_interaction": true
+   },
+   "order": 58,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "B站：YJ0942, https://space.bilibili.com/299509194",
+   "properties": {
+    "fontSize": 40,
+    "fontFamily": "Arial",
+    "fontColor": "#ffffff",
+    "textAlign": "left",
+    "backgroundColor": "transparent",
+    "padding": 0,
+    "borderRadius": 0,
+    "angle": 0
+   },
+   "color": "#fff0",
+   "bgcolor": "#fff0"
+  },
+  {
+   "id": 344,
+   "type": "Label (rgthree)",
+   "pos": [
+    -3730,
+    -350
+   ],
+   "size": [
+    940,
+    40
+   ],
+   "flags": {
+    "allow_interaction": true
+   },
+   "order": 59,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "Youtube: YJ0942, https://www.youtube.com/@yj0942",
+   "properties": {
+    "fontSize": 40,
+    "fontFamily": "Arial",
+    "fontColor": "#ffffff",
+    "textAlign": "left",
+    "backgroundColor": "transparent",
+    "padding": 0,
+    "borderRadius": 0,
+    "angle": 0
+   },
+   "color": "#fff0",
+   "bgcolor": "#fff0"
+  },
+  {
+   "id": 345,
+   "type": "Label (rgthree)",
+   "pos": [
+    -2740,
+    -350
+   ],
+   "size": [
+    864,
+    40
+   ],
+   "flags": {
+    "allow_interaction": true
+   },
+   "order": 60,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "https://www.runninghub.ai?inviteCode=aolwbd1n",
+   "properties": {
+    "fontSize": 40,
+    "fontFamily": "Arial",
+    "fontColor": "#ffffff",
+    "textAlign": "left",
+    "backgroundColor": "transparent",
+    "padding": 0,
+    "borderRadius": 0,
+    "angle": 0
+   },
+   "color": "#fff0",
+   "bgcolor": "#fff0"
+  },
+  {
+   "id": 346,
+   "type": "UNETLoader",
+   "pos": [
+    1210,
+    745
+   ],
+   "size": [
+    520,
+    82
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 4,
+   "title": "Remake model 换人模型（选「多人互换」风格时自动打开 / switched on by the 多人互换 style）",
+   "inputs": [],
+   "outputs": [
+    {
+     "localized_name": "MODEL",
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      196
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "UNETLoader",
+    "h3md_role": "remake_model",
+    "models": [
+     {
+      "name": "viggle_remake_swap_pruned_int8_convrot.safetensors",
+      "directory": "diffusion_models",
+      "url": "https://huggingface.co/Viggle/Viggle-Remake"
+     }
+    ]
+   },
+   "widgets_values": [
+    "viggle_remake_swap_pruned_int8_convrot.safetensors",
+    "default"
+   ]
   }
  ],
  "links": [
@@ -4166,6 +4471,14 @@
    227,
    0,
    "H3MD_PLAN"
+  ],
+  [
+   196,
+   346,
+   0,
+   227,
+   28,
+   "MODEL"
   ]
  ],
  "groups": [
@@ -4227,6 +4540,19 @@
     1049.8569412218003
    ],
    "color": "#3f789e",
+   "flags": {}
+  },
+  {
+   "id": 6,
+   "title": "",
+   "bounding": [
+    -3800,
+    -770,
+    2064,
+    520
+   ],
+   "color": "#3f789e",
+   "font_size": 24,
    "flags": {}
   }
  ],

@@ -98,7 +98,7 @@ non_diegetic_music:
 - **开了 depth 的视频没有 `<Video N>` 编号**（见第 6 节），后面的视频编号顺延。
 - 素材拖进 shot 只是挂上，标签用提示词下方的标签按钮或输入 @ 插入，保证编号和后端一致。
 - **先核对每张 `<Picture N>` 在本 shot 里实际是什么图，再写它的作用**（标签按钮上有缩略图；问不清就问用户）。人物、服装、场景要分别对应到真正包含它的那张图，不要套“`<Picture 1>` 是人物、`<Picture 2>` 是脸”这类固定模板。有场景图时，写明它是整段的拍摄地点、从第一帧到最后一帧不变。
-- 人物替换：参考视频提供动作和位置，人换成 `<Subject N>`，用 `attribute_transfer`。
+- 人物替换：参考视频提供动作和位置，人换成 `<Subject N>`，用 `attribute_transfer`。多人换人(Remake 引擎)见第 12d 节。
 - **动作复刻（TARA）：原片拍成什么样，提示词就写成什么样**（0.4.4，11-09 实测）。提示词要和原片对得上；照"原地跳舞"写的模板（"固定机位、在某场景跳舞、场景不变"）用在镜头会动的原片上，第 2 个窗口就跳回了提示词里的场景。
   - 镜头：照原片。原片固定机位 → `A locked-off shot matching the framing of <Video 1>.`；原片在动（跟拍、摇镜头、跟着跑步的人）→ `One continuous tracking shot that moves exactly like the camera of <Video 1>.`
   - 景物：用原片的，或者写明新场景。
@@ -143,11 +143,16 @@ non_diegetic_music:
 - 放在有景的地方，不要空棚；场景简单、明亮、一种地面。
 - 每个 shot 都挂她的照片（图片或 RefMod）定义 `<Subject 1>`，retention 写 `fully_preserved`；每个 shot 都重新完整描述主体外观，不依赖上一段。
 - 一镜到底的单场景长视频（动作复刻、长镜头）：Loop Options 的 `lowres_anchor` 设 1（需要 `continue_lowres_prefix = native_lowres_carry`），每段低清结果拉回本镜头第一段的颜色统计，颜色不会一段段变深、人不会越来越显老。场景本该变色的叙事片不要开；硬切后自动以新镜头第一段为准。
-- 1080p 直出的中景、半身脸已经够清楚，一般不用修脸；远景小脸再考虑。
+- 1080p 直出的中近景（脸约占画面高度 1/5）已经够清楚，不用修脸。远景小脸修脸也救不回来，靠景别解决（见 10b）。
 
 ## 10b. 唱歌、景别和机位（160 秒 MV 实测）
 - **只在中景和近景里唱。** 远景里脸太小看不清嘴，H3 会自己插一个正面唱歌的特写：要么硬切，要么半透明叠化（一张大脸浮在画面上）。写了"一镜到底、不切"也拦不住。远景写 `She does not sing in this shot; her lips stay softly closed`，歌声当画外音。
 - **脸的大小决定清晰度。** 1920×1088 横屏的膝盖以上中景，脸只有约 110 像素，会糊、有斑点，修脸也救不回来。腰部以上或更近，或者用 1088×1920 竖屏，脸有 200 像素以上就清楚。脸会很小的镜头，改成背影、远处侧影或细节（头发、手、裙摆）。
+- **要看清脸的镜头，按"脸占画面高度约 1/5"来设计（11-13 实测）。** 同一个镜头、同一个种子、同样的参考图，只把景别从 Medium-wide 改成 Medium close-up：脸从约 100 像素（不到画面高度 1/10）变成约 260 像素（约 1/5），不开修脸就清楚，出片时间一样。小脸上试过的后期办法都不够：标准修脸、Plus 拼接、放大重画、换修复模型（VOSR2 / SeedVR2），只是从"很糊"到"勉强能看"，眼睛重影、发丝发虚还在，还多花时间。所以：
+  - 唱歌、说话、表情戏：中近景或更近，写明构图，例如 `Medium close-up locked-off shot, framed from the chest up: the head and shoulders of <Subject 1> fill the frame and her face takes up about one fifth of the frame height.`
+  - 远景只用在不需要看脸的地方（交代环境、背影、剪影），时间短，夹在中近景之间，或者用推拉把远景接到中近景。
+  - 整条 MV 以中近景为主；做计划时先排景别，再写内容。
+- **参考图配一张脸部大特写 + 一张带服装的半身照，并把每张图的作用写对。** 例如 `<Subject 1> is the woman shown in <Picture 2> and <Picture 3>. <Picture 2> is her identity and outfit reference. <Picture 3> is a close-up portrait of the face of <Subject 1>.` 不要把人物写成在场景图里（原 Water 计划就写错了）。只换更好的参考图、景别不变，清晰度只提高约 17%，不解决问题；参考图越多越慢（15 秒一段约 9.5 分钟 → 14–15 分钟），够用就行。
 - **脸部特写照片只给中景和近景。** 挂在远景里，模型可能把这张照片当成一个镜头照搬（构图和背景都搬）。
 - **带时间的歌词，一个镜头只能是一段。** 写 `At 00:07.3 she sings: <d>[English] ...</d>`，用本镜头自己的时间；唱歌的镜头控制在约 500 帧（一段）以内，或者拆成几个镜头各写提示词。自动拆段会让每一段都从 0 秒套用歌词时间。
 - **近处有大片地面时，机位固定。** 镜头在大片草地上移动，草地会像波浪一样起伏。写 `The camera is locked off on a tripod and does not move at all; the ground stays perfectly still and only she, her gown and her hair move.` 运镜留给天空、云和远景。
@@ -238,6 +243,118 @@ non_diegetic_music:
 - 没法生成文件（只能聊天）？就给 12b 的 `.json` 代码块，并列出用户要按原文件名上传到 `input/` 的文件。
 - 完整包的样例（H3MD 自己导出、带工作流）：huggingface.co/yj0942/H3MD-Director 的 `plans/H3MD_demo_eve_mv.zip`。
 
+## 12d. 多人换人(Remake):智能体画关键帧,导演台出视频
+
+把真人视频里的几个人换成用户的角色时用这一节(H3MD 0.5.0 起,`swapEngine: "remake"`)。视频由导演台生成;**你负责
+关键帧、提示词,最后交计划包(或图片清单)**。Remake 会照着关键帧拍:关键帧里人挪了位、变了大小、换错了人,视频就跟着错。
+所以每张关键帧都要过第 5 步的自查,不合格就重画,不能凑合交。不要用 TARA、depth 或 H3 遮罩重画来做这件事。
+
+**本地用户直接用工作流,不用智能体**:`example_workflows/Qwen Image 2.1 Keyframe.json`(节点 H3MD Keyframe 1: Prepare
+和 2: Assemble)一次跑完 A 线:编号、挑时刻、裁人、任意修图模型、对色、贴回、第 6 步的提示词和计划包。先推荐用户用它;
+下面两条路线留给智能体手工做,或单独修某一张关键帧。
+
+**两条路线**:按你自己的能力选一条,其余步骤两条线共用。
+- **A 线:你能运行代码**(Claude Code、Codex、Cursor 之类,或接着本地 ComfyUI):裁图 → 修图 → 贴回 → 对色。构图在原理上
+  不会变,远景小人、人多的画面都能做。**能走 A 线就走 A 线。**
+- **B 线:你只能聊天出图**:推荐用 **ChatGPT**(它的出图模型就是 Remake 原作者用的 gpt-image)。实测 Grok 会把整张图重画、换错人、角色也不像,不能用。整张图交给修图模型改。修图模型整张重画时常常会把人放大、挪位、
+  多画或漏画一个人,所以 B 线对选帧和自查要求更严(见第 2、4、5 步)。原片的帧由用户截好给你(或用户先请 A 线智能体截)。
+
+**真人素材**:在线修图服务(Grok、GPT-image、豆包等)通常拒绝修改真人照片,名人几乎一定被拒。素材要用你有权使用的视频;真人素材只能走 A 线 + 本地修图模型。不要用这个功能冒充真实的人。
+
+**修图模型**:本地用 Qwen Image 2.1 编辑(A 线);只能聊天出图就用 ChatGPT(B 线)。要求是:能同时看两张以上
+的图(原帧 + 角色图),输出尺寸可以指定或保持原图大小。
+
+### 1. 认人:按位置编号,编号一直不变
+- 用户按位置指定,例如"图1换左二,图2换左三,图3换左五"。在**所有人第一次都清楚出现的那一帧**,从左到右编号:左一、左二……
+  这个编号就是这个人在整条视频里的身份,后面换了位置也不变。
+- 给每个人记一句外貌(帽子、发型、衣服颜色和款式),后面每一帧都靠它认人。两个人长得很像、或分不清谁是谁时,停下来问用户。
+- 角色图:每个角色一张清楚的全身或半身图;记下角色的外貌(发型、上衣、裤子、鞋)。
+
+### 2. 选关键帧的时间点
+- 先看完整条视频,列出剪辑点(场景检测 + 自己看),以及每个镜头里各编号的人在哪、谁进场出场、转身、换位置。
+- **每个被换的人至少要有一张大而清楚的关键帧**（中景，脸清楚，正面或侧前方）。只在后排、被挡住或很小的人，模型拿不到他的脸，成片会往原演员那边漂（实测：David 只有小图时，唱歌的镜头里变成了欧洲人的脸）。
+- **每个镜头一张**;人物换位、进场、背身转正面时**加一张**;相邻两张**不超过约 6 秒**。
+- 自动分段后每段(最多 345 帧,约 14 秒)最多用自己的 **4 张**,所以一段 14 秒里 2–3 张就够。
+- 挑**要换的人看得清**的一帧:不糊、不被画面边缘切掉一大半、不被别人挡住大半。
+- **近景、特写不画**:画面里只看得到这个人大腿以上、而且他占了画面的大半时,裁出来几乎是整张图,修图模型会把人缩小或挪位(全身入画的人再高都没关系)。改在特写之前的**中景**画一张
+  (人约占画面高度 1/4 到 1/2):实测中景关键帧能把身份带到同一段后面的特写。
+- **B 线额外规则**:要换的人在画面里太小(不到画面高度约 1/5)时,整张修图很容易多画、漏画或放大人。这种远景要么不画、
+  由后面的中景关键帧带过去,要么请用户换 A 线的智能体来画这一张。
+- 每张记下:原片时间(秒)、帧号(= 时间 × 24)、这一帧里每个人的编号和位置、要换谁。
+
+### 3. 取原帧,并裁成成片的比例
+- 用**原片那一帧本身**(不要用缩略图、截屏)。
+- 先把这一帧裁成成片的比例,再缩放到成片尺寸。成片尺寸:竖屏 **960×1664**,横屏 **1664×960**(或 2560×1472)。
+  做法是**居中裁切**(和 Remake 处理原片的方法一样),例如 1080×1920 的竖屏原片:上下各裁 24 像素,得到 1080×1872,
+  再缩放到 960×1664。关键帧比例不对的话,Remake 会把第一张拉伸变形。
+- B 线:用户把裁好的帧给你;你交回来的图必须是同样的尺寸。
+
+### 4. 画关键帧
+**A 线(能运行代码):一次只换一个人,只改他那一块。**
+1. 框出要换的人(全身框),向外扩:左右各加框宽的 45%,上加框高的 12%,下加 8%;最窄 1:2;超出画面的部分截掉。
+2. 把这块裁下来,放大到约 1.6 百万像素(长宽取 32 的倍数),和角色图一起交给修图模型,提示词见下面的模板。
+3. 修好的图缩回原来这块的大小;**对色**:取这块里人物框以外的一圈(背景部分),算修图前后每个颜色通道的均值和标准差,把修好
+   的图整体调到和原图一致;再贴回原位,四周(碰到画面边缘的那一边除外)羽化约 8% 的宽度。
+4. 一帧里要换几个人,就按这个顺序一个一个做;每做完一个,下一个从贴好的图上裁。
+5. 块以外的像素和原帧一模一样,构图不可能变。
+
+**B 线(只能聊天出图):整张图修,一张一张来。**
+1. 每次只发一张原帧 + 需要的角色图,要求输出和原帧**同样尺寸**。
+2. 一帧里要换的人多、或者第一次出图有人被改错时,改成**一次只换一个人**:换好一个,拿这张结果再换下一个。
+3. 每张出图后马上按第 5 步自查;不合格的重新生成(可以换种子或把提示词里的位置描述写得更具体),不要拿去用。
+
+**给修图模型的提示词模板**(中英文都可以;图1 是原帧或裁下的那块,图2 起是角色图):
+> 以图1为底图,保持图1的构图、机位、背景、光线、颜色和清晰度,以及所有人的位置、大小、姿势、动作、朝向和遮挡关系完全不变。
+> 只把图1中【位置 + 外貌,例如:从左数第二个、戴白色棒球帽穿白色运动服的男子】换成图2中的【角色外貌,例如:女子(金色长卷发,
+> 白色罗纹背心,黑色长牛仔裤,白色运动鞋)】,站姿和动作沿用原来那个人,被挡住的部分仍然被挡住。其他人和背景完全不变。
+> 不要美化,不要调色,不加滤镜,是和图1一样的写实照片。
+
+A 线裁图时把第一句换成"图1是一张照片的局部,把图1中间的【……】换成……",其余一样。
+
+### 5. 自查(每张都要做,两条线一样)
+把关键帧和原帧并排,或叠在一起来回切换着看:
+- [ ] 尺寸和成片一致(960×1664 或 1664×960)。
+- [ ] 人数一样:没有多画一个人,也没有少一个人。
+- [ ] 每个人的位置和大小都和原帧一样(头顶、脚底、左右边缘对得上);背景、地面、天空、建筑没有挪动。
+- [ ] 衣服完全是角色的：原演员的外套、夹克、帽子一件都不能留（实测：关键帧里留着原演员的夹克，成片也一直穿着）。
+- [ ] 换对了人:左几换成了哪个角色,和用户的要求一致;角色的脸、发型、衣服和角色图一致。
+- [ ] 不换的人完全没变:脸、帽子、眼镜、衣服都和原帧一样(常见错误:把角色的帽子或衣服画到旁边的人身上)。
+- [ ] 手和脸完整,没有多手指、没有拼接痕迹;颜色和亮度和原帧一致(没有一块明显偏亮或偏色)。
+有一项不合格就重画这一张(A 线只重画出错的那一块)。
+
+### 6. 写提示词(整条视频一份,六段式,Remake 写法)
+Remake 里 `<Picture N>` 是本段第 N 张关键帧,不是角色图,所以**不要把 Subject 绑到某个 Picture 编号上**。按外貌和所替换的演员
+定义每个 Subject,并说明这些图是本次成片的重画帧:
+- `subject_definitions`:`<Video 1> is the source video with 5 performers: it supplies the motion, gestures, head and
+  lip movement, poses, positions, place changes, timing, the camera, the surroundings, the lighting and the
+  soundtrack.` / `The <Picture> images are redrawn frames of this same run: each shows the people at that moment with
+  their final look, in the positions and poses they hold then; together they fix who is who as the performers change
+  places, leave and come back, and in close-ups.` / `<Subject 1> is a woman with long wavy blonde hair in a white
+  ribbed tank top, black jeans and white sneakers; this subject replaces the second performer counted from the left
+  at the start.`(每个角色一行)。**每个 Subject 都要写人种、大概年龄和长相**（脸型、眼睛、肤色、有没有胡子），不能只写发型和衣服，例如 `<Subject 3> is an East Asian man in his late twenties with a clean-shaven face, dark almond-shaped eyes and short black hair ...`（实测：只写"黑色短发、黑 T 恤"时，东亚角色被画成了欧洲人）
+- `summary`:`The target video is an edited version of <Video 1>. [video editing + reference generation + audio reuse]
+  Recast 3 of the 5 performers with a fixed mapping the whole time, counted from left to right at the start: ...; the
+  other performers stay themselves, with their own faces, hair and outfits.`
+- `retention_analysis`:`<Video 1>: partially_preserved - motion, posture, lip and jaw movement, timing, camera, framing,
+  scene, lighting and colour grade are retained; the face, hair and outfit of the recast performers are not carried
+  over.`;每个 Subject 一行 `fully_preserved - ..., identical in every moment, including close-ups and group shots.`;
+  `Source audio: fully_copy - the original soundtrack and its synchronisation are kept.`
+- `detailed_description`:与 `<Video 1>` 一致的一个连续镜头(原片有剪辑就按原片时间写 `[Ns cut]`),开头从左到右谁是谁,
+  每个被换的人动作和原演员完全一样,每一帧都保持自己的脸、发型和衣服;手有五根手指。
+- `overall_soundscape`:`Keep the source soundtrack; do not invent dialogue.`;`non_diegetic_music`:`<Video 1>` 的音乐不变。
+
+### 7. 交付
+- **A 线:打计划包 zip**(格式见 12c),原片和关键帧都放进 `media/`:
+  `"swapEngine": "remake"`、`"autoSplit": true`、成片尺寸;一个 segment:
+  `{"length": 5+17n(不超过原片结尾), "overlapIn": 0, "videos": [{"id": "src", "trimStart": 开始秒数,
+  "useSoundtrack": false, "depth": false}], "audioMode": "locked", "locked": {"source": "video:src", "offset": 0},
+  "keyframes": [{"image": "kf1", "at": 秒}, ...], "prompt": "..."}`。
+  关键帧图只列在 `media.images`,不放进 segment 的 `images`;`at` 是从本段开头算的秒数(= 原片时间 − trimStart);
+  角色图不用放(Remake 不读)。
+- **B 线:交一份清单**:每张关键帧的文件名、原片时间(秒)、换了谁,再加第 6 步的提示词。用户在导演台打开「Remake 换人」,
+  把图片加进关键帧列表、填时间,提示词贴进镜头里;或者把清单交给 A 线智能体打包。
+- 请用户在示例工作流 `H3MD Director Remake.json` 里先只跑第一段低清,看过再跑全片。
+
 ## 13. 输出前自查
 - [ ] 确实是 H3MD 任务（不是就改用 `h3-prompt-writing`）。
 - [ ] 格式和段落顺序对；字段名一字不差。
@@ -254,6 +371,7 @@ non_diegetic_music:
 - [ ] 场景简单：没有镜子、木地板、地砖、条纹；地面只有一种纯色材质；写了“背景不变黑、不变灰”。
 - [ ] 每个镜头都写了构图、人物位置、环境光线、动作、运镜和声音；对白歌词在 `<d>` 里，保留原语言；不知道歌词就写不唱。
 - [ ] 只在中景、近景唱歌；远景写明不唱；脸部特写照片只给中景和近景。
+- [ ] 要看清脸的镜头都是中近景或更近（脸约占画面高度 1/5，1080p 约 200 像素以上），并写明了构图；远景短、不靠它看脸；没有指望修脸来救小脸。
 - [ ] 近处有大片地面时机位固定；没有 slowly 类词；参考图横竖和成片一致。
 - [ ] 有参考图时：没有写长相、皮肤、妆容、灯光、色彩、风格，只写机位、动作、时间和声音。
 - [ ] 前奏 / 间奏 / 尾奏是单独的段，提示词里没有任何"唱"的意思；没有"no X"这类负面写法；参考图是原图，没有做过局部修图。

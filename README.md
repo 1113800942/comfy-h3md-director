@@ -19,6 +19,8 @@ part is kept on disk, and you repair only what went wrong — down to a few seco
 | <img src="docs/media/mv_1080p_singing.gif" width="420"> | <img src="docs/media/mv_1080p_everest.gif" width="420"> |
 
 ## Highlights
+- **Multi-person swap (0.5.0)**: replace several people in a real video with your own characters - the motion,
+  camera, lip movement and sound stay. Runs Viggle Remake inside the Director; you (or your agent) paint a few keyframes.
 - **Seamless long video (0.4.0, CCW)**: tick one switch on the Director and continued shots are rendered together on one
   timeline with Chained Context Windows — no continuation seams, no drift, no double images; hard cuts stay clean.
 - **Long video in one run**: 2–3 minutes at 1080p (measured: a 2 min 20 s music video at 1920×1088 in 2 h 18 min on an RTX 5090).
@@ -45,8 +47,8 @@ part is kept on disk, and you repair only what went wrong — down to a few seco
 2. You need a ComfyUI version with MiniMax H3 support (0.43 or newer; **0.44 or newer for Seamless long video**).
 3. Open an example workflow: ComfyUI **Templates** → `ComfyUI-H3MD-Director`, or drag one from
    [`example_workflows/`](example_workflows) into ComfyUI. **New here? Start with `H3MD Director simple`** (v0.3):
-   only three things on the canvas – the **H3MD Control Panel** (size, fps / interpolation, face refine, seed, which
-   segments to run, style buttons Balanced / High motion / Motion copy, low-res and high-res LoRA lists), the
+   only three things on the canvas – the **H3MD Control Panel** (size, fps / interpolation, face refine, seed, trial (which
+   parts to run), style buttons Balanced / High motion / Motion copy, low-res and high-res LoRA lists), the
    **Director** (media, shots, prompts) and the video preview. Models, sampler and save settings sit in subgraphs
    (click to open). `H3MD Director` is the older flat full layout.
    Hardware: 40 / 50-series GPU with **16 GB VRAM minimum, 24 GB+ recommended** (measured on an RTX 5090; reports from
@@ -165,6 +167,48 @@ changes:
 * H3MD never deletes the cache on its own: turn on `delete_cache_after_save` on H3MD Save Video Interp, or delete the
   `resume_...` folder by hand when the video is final.
 
+## Multi-person swap (0.5.0, Viggle Remake)
+
+Replace several people in a real video with your own characters ("picture 1 replaces the second person from the left"),
+keeping the motion, camera, lip movement and soundtrack. The Director runs Viggle Remake's swap model in the low-res
+pass and its own high-res pass on top.
+
+1. **Keyframes + plan, locally in one run**: open `example_workflows/Qwen Image 2.1 Keyframe.json`. Put the source
+   video in ComfyUI's input folder, connect the character pictures, write the mapping ("图1换左二" / "picture 1 ->
+   left 2"; people are numbered left to right in the first clear frame - check the people sheet) and one description
+   line per picture. **H3MD Keyframe 1: Prepare** tracks the people (core SAM3.1), picks keyframe moments at most
+   about 5 s apart where the people stand apart, and crops every recast person; any image-edit model redraws the crops
+   (the example uses Qwen Image 2.1 Edit with a 2-step LoRA and the official prompt enhancer - swap in Flux or another
+   editor if you like); **H3MD Keyframe 2: Assemble** colour-matches and pastes them back, writes the Remake plan and
+   saves a plan .zip to `output/H3MD_plans/`. Check the keyframe sheet; redo with another seed if a pose or hand is off.
+   Instead of this workflow, an agent can paint the keyframes and write the plan (`skills/h3md-prompt`, section 12d).
+   Remake follows the keyframes closely, so their quality decides the result.
+2. **Plan**: import the .zip in the Director (locally or on RunningHub).
+3. **Run**: open `example_workflows/H3MD Director Remake.json` (Control Panel style **多人换人**, the Loop's
+   `remake_model` wired to the Remake model). Run the first part, low-res only, before the whole clip.
+   **Both models stay on - they do not conflict**: the low-res pass uses the Remake model (the swap happens there),
+   the high-res pass uses the usual H3 base (it only adds detail). They take turns on the GPU; turning either one off
+   breaks the run. The simple and full workflows have the same Remake model node, already wired to the Loop: the
+   Control Panel style **多人互换** switches it on, every other style switches it off (so it is never loaded otherwise).
+
+Needs (install yourself): the node pack **ComfyUI-Viggle-Remake** and the model
+`viggle_remake_swap_pruned_int8_convrot.safetensors` in `models/diffusion_models`, both from Hugging Face
+[Viggle/Viggle-Remake](https://huggingface.co/Viggle/Viggle-Remake) (see its model card for the licence). Limits:
+output 1664x960 or 960x1664 (or 2560x1472); 90-345 frames per part (autosplit does it); up to 4 keyframes per part;
+window mode is off for these plans. Works best when each recast person and their character are close in hair length,
+build and gender; with big differences it is not perfect, but usable. The keyframe workflow tracks people by position:
+someone who leaves the frame and comes back may be taken for a new person (the info output warns). Thanks to Viggle
+for releasing Remake.
+
+## Reporting a problem
+
+In the H3MD Director click **Report 诊断报告** (next to Export plan) and attach the .zip from `output/H3MD_reports/`
+to your [GitHub issue](../../issues). It holds what we need to find the cause: GPU, VRAM (and the peak of the last
+run), versions of ComfyUI / torch / H3MD and the related node packs, which models were found, the node settings, a
+check of the plan against the prompt-skill rules (lengths, window handoffs, Remake keyframes...) and the last runs'
+H3MD log and error. It has no user or computer names, no folders (paths are cut to file names) and no pictures,
+videos or audio; untick **prompts** to leave the prompts out. It is only saved on your machine.
+
 ## More (click to open)
 
 <details>
@@ -205,10 +249,15 @@ changes:
 
 **Example workflows**
 * `H3MD Director simple.json` — **start here** (v0.3): Control Panel + Director + preview; models / sampler / save in
-  subgraphs; no rgthree, Crystools, easy-use, LayerStyle or TE-Speed nodes. Low VRAM: swap the 32B text encoder for 4B +
+  subgraphs; no Crystools, easy-use, LayerStyle or TE-Speed nodes (rgthree only draws the title banner; without it the banner is missing, nothing else). Low VRAM: swap the 32B text encoder for 4B +
   ClipProj (the full workflow has the ClipProj node bypassed; see the text encoder notes below).
+* `example_plans/h3md_silver_warrior_1min_v3.zip` — a ready-to-import **1-minute fight** plan (9 shots, 1280×704, no media
+  needed): in the Director click **Import plan…**, pick the zip, choose "Plan only". Made for the Control Panel's "high
+  motion" style (one weapon LoRA per pass).
 * `H3MD Director.json` — the full setup used for the samples; adds face refine, RIFE interpolation to 48 fps, one extra
   refine step and a few convenience nodes.
+* `H3MD Director Remake.json` + `Qwen Image 2.1 Keyframe.json` — the multi-person swap (0.5.0): the second
+  makes the keyframes and the plan .zip, the first runs it (see "Multi-person swap").
 
 | Node pack | What it does in the workflows | Needed? | Without it |
 |---|---|---|---|
@@ -218,6 +267,7 @@ changes:
 | [ComfyUI-ClipProj](https://github.com/nicolab28/ComfyUI-ClipProj) | 4B text encoder projection, saves 10+ GB VRAM | only with the 4B encoder | use the 32B encoder |
 | [ComfyUI-VFI](https://github.com/GACLove/ComfyUI-VFI) | RIFE interpolation in `H3MD Save Video Interp` | optional | keep `interpolate` off: 24 fps output |
 | [ComfyUI-VOSR2](https://github.com/ylchen333/ComfyUI-VOSR2) (simple) / TE-Speed-VOSR2 (full) | face refine in `H3MD Save Video Interp` | optional | keep `face_refine` off (default) |
+| [ComfyUI-H3-FaceRefine-Plus](https://github.com/AnniCodex/ComfyUI-H3-FaceRefine-Plus) (AnniCodex, MIT) + ComfyUI-H3-FaceRefine | face refine save node, optional inputs `stitch_mode = plus` (antialiased paste, light from the original, detail from the refined face) and `flow_lock` (pins the refined features back onto the original frames, less face wobble); needs opencv-python | optional | leave both at their defaults (`standard` / off); if the pack is missing the node falls back and says so in the report |
 | [ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler) | face refine with `refine_model = SeedVR2`: its DiT / VAE loaders go to `seedvr2_model` / `seedvr2_vae` (TE-Speed SeedVR2 also works) | optional | use VOSR2, or keep `face_refine` off |
 | T8 semantic bridge (MiniMax H3 prompt enhancer T8) | its "Semantic Bridge" config or multi-bridge stack can go straight into the Loop's `semantic_bridge` input (same math as our own bridge node) | optional | our H3MD Semantic Bridge node (in the example workflows: wired, bypassed - select it and press Ctrl+B to use it; the style buttons no longer switch a bridge on). The bridge's author does not recommend it with reference pictures or lip-sync to a reference audio |
 | [ComfyUI-YCNodes-MiniMax-H3](https://github.com/yichengup/ComfyUI-YCNodes-MiniMax-H3) | `H3SigmaRefiner`: one extra refine step | optional | plain `BasicScheduler` |
@@ -544,6 +594,10 @@ how we solved them — feel free to build on them.
   5+17n frames. With `motion_transfer:` in the prompt it is rounded **down** at the clip end (TARA needs a source frame
   for every frame, so up to 0.7 s of the clip end is left out); in every other use it is rounded **up** as before.
   You never set it yourself, and the prompt's `Duration:` line is updated automatically.
+  Since 0.4.6 a guide video that ends up to 16 frames before its shot (the shot was rounded up) keeps its last frame to
+  the shot's length, in segment and window mode, so a missing `motion_transfer:` no longer ends in the TARA "identical
+  temporal grids" error; and with the Control Panel style on "motion copy" the trigger is added to the plan's global
+  prompt when it is queued, if the plan has none (your workflow text is not changed).
 
 - Reference video → Depth Anything V2 depth → SAM3 keeps only the person → Fun ControlNet, **on the low-res pass
   only**.

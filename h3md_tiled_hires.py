@@ -171,8 +171,13 @@ def packed_rows(video_shape, audio_t: int, text_len: int, keyframe_tokens: int, 
     return int(text_len + ref_rows + 2 * audio_t + (video_shape[2] + keyframe_tokens) * hp * wp)
 
 
-def cond_stats(conds):
-    """(text_len, keyframe video tokens, ref rows) - max over cond dicts."""
+def cond_stats(conds, full_t: int | None = None, window_t: int | None = None):
+    """(text_len, keyframe video tokens, ref rows) - max over cond dicts.
+    full_t / window_t (0.4.8, window mode): a timeline-aligned reference video (latent length == the shot's full_t) is
+    cropped to the window by H3MD window mode (h3md_window.crop_refs, with its soundtrack), so a strip only carries
+    window_t of its latent frames - count those, not the whole shot (11-13: 72 counted where each window had 52,
+    ~7.7k extra fixed rows per strip -> 12 strips instead of ~8)."""
+    crop = bool(full_t and window_t and 0 < int(window_t) < int(full_t))
     text_len = kf_tokens = ref_rows = 0
     groups = conds.values() if isinstance(conds, dict) else []
     for g in groups:
@@ -186,12 +191,17 @@ def cond_stats(conds):
             rr = 0
             for r in d.get("minimax_refs") or []:
                 lat = r.get("latent")
+                aligned = False
                 if isinstance(lat, torch.Tensor) and lat.ndim >= 4:
                     t = lat.shape[2] if lat.ndim == 5 else 1
+                    aligned = crop and lat.ndim == 5 and int(t) == int(full_t)
+                    if aligned:
+                        t = int(window_t)
                     rr += int(t * ((lat.shape[-2] + 1) // 2) * ((lat.shape[-1] + 1) // 2))
                 al = r.get("audio_latent")
                 if isinstance(al, torch.Tensor):
-                    rr += 2 * int(al.shape[-1])
+                    at = int(al.shape[-1])
+                    rr += 2 * (math.ceil(at * int(window_t) / int(full_t)) if aligned else at)
             ref_rows = max(ref_rows, rr)
     return text_len, kf_tokens, ref_rows
 
@@ -322,12 +332,12 @@ def estimate_bytes(model_patcher, rows: int):
 
 
 def plan_tiles(model_patcher, video_shape, audio_t: int, conds, req: dict, available=None, dynamic=None,
-               min_tiles: int = 1, device: str | None = None):
+               min_tiles: int = 1, device: str | None = None, full_t: int | None = None):
     """Fewest strips (>= min_tiles) whose calibrated estimate fits the free VRAM.  min_tiles > 1 is used by the
     out-of-memory retry; device selects this machine's local calibration records."""
     axis = select_axis(video_shape, req.get("axis", "auto"))
     length = int(video_shape[axis])
-    text_len, kf_tokens, ref_rows = cond_stats(conds)
+    text_len, kf_tokens, ref_rows = cond_stats(conds, full_t, int(video_shape[2]))
     cal = calibration(dynamic, device)
 
     def tile_rows(spans):
@@ -699,11 +709,13 @@ def _run(executor, state, req, stats, noise, latent_image, sampler, sigmas, deno
         plan = None
         try:
             vshape, audio_t = window_shape(patcher, [tuple(x) for x in latent_shapes][0], tuple(latent_shapes[1])[-1])
-            plan = plan_tiles(patcher, vshape, audio_t, guider.conds, req, min_tiles=min_tiles, device=device)
+            full_t = int(latent_shapes[0][2])   # 0.4.8: window mode crops timeline-aligned guides to the window
+            plan = plan_tiles(patcher, vshape, audio_t, guider.conds, req, min_tiles=min_tiles, device=device,
+                              full_t=full_t)
             if vshape[2] != latent_shapes[0][2] and 1 < plan["tiles"] < plan["max_tiles"] and attempt == 1:
                 # window mode (YJ 11-07): one strip more than the estimate needs - headroom for smaller cards
                 plan = plan_tiles(patcher, vshape, audio_t, guider.conds, req, min_tiles=plan["tiles"] + 1,
-                                  device=device)
+                                  device=device, full_t=full_t)
                 LOG.info("%s window mode: one extra strip for headroom -> %d strips", _TAG, plan["tiles"])
             stats["plan"] = plan
             with FF.chunked_mlp(ff_rows):

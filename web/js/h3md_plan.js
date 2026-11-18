@@ -836,6 +836,9 @@ export function renameMedia(plan, kind, oldId, newId) {
     } else if (Array.isArray(s[kind])) {
       s[kind] = s[kind].map((x) => (String(x) === oldId ? newId : x));
     }
+    if (kind === "images" && Array.isArray(s.keyframes)) {
+      s.keyframes = s.keyframes.map((k) => (k && String(k.image) === oldId ? { ...k, image: newId } : k));
+    }
     if (lockedPrefix[kind] && s.locked && s.locked.source === lockedPrefix[kind] + oldId) s.locked.source = lockedPrefix[kind] + newId;
   }
   return true;
@@ -845,7 +848,8 @@ export function mediaUsage(plan, kind, id) {
   (plan.segments || []).forEach((s, i) => {
     if (!s) return;
     const ids = kind === "videos" ? (s.videos || []).map((v) => videoRef(v).id) : kind === "audios" ? (s.audios || []).map((x) => audioEntry(x).id) : (s[kind] || []).map(String);
-    if (ids.includes(id) || (lockedPrefix[kind] && s.locked && s.locked.source === lockedPrefix[kind] + id)) out.push(i);
+    const usedKf = kind === "images" && Array.isArray(s.keyframes) && s.keyframes.some((k) => k && String(k.image) === id);
+    if (ids.includes(id) || usedKf || (lockedPrefix[kind] && s.locked && s.locked.source === lockedPrefix[kind] + id)) out.push(i);
   });
   return out;
 }
@@ -856,6 +860,10 @@ export function removeMedia(plan, kind, id) {
     if (kind === "videos") s.videos = (s.videos || []).filter((v) => videoRef(v).id !== id);
     else if (kind === "audios" && Array.isArray(s.audios)) s.audios = s.audios.filter((x) => audioEntry(x).id !== id);
     else if (Array.isArray(s[kind])) s[kind] = s[kind].filter((x) => String(x) !== id);
+    if (kind === "images" && Array.isArray(s.keyframes)) {
+      s.keyframes = s.keyframes.filter((k) => k && String(k.image) !== id);
+      if (!s.keyframes.length) delete s.keyframes;
+    }
     // a lock on the removed file is dropped (back to reference); an empty source used to fail at queue time
     if (lockedPrefix[kind] && s.locked && s.locked.source === lockedPrefix[kind] + id) { delete s.audioMode; delete s.locked; }
   }
@@ -881,6 +889,12 @@ export function clearOrphanRefState(plan) {
     const n = (k) => (Array.isArray(s[k]) ? s[k].length : 0);
     if (!n("images") && !n("videos") && !n("audios") && !n("refmods")) {
       if (s.locked || s.audioMode === "locked") { delete s.locked; if (s.audioMode === "locked") delete s.audioMode; changed++; }
+    }
+    if (Array.isArray(s.keyframes)) {
+      const keep = s.keyframes.filter((k) => k && has("images", String(k.image)));
+      if (keep.length !== s.keyframes.length) changed++;
+      if (keep.length) s.keyframes = keep;
+      else delete s.keyframes;
     }
   }
   // the face-refine ID Ref goes with the last shot that uses its picture
@@ -1295,4 +1309,127 @@ export function clearMedia(plan, kind) {
   ensureShape(plan);
   for (const it of (plan.media[kind] || []).slice()) if (it) removeMedia(plan, kind, it.id);
   plan.media[kind] = [];
+}
+
+// Remake Swap module (2026-11-15, experimental): plan.swapEngine and segments[].keyframes.
+// Off = key absent (old plans and serialize output stay unchanged). UI writes only "remake" or deletes the key.
+export const REMAKE_MAX_KEYFRAMES = 4;
+
+export function remakeOn(plan) {
+  return !!(plan && plan.swapEngine === "remake");
+}
+
+export function setRemake(plan, on) {
+  if (!plan || typeof plan !== "object") return plan;
+  if (on) {
+    plan.swapEngine = "remake";
+    if (plan.windowMode !== undefined) delete plan.windowMode;
+  } else {
+    delete plan.swapEngine;
+  }
+  return plan;
+}
+
+export function keyframeList(seg) {
+  return Array.isArray(seg && seg.keyframes) ? seg.keyframes.slice() : [];
+}
+
+export function normalizeKeyframeEntry(plan, seg, entry, notes = []) {
+  if (!entry || typeof entry !== "object" || Array.isArray(entry) || entry.image == null || num(entry.at) == null) {
+    notes.push("keyframe needs 'image' and 'at' (seconds)");
+    return null;
+  }
+  const image = String(entry.image);
+  const known = new Set((plan.media && plan.media.images || []).map((x) => x && String(x.id)));
+  if (!known.has(image)) {
+    notes.push(`keyframe image '${image}' is not in media.images`);
+    return null;
+  }
+  const length = segmentLength(seg) ?? 0;
+  const overlap = Math.trunc(num(seg && seg.overlapIn || 0, 0));
+  const at = Number(num(entry.at));
+  const frame = Math.trunc(pyRound(at * FPS));
+  if (frame < 0 || frame >= length) {
+    notes.push(`keyframe '${image}' at ${at} s is outside the shot (0-${((Math.max(length, 1) - 1) / FPS).toFixed(2)} s)`);
+    return null;
+  }
+  if (frame < overlap) {
+    notes.push(`keyframe '${image}' at ${(frame / FPS).toFixed(2)} s is inside the carried overlap`);
+    return null;
+  }
+  return { image, at: frame / FPS };
+}
+
+export function normalizeShotKeyframes(plan, i, notes = []) {
+  const seg = (plan.segments || [])[i];
+  if (!seg || typeof seg !== "object") return [];
+  const byFrame = new Map();
+  for (const e of keyframeList(seg)) {
+    const n = [];
+    const kf = normalizeKeyframeEntry(plan, seg, e, n);
+    for (const m of n) notes.push(`segment ${i + 1}: ${m}`);
+    if (!kf) continue;
+    const frame = Math.trunc(pyRound(kf.at * FPS));
+    if (byFrame.has(frame)) notes.push(`segment ${i + 1}: two keyframes at frame ${frame} - '${kf.image}' replaces '${byFrame.get(frame)}'`);
+    byFrame.set(frame, kf.image);
+  }
+  const out = [...byFrame.entries()].sort((a, b) => a[0] - b[0]).map(([frame, image]) => ({ image, at: frame / FPS }));
+  if (out.length) seg.keyframes = out;
+  else delete seg.keyframes;
+  return out;
+}
+
+export function addShotKeyframe(plan, i, imageId, at, limit = REMAKE_MAX_KEYFRAMES) {
+  const seg = (plan.segments || [])[i];
+  const notes = [];
+  if (!seg) return { ok: false, notes: ["no such segment"] };
+  const kf = normalizeKeyframeEntry(plan, seg, { image: imageId, at }, notes);
+  if (!kf) return { ok: false, notes };
+  const cur = keyframeList(seg);
+  const frame = Math.trunc(pyRound(kf.at * FPS));
+  const replaces = cur.some((x) => Math.trunc(pyRound(Number(x.at) * FPS)) === frame);
+  if (!replaces && cur.length >= limit) {
+    return { ok: false, notes: [`Remake takes at most ${limit} keyframes`] };
+  }
+  cur.push(kf);
+  seg.keyframes = cur;
+  normalizeShotKeyframes(plan, i, notes);
+  return { ok: true, notes };
+}
+
+export function updateShotKeyframe(plan, i, idx, patch, limit = REMAKE_MAX_KEYFRAMES) {
+  const seg = (plan.segments || [])[i];
+  const notes = [];
+  if (!seg) return { ok: false, notes: ["no such segment"] };
+  const cur = keyframeList(seg);
+  if (idx < 0 || idx >= cur.length) return { ok: false, notes: ["no such keyframe"] };
+  const next = { ...cur[idx], ...patch };
+  if (next.image != null) next.image = String(next.image);
+  if (patch && patch.at !== undefined) {
+    const a = num(patch.at);
+    if (a == null) {
+      notes.push("keyframe needs 'image' and 'at' (seconds)");
+      return { ok: false, notes };
+    }
+    next.at = Number(a);
+  }
+  cur[idx] = next;
+  if (cur.length > limit) {
+    notes.push(`Remake takes at most ${limit} keyframes`);
+    cur.length = limit;
+  }
+  seg.keyframes = cur;
+  // Keep a typed out-of-range or unknown-id row so the editor can show the warning; do not auto-drop.
+  normalizeKeyframeEntry(plan, seg, next, notes);
+  return { ok: notes.length === 0, notes };
+}
+export function removeShotKeyframe(plan, i, idx) {
+  const seg = (plan.segments || [])[i];
+  if (!seg) return false;
+  const cur = keyframeList(seg);
+  if (idx < 0 || idx >= cur.length) return false;
+  cur.splice(idx, 1);
+  if (cur.length) seg.keyframes = cur;
+  else delete seg.keyframes;
+  return true;
 }

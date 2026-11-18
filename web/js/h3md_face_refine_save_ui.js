@@ -25,7 +25,7 @@ export const FACE_WIDGETS = [
   "identity_track", "identity_threshold", "select", "fallback_detector", "fallback_head_frac", "select_index",
   "identity_model", "cut_detection", "cut_threshold", "absent_shots", "X", "Y", "frame_index",
   "paste_region", "mask_dilation", "feather", "colour_match", "blend", "undetected_frames", "feather_scales_with_crop",
-  "vosr2_seed", "refine_model"];
+  "vosr2_seed", "refine_model", "stitch_mode", "flow_lock"];
 export function syncFaceWidgets(node) {
   // face_refine fed by a link (e.g. from the Director / an outer subgraph input): its value is only known at run time,
   // so the face widgets stay editable (11-07 user report: everything greyed out whatever the outer value was)

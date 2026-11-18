@@ -168,6 +168,7 @@ def _file_sig(file: str):
 def _used_files(seg: dict, media: dict) -> list:
     used = [("images", i) for i in seg["images"]] + [("videos", v["id"]) for v in seg["videos"]]
     used += [("audios", a) for a in seg["audios"]]
+    used += [("images", k["image"]) for k in seg.get("keyframes") or ()]   # 0.4.9 (none -> key unchanged)
     if seg.get("audioMode") == "locked" and seg.get("locked"):
         lk = seg["locked"]
         used.append(("videos" if lk["kind"] == "video" else "audios", lk["id"]))
@@ -186,6 +187,15 @@ def segment_signature(plan: dict, k: int) -> dict:
     keep = ("startFrame", "length", "overlapIn", "prompt", "images", "videos", "audios", "audioMode", "locked")
     sig = {"seg": {key: seg.get(key) for key in keep}, "files": files,
            "size": [plan.get("width"), plan.get("height")]}
+    if plan.get("swapEngine"):   # 2026-11-14 multi-person swap engine: only these plans get the key
+        sig["swapEngine"] = plan["swapEngine"]
+        sig["remakeSchedule"] = "official6-low"  # 2026-11-15: full official 6-step on low only (invalidates old 4+3 cache)
+        if plan.get("remakeMode"):
+            sig["remakeMode"] = plan["remakeMode"]
+    if seg.get("keyframes"):   # 0.4.9: only shots with keyframes get the key (old plans keep their keys)
+        sig["keyframes"] = [[k["image"], int(k["frame"])] for k in seg["keyframes"]]
+    if seg.get("keyframesNear"):   # 2026-11-15: a swap part without its own keyframe (nearest one, un-pinned)
+        sig["keyframesNear"] = [[k["image"], int(k["frame"])] for k in seg["keyframesNear"]]
     # window-exp: only window-mode plans get these keys, so every other plan keeps its old cache keys
     if plan.get("windowMode"):
         sig["windowMode"] = {k: v for k, v in plan["windowMode"].items() if k not in ("preview", "redraw")}
@@ -206,6 +216,7 @@ def segment_signature(plan: dict, k: int) -> dict:
             sig["refVideoAuto"] = [D.REF_VIDEO_AUTO_TOKEN_LIMIT, [list(t) for t in D.REF_VIDEO_TIERS]]
             if plan.get("tokenBudget"):   # H3MD autosplit: the auto tier limit is the plan's token budget
                 sig["refVideoAuto"][0] = int(plan["tokenBudget"])
+            sig["refVideoAuto"].append(D.ref_fixed_limit(sig["refVideoAuto"][0]))   # 0.4.8 reference-media limit
             if any(v.get("depth") for v in seg["videos"]):   # depth videos fixed at the lowest tier (2026-10-27)
                 sig["refVideoAutoDepth"] = "lowest"
     return sig
