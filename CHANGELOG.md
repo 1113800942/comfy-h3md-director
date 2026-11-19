@@ -2,6 +2,12 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.5.6] - 2026-11-18
+
+### Added / 新增
+- Keyframe workflow (multi-person swap): when `start_s` / `end_s` on H3MD Keyframe 1: Prepare cut a part of the source, the plan now records where that part sits in the original (`sourceTrim`: start and end in seconds). H3MD RH (RunningHub, 0.5.5-rh1) uses it to cut the same part when the whole original is uploaded there. Nothing else changes; plans without it work as before.
+  关键帧工作流（多人换人）：Prepare 用 `start_s` / `end_s` 截了原片的一段时，计划里会记下这一段在原片里的起止秒数（`sourceTrim`）。RunningHub 版 H3MD RH（0.5.5-rh1）在那边上传整条原片时，靠它自动截出同一段。其他都不变；没有这一项的旧计划照常用。
+
 ## [0.5.5] - 2026-11-18
 
 ### Changed / 改动

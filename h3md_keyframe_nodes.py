@@ -480,6 +480,10 @@ class H3MDKeyframePrepare:
         job = {"video": plan_path(video, path), "video_abs": path, "duration": info["duration"],
                "has_audio": info["audio"], "size": list(size), "length": length, "moments": job_moments,
                "frames": full, "prompt": prompt, "chosen": chosen, "order": order}
+        if float(start_s or 0.0) > 0 or float(end_s or 0.0) > 0:
+            # 0.5.6: where the cut part sits in the original, so H3MD RH can cut the same part from a whole original
+            st = round(max(0.0, float(start_s or 0.0)), 3)
+            job["source_trim"] = {"start": st, "end": round(st + float(info["duration"]), 3)}
         text = {"video": job["video"], "size": list(size), "frames": length, "seconds": round(dur, 2),
                 "people_at_start": len(order), "numbered_at": nf["at"],
                 "mapping": [{"picture": p, "left": k} for p, k, _ in chosen],
@@ -562,6 +566,8 @@ class H3MDKeyframeAssemble:
                                                    if m["items"] else "source frame"))
         plan = K.build_plan(job["video"], job["duration"], job["has_audio"], (W, H), job["length"], kfs,
                             job["prompt"], name)
+        if job.get("source_trim"):
+            plan["sourceTrim"] = dict(job["source_trim"])
         plan_s = json.dumps(plan, ensure_ascii=False, indent=2)
         with open(os.path.join(kdir, "plan.json"), "w", encoding="utf-8") as fh:
             fh.write(plan_s)
