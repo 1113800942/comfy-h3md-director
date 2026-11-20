@@ -681,27 +681,70 @@ def _boxes_at(track, t):
     return out, m
 
 
-def reference_sheet(refs, w, h):
-    """the characters side by side on black, one column each (SCAIL-2 takes one reference picture with everybody)
-    -> (uint8 [h, w, 3], columns)"""
+def _detect(sam, image_t, cond, threshold):
+    """SAM3 single-image detection -> [(box xyxy px, bool mask)] (ComfyUI's SAM3_Detect, one mask per object)"""
+    from comfy_extras.nodes_sam3 import SAM3_Detect
+    masks, boxes = SAM3_Detect.execute(model=sam, image=image_t, conditioning=cond, threshold=threshold,
+                                       refine_iterations=2, individual_masks=True).result
+    bx = boxes[0] if boxes else []
+    out = []
+    for i, d in enumerate(bx):
+        m = masks[i].cpu().numpy() > 0.5 if i < masks.shape[0] else None
+        out.append(([d["x"], d["y"], d["x"] + d["width"], d["y"] + d["height"]], m))
+    return out
+
+
+def cut_character(sam, picture, cond_person, cond_head, threshold):
+    """the character in a picture: (rgb uint8, figure mask, figure box, head box or None)"""
+    import numpy as np
+    rgb = to_u8(picture)
+    found = _detect(sam, picture[..., :3], cond_person, threshold)
+    if found:
+        box, m = max(found, key=lambda bm: (bm[0][2] - bm[0][0]) * (bm[0][3] - bm[0][1]))
+        if m is None or not m.any():
+            m = np.zeros(rgb.shape[:2], bool)
+            m[int(box[1]):int(box[3]), int(box[0]):int(box[2])] = True
+    else:                                       # nothing found: the whole picture is the character
+        h, w = rgb.shape[:2]
+        box, m = [0.0, 0.0, float(w), float(h)], np.ones((h, w), bool)
+    head = K.pick_head(box, [b for b, _ in _detect(sam, picture[..., :3], cond_head, threshold)])
+    return rgb, m, box, head
+
+
+def aligned_reference(chars, targets, w, h):
+    """0.5.91: SCAIL-2's reference picture, aligned with the keyframe: every character pasted where the person she
+    replaces stands, head on head at the same size; the nearer person (lower box bottom) last.  chars / targets:
+    lists in colour order; targets = (figure box px, head box px or None).  -> (rgb uint8 [h, w, 3], colour mask
+    float [h, w, 3] on black, notes)"""
     import numpy as np
     from PIL import Image
-    cols = K.ref_columns(len(refs), w, h)
-    sheet = Image.new("RGB", (w, h), (0, 0, 0))
-    for r, (x0, y0, x1, y1) in zip(refs, cols):
-        im = Image.fromarray(to_u8(r))
-        sc = min((x1 - x0) / im.width, (y1 - y0) / im.height)
-        im = im.resize((max(1, int(im.width * sc)), max(1, int(im.height * sc))), Image.LANCZOS)
-        sheet.paste(im, (x0 + (x1 - x0 - im.width) // 2, y1 - im.height))
-    return np.asarray(sheet), cols
+    from comfy_extras.nodes_scail import DEFAULT_PALETTE
+    rgb = np.zeros((h, w, 3), np.uint8)
+    cm = np.zeros((h, w, 3), np.float32)
+    notes = []
+    order = sorted(range(len(chars)), key=lambda k: targets[k][0][3])
+    for k in order:
+        c_rgb, c_m, c_box, c_head = chars[k]
+        t_box, t_head = targets[k]
+        sc, dx, dy, how = K.place_character(t_box, c_box, t_head, c_head)
+        notes.append(how)
+        aff = (1.0 / sc, 0.0, -dx / sc, 0.0, 1.0 / sc, -dy / sc)
+        im = np.asarray(Image.fromarray(c_rgb).transform((w, h), Image.AFFINE, aff, resample=Image.BILINEAR))
+        mk = np.asarray(Image.fromarray(c_m.astype(np.uint8) * 255).transform((w, h), Image.AFFINE, aff,
+                                                                              resample=Image.BILINEAR)) > 127
+        rgb[mk] = im[mk]
+        cm[mk] = DEFAULT_PALETTE[k % len(DEFAULT_PALETTE)]
+    return rgb, cm, [notes[order.index(k)] for k in range(len(chars))]
 
 
 class H3MDKeyframeRecast:
     """0.5.91: SCAIL-2 character replacement, wired as ComfyUI's official template 'Character Replacement (SCAIL-2
     Int8)': the SCAIL-2 model + DPO LoRA + lightx2v distill LoRA, shift 5, 6 steps, CFG 1, replacement mode.  For
     every keyframe it is driven by SCAIL_LEN source frames around it; SAM3 tracks them and the recast people are
-    painted in SCAIL-2's trained colours (picture order); the reference picture holds the characters side by side
-    in the same colours.  The keyframe is the generated frame at the keyframe's place.  Everybody not recast and the
+    painted in SCAIL-2's trained colours (picture order); the reference picture is aligned with the keyframe: each
+    character cut out of her picture and put where the person she replaces stands, head on head at the same size,
+    in the same colour (test 15:35: characters side by side were drawn into wide shots as extra giant people and
+    swapped faces when the people stood in another order).  The keyframe is the generated frame at the keyframe's place.  Everybody not recast and the
     background come from the source.  H3 Image (tests 2026-11-20 13:58 / 14:24 / 14:42: reposed, rescaled or
     reframed the people even with masks) is gone."""
 
@@ -773,6 +816,8 @@ class H3MDKeyframeRecast:
         patchers = [sam] + ([sclip.patcher] if getattr(sclip, "patcher", None) is not None else [])
         try:
             cond = nodes.CLIPTextEncode().encode(sclip, "person")[0]
+            cond_head = nodes.CLIPTextEncode().encode(sclip, "head")[0]
+            cut_cache = {}
             for m in job["moments"]:
                 if not m["items"]:
                     continue
@@ -788,32 +833,27 @@ class H3MDKeyframeRecast:
                 people = [[it["own"][0] / W, it["own"][1] / H, it["own"][2] / W, it["own"][3] / H]
                           for it in m["items"]]
                 got = K.match_people(objs, people)
-                sheet, cols = reference_sheet(refs, gw, gh)
-                rtrack = SAM3_VideoTrack.execute(images=torch.from_numpy(sheet.astype(np.float32) / 255.0)[None],
-                                                 model=sam, conditioning=cond, detection_threshold=self.THRESHOLD,
-                                                 max_objects=2 * len(refs),
-                                                 detect_interval=self.DETECT_INTERVAL).result[0]
-                rboxes, _ = _boxes_at(rtrack, 0)
-                robjs = []
-                for o in range(max(rboxes) + 1 if rboxes else 0):
-                    bx = rboxes.get(o)
-                    robjs.append(((bx[0] + bx[2]) / 2 * gw, (bx[2] - bx[0]) * (bx[3] - bx[1])) if bx else (-1, 0))
-                rgot = K.column_objects(robjs, cols)
-                keep = [j for j in range(len(refs)) if got[j] is not None and rgot[j] is not None]
-                notes = [f"picture {m['items'][j]['picture']} (left {m['items'][j]['left']}): "
-                         + ("not found in the piece around the keyframe" if got[j] is None else
-                            "no person found in its picture") + " - left as in the source"
-                         for j in range(len(refs)) if j not in keep]
+                keep = [j for j in range(len(refs)) if got[j] is not None]
+                notes = [f"picture {m['items'][j]['picture']} (left {m['items'][j]['left']}): not found in the "
+                         "piece around the keyframe - left as in the source" for j in range(len(refs)) if j not in keep]
                 if keep:
+                    heads = [b_ for b_, _ in _detect(sam, drive[ki:ki + 1], cond_head, self.THRESHOLD)]
+                    chars, targets = [], []
+                    for j in keep:
+                        p_ = m["items"][j]["picture"]
+                        if p_ not in cut_cache:
+                            cut_cache[p_] = cut_character(sam, refs[j], cond, cond_head, self.THRESHOLD)
+                        chars.append(cut_cache[p_])
+                        ob = objs[got[j]]
+                        tb = [ob[0] * gw, ob[1] * gh, ob[2] * gw, ob[3] * gh]
+                        targets.append((tb, K.pick_head(tb, heads)))
+                    ref_rgb, ref_cm, how = aligned_reference(chars, targets, gw, gh)
+                    notes += [f"picture {m['items'][j]['picture']}: placed {how[k]} on {how[k]}"
+                              + ("" if how[k] == "head" else " (no head found - whole figure on the person's box)")
+                              for k, j in enumerate(keep)]
                     pose_mask = _render_colored_masks(_subset_track_data(track, [got[j] for j in keep]), "white")
-                    ref_mask = _render_colored_masks(_subset_track_data(rtrack, [rgot[j] for j in keep]), "black")
-                    ref_img = torch.from_numpy(sheet.astype(np.float32) / 255.0)[None]
-                    if len(keep) < len(refs):        # a column without its person must not stay in the reference
-                        cm = np.zeros((gh, gw, 1), np.float32)
-                        for j in keep:
-                            x0, y0, x1, y1 = cols[j]
-                            cm[:, x0:x1] = 1.0
-                        ref_img = ref_img * torch.from_numpy(cm)[None]
+                    ref_mask = torch.from_numpy(ref_cm)[None]
+                    ref_img = torch.from_numpy(ref_rgb.astype(np.float32) / 255.0)[None]
                     prompt = K.scail_prompt([{"rank": m["items"][j]["rank"], "desc": m["items"][j].get("desc", "")}
                                              for j in keep])
                 else:

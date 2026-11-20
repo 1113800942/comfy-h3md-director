@@ -38,12 +38,21 @@ def test_match_people_by_overlap():
     assert K.match_people({0: [0.1, 0.1, 0.3, 0.9]}, [[0.1, 0.1, 0.3, 0.9], [0.11, 0.1, 0.3, 0.9]]).count(0) == 1
 
 
-def test_reference_columns():
-    cols = K.ref_columns(3, 1248, 736)
-    assert len(cols) == 3 and cols[0][0] < cols[1][0] < cols[2][0] and cols[2][2] <= 1248
-    assert all(x1 > x0 and y1 > y0 for x0, y0, x1, y1 in cols)
-    objs = [(1000.0, 5.0), (100.0, 9.0), (150.0, 2.0), (-1, 0)]   # column 1: biggest wins; column 2 empty
-    assert K.column_objects(objs, cols) == [1, None, 0]
+def test_pick_head():
+    person = [100, 50, 200, 450]
+    heads = [[130, 55, 170, 100], [210, 60, 250, 105], [140, 300, 160, 320]]   # hers, a neighbour's, a knee
+    assert K.pick_head(person, heads) == [130, 55, 170, 100]
+    assert K.pick_head(person, [[210, 60, 250, 105]]) is None and K.pick_head(person, []) is None
+
+
+def test_place_character_head_on_head():
+    # half-body photo, head 100 px tall at (450..550, 100..200); the target head 20 px at (190..210, 40..60)
+    s, dx, dy, how = K.place_character([150, 40, 250, 400], [0, 0, 1000, 1200], [190, 40, 210, 60],
+                                       [450, 100, 550, 200])
+    assert how == "head" and abs(s - 0.2) < 1e-9
+    assert abs(500 * s + dx - 200) < 1e-6 and abs(100 * s + dy - 40) < 1e-6   # head middle and top land on hers
+    s, dx, dy, how = K.place_character([150, 40, 250, 400], [100, 0, 300, 720])
+    assert how == "figure" and abs(s - 0.5) < 1e-9 and abs(200 * s + dx - 200) < 1e-6 and abs(dy - 40) < 1e-6
 
 
 def test_scail_prompt_names_people_by_place():

@@ -748,22 +748,34 @@ def match_people(obj_boxes, people_boxes, min_iou=SCAIL_MATCH_IOU):
     return out
 
 
-def ref_columns(n, w, h, pad=0.04):
-    """0.5.91: the reference picture SCAIL-2 takes holds every character side by side: n columns of the w x h canvas
-    -> [(x0, y0, x1, y1)] in pixels, left to right"""
-    cw = w / float(n)
-    p = int(round(pad * min(cw, h)))
-    return [(int(round(i * cw)) + p, p, int(round((i + 1) * cw)) - p, h - p) for i in range(n)]
+def pick_head(person, heads):
+    """0.5.91: the head of a person: of the head boxes found in the frame (x0, y0, x1, y1 px), the one whose centre
+    is inside her box, in its upper part, and nearest its top middle.  -> box or None"""
+    x0, y0, x1, y1 = person
+    w, h = max(1.0, x1 - x0), max(1.0, y1 - y0)
+    best = None
+    for b in heads or []:
+        cx, cy = (b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0
+        if not (x0 <= cx <= x1 and y0 - 0.1 * h <= cy <= y0 + 0.6 * h):
+            continue
+        d = abs(cx - (x0 + x1) / 2.0) / w + (cy - y0) / h
+        if best is None or d < best[0]:
+            best = (d, list(b))
+    return best[1] if best else None
 
 
-def column_objects(objs, cols):
-    """0.5.91: the person found in each column of the reference picture.  objs = [(centre x px, area)] of the
-    tracked objects -> [object index or None] per column (the biggest one whose centre is in the column)"""
-    out = []
-    for x0, _, x1, _ in cols:
-        inside = [(a, o) for o, (cx, a) in enumerate(objs) if x0 <= cx < x1 and a > 0]
-        out.append(max(inside)[1] if inside else None)
-    return out
+def place_character(t_box, c_box, t_head=None, c_head=None):
+    """0.5.91: where a character picture goes on the SCAIL-2 reference (aligned with the keyframe): scale s and
+    shift (dx, dy) so that picture pixel (x, y) lands on (x * s + dx, y * s + dy).  Head on head (same size, same
+    top, same middle) when both heads are known - right for a half-body photo and a full-body one alike; else her
+    whole figure on the person's box (same height, same top, same middle)."""
+    if t_head and c_head:
+        tw, th = t_head[2] - t_head[0], t_head[3] - t_head[1]
+        cw, ch = c_head[2] - c_head[0], c_head[3] - c_head[1]
+        s = math.sqrt(max(1e-6, tw * th) / max(1e-6, cw * ch))
+        return s, (t_head[0] + t_head[2]) / 2.0 - s * (c_head[0] + c_head[2]) / 2.0, t_head[1] - s * c_head[1], "head"
+    s = (t_box[3] - t_box[1]) / max(1e-6, c_box[3] - c_box[1])
+    return s, (t_box[0] + t_box[2]) / 2.0 - s * (c_box[0] + c_box[2]) / 2.0, t_box[1] - s * c_box[1], "figure"
 
 
 def frame_rank(own, others):
