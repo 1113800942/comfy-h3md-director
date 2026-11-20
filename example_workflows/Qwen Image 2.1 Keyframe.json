@@ -1,1463 +1,1475 @@
 {
-  "id": "h3md-keyframe-qwen21",
-  "revision": 0,
-  "last_node_id": 59,
-  "last_link_id": 41,
-  "nodes": [
+ "id": "h3md-keyframe-qwen21",
+ "revision": 0,
+ "last_node_id": 59,
+ "last_link_id": 41,
+ "nodes": [
+  {
+   "id": 1,
+   "type": "LoadImage",
+   "pos": [
+    -1300,
+    100
+   ],
+   "size": [
+    300,
+    330
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
     {
-      "id": 1,
-      "type": "LoadImage",
-      "pos": [
-        -1300,
-        100
-      ],
-      "size": [
-        300,
-        330
-      ],
-      "flags": {},
-      "order": 1,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "localized_name": "IMAGE",
-          "name": "IMAGE",
-          "type": "IMAGE",
-          "links": [
-            1
-          ]
-        },
-        {
-          "localized_name": "MASK",
-          "name": "MASK",
-          "type": "MASK",
-          "links": []
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "LoadImage"
-      },
-      "widgets_values": [
-        "character_1.png",
-        "image"
-      ],
-      "title": "图1 Picture 1"
+     "localized_name": "IMAGE",
+     "name": "IMAGE",
+     "type": "IMAGE",
+     "links": [
+      1
+     ]
     },
     {
-      "id": 2,
-      "type": "LoadImage",
-      "pos": [
-        -1300,
-        460
-      ],
-      "size": [
-        300,
-        330
-      ],
-      "flags": {},
-      "order": 2,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "localized_name": "IMAGE",
-          "name": "IMAGE",
-          "type": "IMAGE",
-          "links": [
-            2
-          ]
-        },
-        {
-          "localized_name": "MASK",
-          "name": "MASK",
-          "type": "MASK",
-          "links": []
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "LoadImage"
-      },
-      "widgets_values": [
-        "character_2.png",
-        "image"
-      ],
-      "title": "图2 Picture 2"
-    },
-    {
-      "id": 3,
-      "type": "LoadImage",
-      "pos": [
-        -1300,
-        820
-      ],
-      "size": [
-        300,
-        330
-      ],
-      "flags": {},
-      "order": 3,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "localized_name": "IMAGE",
-          "name": "IMAGE",
-          "type": "IMAGE",
-          "links": [
-            3
-          ]
-        },
-        {
-          "localized_name": "MASK",
-          "name": "MASK",
-          "type": "MASK",
-          "links": []
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "LoadImage"
-      },
-      "widgets_values": [
-        "character_3.png",
-        "image"
-      ],
-      "title": "图3 Picture 3"
-    },
-    {
-      "id": 10,
-      "type": "H3MDKeyframePrepare",
-      "pos": [
-        -950,
-        100
-      ],
-      "size": [
-        420,
-        640
-      ],
-      "flags": {},
-      "order": 10,
-      "mode": 0,
-      "inputs": [
-        {
-          "localized_name": "video",
-          "name": "video",
-          "type": "STRING",
-          "widget": {
-            "name": "video"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "mapping",
-          "name": "mapping",
-          "type": "STRING",
-          "widget": {
-            "name": "mapping"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "descriptions",
-          "name": "descriptions",
-          "type": "STRING",
-          "widget": {
-            "name": "descriptions"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "people_at_start",
-          "name": "people_at_start",
-          "type": "STRING",
-          "widget": {
-            "name": "people_at_start"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "max_gap_s",
-          "name": "max_gap_s",
-          "type": "FLOAT",
-          "widget": {
-            "name": "max_gap_s"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "prompt_language",
-          "name": "prompt_language",
-          "type": "COMBO",
-          "widget": {
-            "name": "prompt_language"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "threshold",
-          "name": "threshold",
-          "type": "FLOAT",
-          "widget": {
-            "name": "threshold"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "max_people",
-          "name": "max_people",
-          "type": "INT",
-          "widget": {
-            "name": "max_people"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "picture_1",
-          "name": "picture_1",
-          "type": "IMAGE",
-          "shape": 7,
-          "link": 1
-        },
-        {
-          "localized_name": "picture_2",
-          "name": "picture_2",
-          "type": "IMAGE",
-          "shape": 7,
-          "link": 2
-        },
-        {
-          "localized_name": "picture_3",
-          "name": "picture_3",
-          "type": "IMAGE",
-          "shape": 7,
-          "link": 3
-        },
-        {
-          "localized_name": "picture_4",
-          "name": "picture_4",
-          "type": "IMAGE",
-          "shape": 7,
-          "link": null
-        },
-        {
-          "localized_name": "picture_5",
-          "name": "picture_5",
-          "type": "IMAGE",
-          "shape": 7,
-          "link": null
-        },
-        {
-          "localized_name": "source_video",
-          "name": "source_video",
-          "type": "VIDEO",
-          "shape": 7,
-          "link": 30
-        },
-        {
-          "localized_name": "start_s",
-          "name": "start_s",
-          "shape": 7,
-          "type": "FLOAT",
-          "widget": {
-            "name": "start_s"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "end_s",
-          "name": "end_s",
-          "shape": 7,
-          "type": "FLOAT",
-          "widget": {
-            "name": "end_s"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "localized_name": "crops",
-          "name": "crops",
-          "type": "IMAGE",
-          "shape": 6,
-          "links": []
-        },
-        {
-          "localized_name": "pictures",
-          "name": "pictures",
-          "type": "IMAGE",
-          "shape": 6,
-          "links": [
-            32
-          ]
-        },
-        {
-          "localized_name": "prompts",
-          "name": "prompts",
-          "type": "STRING",
-          "shape": 6,
-          "links": []
-        },
-        {
-          "localized_name": "job",
-          "name": "job",
-          "type": "H3MD_KEYFRAME_JOB",
-          "links": [
-            31
-          ]
-        },
-        {
-          "localized_name": "people_sheet",
-          "name": "people_sheet",
-          "type": "IMAGE",
-          "links": [
-            4
-          ]
-        },
-        {
-          "localized_name": "info",
-          "name": "info",
-          "type": "STRING",
-          "links": [
-            5
-          ]
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "H3MDKeyframePrepare"
-      },
-      "widgets_values": [
-        "",
-        "图1换左二\n图2换左三\n图3换左五",
-        "a young European woman in her mid twenties with a fair oval face, grey-blue eyes and long wavy blonde hair, in a white ribbed tank top, long black jeans and white sneakers\na European man around thirty with a strong square jaw, hazel eyes, a well-trimmed short beard and short dark brown hair, in a beige trench coat over a white shirt, dark grey trousers and brown leather shoes\nan East Asian man in his mid twenties with a clean-shaven face, dark almond-shaped eyes and short black hair trimmed close at the sides, a muscular build, in a fitted black T-shirt, long dark blue jeans and black sneakers",
-        "",
-        5.0,
-        "en",
-        0.4,
-        8,
-        0.0,
-        0.0
-      ]
-    },
-    {
-      "id": 11,
-      "type": "PreviewImage",
-      "pos": [
-        -950,
-        800
-      ],
-      "size": [
-        420,
-        300
-      ],
-      "flags": {},
-      "order": 11,
-      "mode": 0,
-      "inputs": [
-        {
-          "localized_name": "images",
-          "name": "images",
-          "type": "IMAGE",
-          "link": 4
-        }
-      ],
-      "outputs": [],
-      "properties": {
-        "Node name for S&R": "PreviewImage"
-      },
-      "widgets_values": [],
-      "title": "认人表 People (check numbers)"
-    },
-    {
-      "id": 12,
-      "type": "PreviewAny",
-      "pos": [
-        -950,
-        1150
-      ],
-      "size": [
-        420,
-        260
-      ],
-      "flags": {},
-      "order": 12,
-      "mode": 0,
-      "inputs": [
-        {
-          "localized_name": "source",
-          "name": "source",
-          "type": "*",
-          "link": 5
-        }
-      ],
-      "outputs": [],
-      "properties": {
-        "Node name for S&R": "PreviewAny"
-      },
-      "widgets_values": [],
-      "title": "Info"
-    },
-    {
-      "id": 20,
-      "type": "UNETLoader",
-      "pos": [
-        -450,
-        100
-      ],
-      "size": [
-        360,
-        90
-      ],
-      "flags": {},
-      "order": 20,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "localized_name": "MODEL",
-          "name": "MODEL",
-          "type": "MODEL",
-          "links": [
-            6
-          ]
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "UNETLoader",
-        "models": [
-          {
-            "name": "qwen_image_2.1_int8_convrot.safetensors",
-            "directory": "diffusion_models",
-            "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_int8_convrot.safetensors"
-          }
-        ]
-      },
-      "widgets_values": [
-        "qwen_image_2.1_int8_convrot.safetensors",
-        "default"
-      ]
-    },
-    {
-      "id": 21,
-      "type": "LoraLoaderModelOnly",
-      "pos": [
-        -450,
-        230
-      ],
-      "size": [
-        360,
-        90
-      ],
-      "flags": {},
-      "order": 21,
-      "mode": 0,
-      "inputs": [
-        {
-          "localized_name": "model",
-          "name": "model",
-          "type": "MODEL",
-          "link": 6
-        }
-      ],
-      "outputs": [
-        {
-          "localized_name": "MODEL",
-          "name": "MODEL",
-          "type": "MODEL",
-          "links": [
-            7
-          ]
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "LoraLoaderModelOnly"
-      },
-      "widgets_values": [
-        "qwen_image_2.1_dmd2_2steps.safetensors",
-        1.0
-      ],
-      "title": "2-step LoRA (DMD2)"
-    },
-    {
-      "id": 22,
-      "type": "ModelSamplingAuraFlow",
-      "pos": [
-        -450,
-        360
-      ],
-      "size": [
-        360,
-        60
-      ],
-      "flags": {},
-      "order": 22,
-      "mode": 0,
-      "inputs": [
-        {
-          "localized_name": "model",
-          "name": "model",
-          "type": "MODEL",
-          "link": 7
-        }
-      ],
-      "outputs": [
-        {
-          "localized_name": "MODEL",
-          "name": "MODEL",
-          "type": "MODEL",
-          "links": [
-            34
-          ]
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "ModelSamplingAuraFlow"
-      },
-      "widgets_values": [
-        1.0
-      ]
-    },
-    {
-      "id": 23,
-      "type": "CLIPLoader",
-      "pos": [
-        -450,
-        460
-      ],
-      "size": [
-        360,
-        110
-      ],
-      "flags": {},
-      "order": 23,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "localized_name": "CLIP",
-          "name": "CLIP",
-          "type": "CLIP",
-          "links": [
-            35
-          ]
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "CLIPLoader",
-        "models": [
-          {
-            "name": "qwen3vl_8b_int8_convrot.safetensors",
-            "directory": "text_encoders",
-            "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors"
-          }
-        ]
-      },
-      "widgets_values": [
-        "qwen3vl_8b_int8_convrot.safetensors",
-        "qwen_image",
-        "default"
-      ]
-    },
-    {
-      "id": 24,
-      "type": "VAELoader",
-      "pos": [
-        -450,
-        610
-      ],
-      "size": [
-        360,
-        60
-      ],
-      "flags": {},
-      "order": 24,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "localized_name": "VAE",
-          "name": "VAE",
-          "type": "VAE",
-          "links": [
-            36
-          ]
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "VAELoader",
-        "models": [
-          {
-            "name": "qwen_image_2.1_vae_bf16.safetensors",
-            "directory": "vae",
-            "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors"
-          }
-        ]
-      },
-      "widgets_values": [
-        "qwen_image_2.1_vae_bf16.safetensors"
-      ]
-    },
-    {
-      "id": 28,
-      "type": "KSamplerSelect",
-      "pos": [
-        -50,
-        400
-      ],
-      "size": [
-        300,
-        60
-      ],
-      "flags": {},
-      "order": 28,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "localized_name": "SAMPLER",
-          "name": "SAMPLER",
-          "type": "SAMPLER",
-          "links": [
-            37
-          ]
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "KSamplerSelect"
-      },
-      "widgets_values": [
-        "euler"
-      ]
-    },
-    {
-      "id": 29,
-      "type": "ManualSigmas",
-      "pos": [
-        -50,
-        500
-      ],
-      "size": [
-        300,
-        60
-      ],
-      "flags": {},
-      "order": 29,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "localized_name": "SIGMAS",
-          "name": "SIGMAS",
-          "type": "SIGMAS",
-          "links": [
-            38
-          ]
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "ManualSigmas"
-      },
-      "widgets_values": [
-        "1.0, 0.5, 0"
-      ]
-    },
-    {
-      "id": 32,
-      "type": "PreviewImage",
-      "pos": [
-        300,
-        520
-      ],
-      "size": [
-        300,
-        300
-      ],
-      "flags": {},
-      "order": 32,
-      "mode": 0,
-      "inputs": [
-        {
-          "localized_name": "images",
-          "name": "images",
-          "type": "IMAGE",
-          "link": 39
-        }
-      ],
-      "outputs": [],
-      "properties": {
-        "Node name for S&R": "PreviewImage"
-      },
-      "widgets_values": [],
-      "title": "Recast keyframes (whole frame)"
-    },
-    {
-      "id": 40,
-      "type": "H3MDKeyframeAssemble",
-      "pos": [
-        650,
-        100
-      ],
-      "size": [
-        340,
-        160
-      ],
-      "flags": {},
-      "order": 40,
-      "mode": 0,
-      "inputs": [
-        {
-          "localized_name": "job",
-          "name": "job",
-          "type": "H3MD_KEYFRAME_JOB",
-          "link": 41
-        },
-        {
-          "localized_name": "edited",
-          "name": "edited",
-          "type": "IMAGE",
-          "link": 40
-        },
-        {
-          "localized_name": "name",
-          "name": "name",
-          "type": "STRING",
-          "widget": {
-            "name": "name"
-          },
-          "link": null
-        },
-        {
-          "localized_name": "save_zip",
-          "name": "save_zip",
-          "type": "BOOLEAN",
-          "widget": {
-            "name": "save_zip"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "localized_name": "keyframes_sheet",
-          "name": "keyframes_sheet",
-          "type": "IMAGE",
-          "links": [
-            28
-          ]
-        },
-        {
-          "localized_name": "plan_json",
-          "name": "plan_json",
-          "type": "STRING",
-          "links": []
-        },
-        {
-          "localized_name": "zip_path",
-          "name": "zip_path",
-          "type": "STRING",
-          "links": [
-            29
-          ]
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "H3MDKeyframeAssemble"
-      },
-      "widgets_values": [
-        "multiswap",
-        true
-      ]
-    },
-    {
-      "id": 41,
-      "type": "PreviewImage",
-      "pos": [
-        1020,
-        100
-      ],
-      "size": [
-        520,
-        420
-      ],
-      "flags": {},
-      "order": 41,
-      "mode": 0,
-      "inputs": [
-        {
-          "localized_name": "images",
-          "name": "images",
-          "type": "IMAGE",
-          "link": 28
-        }
-      ],
-      "outputs": [],
-      "properties": {
-        "Node name for S&R": "PreviewImage"
-      },
-      "widgets_values": [],
-      "title": "关键帧总览 Keyframes"
-    },
-    {
-      "id": 42,
-      "type": "PreviewAny",
-      "pos": [
-        1020,
-        560
-      ],
-      "size": [
-        520,
-        120
-      ],
-      "flags": {},
-      "order": 42,
-      "mode": 0,
-      "inputs": [
-        {
-          "localized_name": "source",
-          "name": "source",
-          "type": "*",
-          "link": 29
-        }
-      ],
-      "outputs": [],
-      "properties": {
-        "Node name for S&R": "PreviewAny"
-      },
-      "widgets_values": [],
-      "title": "Plan zip"
-    },
-    {
-      "id": 50,
-      "type": "MarkdownNote",
-      "pos": [
-        -1300,
-        1200
-      ],
-      "size": [
-        700,
-        760
-      ],
-      "flags": {},
-      "order": 50,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [],
-      "properties": {
-        "Node name for S&R": "MarkdownNote"
-      },
-      "widgets_values": [
-        "**0.5.7：串行换人** — Recast 节点一个人一个人修，后一个人从已换好前面人的帧上裁。原角色轮廓大（cos 服、长假发、尾巴）把 mask_grow 调到 0.25-0.35。\n\n## H3MD 多人换人：关键帧 + 计划包（H3MD 0.5.5）\n\n**做什么**：一次运行把原片里要换的人在几个时刻画成新角色（关键帧），再写好 Remake 计划，打成计划包 zip。之后到导演台出片：打开 `H3MD Director Remake.json` →「导入计划」选这个 zip → 运行。\n\n**怎么用**\n1. 把原片拖进左上角的「Source video 原片」（加载视频）节点。只想换其中一段，就在 Prepare 填 `start_s`（起始秒）和 `end_s`（结束秒，0 = 到片尾），这一段连同原声截出来当原片用。横屏出 1664×960，竖屏出 960×1664（居中裁）。\n2. 角色图接到 picture_1…5。\n3. `mapping` 写\"图1换左二\"：人按**开头第一帧清楚的画面从左到右**编号，先跑一次看「认人表」核对编号。\n4. `descriptions` 每张图一行：人种、年龄、长相、发型、每件衣服（建议英文，会写进 Remake 提示词）。**必须照你自己的图写对**：示例三行写的是示例里的三张角色图，换了图就要改；性别、人种、衣服写反了，修图会照错的画。`people_at_start` 可选：原片开头从左到右每人一行现在的样子，帮修图认准人。\n5. 运行。看「关键帧总览」，满意就去导演台导入 `output/H3MD_plans/<名字>.zip`；不满意换修图种子再跑。\n\n**修图模型可以换**：中间这组是示例（Qwen Image 2.1 编辑 + 2 步 LoRA，提示词直接用 Prepare 写好的，不做增强）。换成任何\"图1 + 图2 + 提示词 → 新图\"的编辑模型都行：输入接 Prepare 的 crops（图1）、pictures（图2）、prompts，输出接 Assemble 的 edited。\n\n**效果上限**：被换的人和角色发型长短、体型、性别接近时最好；差很多时不完美，但能用。人走出画面再回来可能被当成新的人（看 info 里的提醒）。\n\n---\n\n**What it does**: one run redraws the recast people at a few moments (keyframes), writes the Remake plan and packs a plan zip. Then open `H3MD Director Remake.json`, Import plan → the zip, run.\n\n**Steps**: drag the source video into the \"Source video\" (Load Video) node, optional `start_s` / `end_s` to recast only that part (cut with its sound); character pictures on picture_1…5; `mapping` like \"picture 1 -> left 2\" (people numbered **left to right in the first clear frame**: check the people sheet); one description line per picture (race, age, face, hair, every garment) - **it must match your own picture**: the three example lines describe the example pictures; if a line contradicts the picture (gender, race, clothes) the edit follows the wrong text; run; check the keyframe sheet.\n\n**Any image-edit model works in the middle**: crops = image 1, pictures = image 2, prompts = prompt, its output → Assemble `edited`.\n\n**Models (this example)**: Qwen Image 2.1 int8 / text encoder / VAE from [Comfy-Org/Qwen-Image-2.1](https://huggingface.co/Comfy-Org/Qwen-Image-2.1); 2-step LoRA [linoyts/Qwen-Image-2.1-DMD2-2steps](https://huggingface.co/linoyts/Qwen-Image-2.1-DMD2-2steps) (sigmas 1.0, 0.5, 0; shift 1; cfg 1); people tracking: ComfyUI core SAM3.1 `sam3.1_multiplex_fp16.safetensors` in models/checkpoints.\n"
-      ],
-      "title": "Note: 怎么用 How to use"
-    },
-    {
-      "id": 51,
-      "type": "Label (rgthree)",
-      "pos": [
-        -1260,
-        -530
-      ],
-      "size": [
-        1984,
-        120
-      ],
-      "flags": {
-        "allow_interaction": true
-      },
-      "order": 23,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [],
-      "title": "Qwen Image 2.1 Keyframe 关键帧",
-      "properties": {
-        "fontSize": 120,
-        "fontFamily": "Arial",
-        "fontColor": "#ffff00",
-        "textAlign": "left",
-        "backgroundColor": "transparent",
-        "padding": 0,
-        "borderRadius": 0,
-        "angle": 0
-      },
-      "color": "#fff0",
-      "bgcolor": "#fff0"
-    },
-    {
-      "id": 52,
-      "type": "Label (rgthree)",
-      "pos": [
-        744,
-        -450
-      ],
-      "size": [
-        75,
-        30
-      ],
-      "flags": {
-        "allow_interaction": true
-      },
-      "order": 24,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [],
-      "title": "by YJ",
-      "properties": {
-        "fontSize": 30,
-        "fontFamily": "Arial",
-        "fontColor": "#ffffff",
-        "textAlign": "center",
-        "backgroundColor": "transparent",
-        "padding": 0,
-        "borderRadius": 0,
-        "angle": 0
-      },
-      "color": "#fff0",
-      "bgcolor": "#fff0"
-    },
-    {
-      "id": 53,
-      "type": "Label (rgthree)",
-      "pos": [
-        -1250,
-        -380
-      ],
-      "size": [
-        798,
-        40
-      ],
-      "flags": {
-        "allow_interaction": true
-      },
-      "order": 25,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [],
-      "title": "https://huggingface.co/yj0942/H3MD-Director",
-      "properties": {
-        "fontSize": 40,
-        "fontFamily": "Arial",
-        "fontColor": "#ffffff",
-        "textAlign": "left",
-        "backgroundColor": "transparent",
-        "padding": 0,
-        "borderRadius": 0,
-        "angle": 0
-      },
-      "color": "#fff0",
-      "bgcolor": "#fff0"
-    },
-    {
-      "id": 54,
-      "type": "Label (rgthree)",
-      "pos": [
-        -330,
-        -380
-      ],
-      "size": [
-        921,
-        40
-      ],
-      "flags": {
-        "allow_interaction": true
-      },
-      "order": 26,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [],
-      "title": "https://github.com/1113800942/comfy-h3md-director",
-      "properties": {
-        "fontSize": 40,
-        "fontFamily": "Arial",
-        "fontColor": "#ffffff",
-        "textAlign": "left",
-        "backgroundColor": "transparent",
-        "padding": 0,
-        "borderRadius": 0,
-        "angle": 0
-      },
-      "color": "#fff0",
-      "bgcolor": "#fff0"
-    },
-    {
-      "id": 55,
-      "type": "Label (rgthree)",
-      "pos": [
-        -1180,
-        -280
-      ],
-      "size": [
-        690,
-        40
-      ],
-      "flags": {
-        "allow_interaction": true
-      },
-      "order": 27,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [],
-      "title": "https://civitai.com/user/1113800942188",
-      "properties": {
-        "fontSize": 40,
-        "fontFamily": "Arial",
-        "fontColor": "#ffffff",
-        "textAlign": "left",
-        "backgroundColor": "transparent",
-        "padding": 0,
-        "borderRadius": 0,
-        "angle": 0
-      },
-      "color": "#fff0",
-      "bgcolor": "#fff0"
-    },
-    {
-      "id": 56,
-      "type": "Label (rgthree)",
-      "pos": [
-        -200,
-        -280
-      ],
-      "size": [
-        898,
-        40
-      ],
-      "flags": {
-        "allow_interaction": true
-      },
-      "order": 28,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [],
-      "title": "B站：YJ0942, https://space.bilibili.com/299509194",
-      "properties": {
-        "fontSize": 40,
-        "fontFamily": "Arial",
-        "fontColor": "#ffffff",
-        "textAlign": "left",
-        "backgroundColor": "transparent",
-        "padding": 0,
-        "borderRadius": 0,
-        "angle": 0
-      },
-      "color": "#fff0",
-      "bgcolor": "#fff0"
-    },
-    {
-      "id": 57,
-      "type": "Label (rgthree)",
-      "pos": [
-        -1250,
-        -180
-      ],
-      "size": [
-        940,
-        40
-      ],
-      "flags": {
-        "allow_interaction": true
-      },
-      "order": 29,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [],
-      "title": "Youtube: YJ0942, https://www.youtube.com/@yj0942",
-      "properties": {
-        "fontSize": 40,
-        "fontFamily": "Arial",
-        "fontColor": "#ffffff",
-        "textAlign": "left",
-        "backgroundColor": "transparent",
-        "padding": 0,
-        "borderRadius": 0,
-        "angle": 0
-      },
-      "color": "#fff0",
-      "bgcolor": "#fff0"
-    },
-    {
-      "id": 58,
-      "type": "Label (rgthree)",
-      "pos": [
-        -260,
-        -180
-      ],
-      "size": [
-        864,
-        40
-      ],
-      "flags": {
-        "allow_interaction": true
-      },
-      "order": 30,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [],
-      "title": "https://www.runninghub.ai?inviteCode=aolwbd1n",
-      "properties": {
-        "fontSize": 40,
-        "fontFamily": "Arial",
-        "fontColor": "#ffffff",
-        "textAlign": "left",
-        "backgroundColor": "transparent",
-        "padding": 0,
-        "borderRadius": 0,
-        "angle": 0
-      },
-      "color": "#fff0",
-      "bgcolor": "#fff0"
-    },
-    {
-      "id": 59,
-      "type": "LoadVideo",
-      "pos": [
-        -1680,
-        100
-      ],
-      "size": [
-        340,
-        560
-      ],
-      "flags": {},
-      "order": 0,
-      "mode": 0,
-      "inputs": [
-        {
-          "localized_name": "file",
-          "name": "file",
-          "type": "COMBO",
-          "widget": {
-            "name": "file"
-          },
-          "link": null
-        }
-      ],
-      "outputs": [
-        {
-          "localized_name": "VIDEO",
-          "name": "VIDEO",
-          "type": "VIDEO",
-          "links": [
-            30
-          ]
-        }
-      ],
-      "title": "Source video 原片（拖进来）",
-      "properties": {
-        "Node name for S&R": "LoadVideo"
-      },
-      "widgets_values": [
-        "source_video.mp4",
-        "image"
-      ]
-    },
-    {
-      "id": 33,
-      "type": "H3MDKeyframeRecast",
-      "pos": [
-        -50,
-        100
-      ],
-      "size": [
-        420,
-        330
-      ],
-      "flags": {},
-      "order": 27,
-      "mode": 0,
-      "title": "H3MD Keyframe 1b: Recast 整帧换人 0.5.9",
-      "inputs": [
-        {
-          "name": "job",
-          "type": "H3MD_KEYFRAME_JOB",
-          "link": 31
-        },
-        {
-          "name": "pictures",
-          "type": "IMAGE",
-          "link": 32
-        },
-        {
-          "name": "model",
-          "type": "MODEL",
-          "link": 34
-        },
-        {
-          "name": "clip",
-          "type": "CLIP",
-          "link": 35
-        },
-        {
-          "name": "vae",
-          "type": "VAE",
-          "link": 36
-        },
-        {
-          "name": "sampler",
-          "type": "SAMPLER",
-          "link": 37
-        },
-        {
-          "name": "sigmas",
-          "type": "SIGMAS",
-          "link": 38
-        }
-      ],
-      "outputs": [
-        {
-          "name": "keyframes",
-          "type": "IMAGE",
-          "links": [
-            39,
-            40
-          ],
-          "shape": 6
-        },
-        {
-          "name": "job",
-          "type": "H3MD_KEYFRAME_JOB",
-          "links": [
-            41
-          ]
-        },
-        {
-          "name": "prompts",
-          "type": "STRING",
-          "links": null
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "H3MDKeyframeRecast"
-      },
-      "widgets_values": [
-        0,
-        "randomize",
-        1.0
-      ]
+     "localized_name": "MASK",
+     "name": "MASK",
+     "type": "MASK",
+     "links": []
     }
-  ],
-  "links": [
-    [
-      1,
-      1,
-      0,
-      10,
-      8,
-      "IMAGE"
-    ],
-    [
-      2,
-      2,
-      0,
-      10,
-      9,
-      "IMAGE"
-    ],
-    [
-      3,
-      3,
-      0,
-      10,
-      10,
-      "IMAGE"
-    ],
-    [
-      4,
-      10,
-      4,
-      11,
-      0,
-      "IMAGE"
-    ],
-    [
-      5,
-      10,
-      5,
-      12,
-      0,
-      "STRING"
-    ],
-    [
-      6,
-      20,
-      0,
-      21,
-      0,
-      "MODEL"
-    ],
-    [
-      7,
-      21,
-      0,
-      22,
-      0,
-      "MODEL"
-    ],
-    [
-      28,
-      40,
-      0,
-      41,
-      0,
-      "IMAGE"
-    ],
-    [
-      29,
-      40,
-      2,
-      42,
-      0,
-      "STRING"
-    ],
-    [
-      30,
-      59,
-      0,
-      10,
-      13,
-      "VIDEO"
-    ],
-    [
-      31,
-      10,
-      3,
-      33,
-      0,
-      "H3MD_KEYFRAME_JOB"
-    ],
-    [
-      32,
-      10,
-      1,
-      33,
-      1,
-      "IMAGE"
-    ],
-    [
-      34,
-      22,
-      0,
-      33,
-      3,
-      "MODEL"
-    ],
-    [
-      35,
-      23,
-      0,
-      33,
-      4,
-      "CLIP"
-    ],
-    [
-      36,
-      24,
-      0,
-      33,
-      5,
-      "VAE"
-    ],
-    [
-      37,
-      28,
-      0,
-      33,
-      6,
-      "SAMPLER"
-    ],
-    [
-      38,
-      29,
-      0,
-      33,
-      7,
-      "SIGMAS"
-    ],
-    [
-      39,
-      33,
-      0,
-      32,
-      0,
-      "IMAGE"
-    ],
-    [
-      40,
-      33,
-      0,
-      40,
-      1,
-      "IMAGE"
-    ],
-    [
-      41,
-      33,
-      1,
-      40,
-      0,
-      "H3MD_KEYFRAME_JOB"
-    ]
-  ],
-  "groups": [
-    {
-      "id": 1,
-      "title": "1 认人 + 挑关键帧 Prepare",
-      "bounding": [
-        -1320,
-        20,
-        820,
-        1430
-      ],
-      "color": "#3f789e",
-      "flags": {}
-    },
-    {
-      "id": 2,
-      "title": "2 修图（可换成任何修图模型）Edit - any image-edit model",
-      "bounding": [
-        -470,
-        20,
-        1090,
-        1140
-      ],
-      "color": "#8A8",
-      "flags": {}
-    },
-    {
-      "id": 3,
-      "title": "3 贴回 + 计划包 Assemble",
-      "bounding": [
-        630,
-        20,
-        930,
-        700
-      ],
-      "color": "#b06634",
-      "flags": {}
-    },
-    {
-      "id": 4,
-      "title": "",
-      "bounding": [
-        -1320,
-        -600,
-        2384,
-        520
-      ],
-      "color": "#3f789e",
-      "font_size": 24,
-      "flags": {}
-    }
-  ],
-  "config": {},
-  "extra": {
-    "h3md": "H3MD 0.5.0 multi-person swap keyframes (Qwen Image 2.1 example)",
-    "ds": {
-      "scale": 0.6,
-      "offset": [
-        1400,
-        100
-      ]
-    }
+   ],
+   "properties": {
+    "Node name for S&R": "LoadImage"
+   },
+   "widgets_values": [
+    "character_1.png",
+    "image"
+   ],
+   "title": "图1 Picture 1"
   },
-  "version": 0.4
+  {
+   "id": 2,
+   "type": "LoadImage",
+   "pos": [
+    -1300,
+    460
+   ],
+   "size": [
+    300,
+    330
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "localized_name": "IMAGE",
+     "name": "IMAGE",
+     "type": "IMAGE",
+     "links": [
+      2
+     ]
+    },
+    {
+     "localized_name": "MASK",
+     "name": "MASK",
+     "type": "MASK",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "LoadImage"
+   },
+   "widgets_values": [
+    "character_2.png",
+    "image"
+   ],
+   "title": "图2 Picture 2"
+  },
+  {
+   "id": 3,
+   "type": "LoadImage",
+   "pos": [
+    -1300,
+    820
+   ],
+   "size": [
+    300,
+    330
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "localized_name": "IMAGE",
+     "name": "IMAGE",
+     "type": "IMAGE",
+     "links": [
+      3
+     ]
+    },
+    {
+     "localized_name": "MASK",
+     "name": "MASK",
+     "type": "MASK",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "LoadImage"
+   },
+   "widgets_values": [
+    "character_3.png",
+    "image"
+   ],
+   "title": "图3 Picture 3"
+  },
+  {
+   "id": 10,
+   "type": "H3MDKeyframePrepare",
+   "pos": [
+    -950,
+    100
+   ],
+   "size": [
+    420,
+    640
+   ],
+   "flags": {},
+   "order": 10,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "video",
+     "name": "video",
+     "type": "STRING",
+     "widget": {
+      "name": "video"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "mapping",
+     "name": "mapping",
+     "type": "STRING",
+     "widget": {
+      "name": "mapping"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "descriptions",
+     "name": "descriptions",
+     "type": "STRING",
+     "widget": {
+      "name": "descriptions"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "people_at_start",
+     "name": "people_at_start",
+     "type": "STRING",
+     "widget": {
+      "name": "people_at_start"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "max_gap_s",
+     "name": "max_gap_s",
+     "type": "FLOAT",
+     "widget": {
+      "name": "max_gap_s"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "prompt_language",
+     "name": "prompt_language",
+     "type": "COMBO",
+     "widget": {
+      "name": "prompt_language"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "threshold",
+     "name": "threshold",
+     "type": "FLOAT",
+     "widget": {
+      "name": "threshold"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "max_people",
+     "name": "max_people",
+     "type": "INT",
+     "widget": {
+      "name": "max_people"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "picture_1",
+     "name": "picture_1",
+     "type": "IMAGE",
+     "shape": 7,
+     "link": 1
+    },
+    {
+     "localized_name": "picture_2",
+     "name": "picture_2",
+     "type": "IMAGE",
+     "shape": 7,
+     "link": 2
+    },
+    {
+     "localized_name": "picture_3",
+     "name": "picture_3",
+     "type": "IMAGE",
+     "shape": 7,
+     "link": 3
+    },
+    {
+     "localized_name": "picture_4",
+     "name": "picture_4",
+     "type": "IMAGE",
+     "shape": 7,
+     "link": null
+    },
+    {
+     "localized_name": "picture_5",
+     "name": "picture_5",
+     "type": "IMAGE",
+     "shape": 7,
+     "link": null
+    },
+    {
+     "localized_name": "source_video",
+     "name": "source_video",
+     "type": "VIDEO",
+     "shape": 7,
+     "link": 30
+    },
+    {
+     "localized_name": "start_s",
+     "name": "start_s",
+     "shape": 7,
+     "type": "FLOAT",
+     "widget": {
+      "name": "start_s"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "end_s",
+     "name": "end_s",
+     "shape": 7,
+     "type": "FLOAT",
+     "widget": {
+      "name": "end_s"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "crops",
+     "name": "crops",
+     "type": "IMAGE",
+     "shape": 6,
+     "links": []
+    },
+    {
+     "localized_name": "pictures",
+     "name": "pictures",
+     "type": "IMAGE",
+     "shape": 6,
+     "links": [
+      32
+     ]
+    },
+    {
+     "localized_name": "prompts",
+     "name": "prompts",
+     "type": "STRING",
+     "shape": 6,
+     "links": [
+      33
+     ]
+    },
+    {
+     "localized_name": "job",
+     "name": "job",
+     "type": "H3MD_KEYFRAME_JOB",
+     "links": [
+      31
+     ]
+    },
+    {
+     "localized_name": "people_sheet",
+     "name": "people_sheet",
+     "type": "IMAGE",
+     "links": [
+      4
+     ]
+    },
+    {
+     "localized_name": "info",
+     "name": "info",
+     "type": "STRING",
+     "links": [
+      5
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "H3MDKeyframePrepare"
+   },
+   "widgets_values": [
+    "",
+    "图1换左二\n图2换左三\n图3换左五",
+    "a young European woman in her mid twenties with a fair oval face, grey-blue eyes and long wavy blonde hair, in a white ribbed tank top, long black jeans and white sneakers\na European man around thirty with a strong square jaw, hazel eyes, a well-trimmed short beard and short dark brown hair, in a beige trench coat over a white shirt, dark grey trousers and brown leather shoes\nan East Asian man in his mid twenties with a clean-shaven face, dark almond-shaped eyes and short black hair trimmed close at the sides, a muscular build, in a fitted black T-shirt, long dark blue jeans and black sneakers",
+    "",
+    5.0,
+    "en",
+    0.4,
+    8,
+    0.0,
+    0.0
+   ]
+  },
+  {
+   "id": 11,
+   "type": "PreviewImage",
+   "pos": [
+    -950,
+    800
+   ],
+   "size": [
+    420,
+    300
+   ],
+   "flags": {},
+   "order": 11,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "images",
+     "name": "images",
+     "type": "IMAGE",
+     "link": 4
+    }
+   ],
+   "outputs": [],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "认人表 People (check numbers)"
+  },
+  {
+   "id": 12,
+   "type": "PreviewAny",
+   "pos": [
+    -950,
+    1150
+   ],
+   "size": [
+    420,
+    260
+   ],
+   "flags": {},
+   "order": 12,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "source",
+     "name": "source",
+     "type": "*",
+     "link": 5
+    }
+   ],
+   "outputs": [],
+   "properties": {
+    "Node name for S&R": "PreviewAny"
+   },
+   "widgets_values": [],
+   "title": "Info"
+  },
+  {
+   "id": 20,
+   "type": "UNETLoader",
+   "pos": [
+    -450,
+    100
+   ],
+   "size": [
+    360,
+    90
+   ],
+   "flags": {},
+   "order": 20,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "localized_name": "MODEL",
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      6
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "UNETLoader",
+    "models": [
+     {
+      "name": "qwen_image_2.1_int8_convrot.safetensors",
+      "directory": "diffusion_models",
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/diffusion_models/qwen_image_2.1_int8_convrot.safetensors"
+     }
+    ]
+   },
+   "widgets_values": [
+    "qwen_image_2.1_int8_convrot.safetensors",
+    "default"
+   ]
+  },
+  {
+   "id": 21,
+   "type": "LoraLoaderModelOnly",
+   "pos": [
+    -450,
+    230
+   ],
+   "size": [
+    360,
+    90
+   ],
+   "flags": {},
+   "order": 21,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "model",
+     "name": "model",
+     "type": "MODEL",
+     "link": 6
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "MODEL",
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      7
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "LoraLoaderModelOnly"
+   },
+   "widgets_values": [
+    "qwen_image_2.1_dmd2_2steps.safetensors",
+    1.0
+   ],
+   "title": "2-step LoRA (DMD2)"
+  },
+  {
+   "id": 22,
+   "type": "ModelSamplingAuraFlow",
+   "pos": [
+    -450,
+    360
+   ],
+   "size": [
+    360,
+    60
+   ],
+   "flags": {},
+   "order": 22,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "model",
+     "name": "model",
+     "type": "MODEL",
+     "link": 7
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "MODEL",
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
+      34
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "ModelSamplingAuraFlow"
+   },
+   "widgets_values": [
+    1.0
+   ]
+  },
+  {
+   "id": 23,
+   "type": "CLIPLoader",
+   "pos": [
+    -450,
+    460
+   ],
+   "size": [
+    360,
+    110
+   ],
+   "flags": {},
+   "order": 23,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "localized_name": "CLIP",
+     "name": "CLIP",
+     "type": "CLIP",
+     "links": [
+      35
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "CLIPLoader",
+    "models": [
+     {
+      "name": "qwen3vl_8b_int8_convrot.safetensors",
+      "directory": "text_encoders",
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/text_encoders/qwen3vl_8b_int8_convrot.safetensors"
+     }
+    ]
+   },
+   "widgets_values": [
+    "qwen3vl_8b_int8_convrot.safetensors",
+    "qwen_image",
+    "default"
+   ]
+  },
+  {
+   "id": 24,
+   "type": "VAELoader",
+   "pos": [
+    -450,
+    610
+   ],
+   "size": [
+    360,
+    60
+   ],
+   "flags": {},
+   "order": 24,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "localized_name": "VAE",
+     "name": "VAE",
+     "type": "VAE",
+     "links": [
+      36
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "VAELoader",
+    "models": [
+     {
+      "name": "qwen_image_2.1_vae_bf16.safetensors",
+      "directory": "vae",
+      "url": "https://huggingface.co/Comfy-Org/Qwen-Image-2.1/resolve/main/vae/qwen_image_2.1_vae_bf16.safetensors"
+     }
+    ]
+   },
+   "widgets_values": [
+    "qwen_image_2.1_vae_bf16.safetensors"
+   ]
+  },
+  {
+   "id": 28,
+   "type": "KSamplerSelect",
+   "pos": [
+    -50,
+    400
+   ],
+   "size": [
+    300,
+    60
+   ],
+   "flags": {},
+   "order": 28,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "localized_name": "SAMPLER",
+     "name": "SAMPLER",
+     "type": "SAMPLER",
+     "links": [
+      37
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "KSamplerSelect"
+   },
+   "widgets_values": [
+    "euler"
+   ]
+  },
+  {
+   "id": 29,
+   "type": "ManualSigmas",
+   "pos": [
+    -50,
+    500
+   ],
+   "size": [
+    300,
+    60
+   ],
+   "flags": {},
+   "order": 29,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "localized_name": "SIGMAS",
+     "name": "SIGMAS",
+     "type": "SIGMAS",
+     "links": [
+      38
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "ManualSigmas"
+   },
+   "widgets_values": [
+    "1.0, 0.5, 0"
+   ]
+  },
+  {
+   "id": 32,
+   "type": "PreviewImage",
+   "pos": [
+    300,
+    520
+   ],
+   "size": [
+    300,
+    300
+   ],
+   "flags": {},
+   "order": 32,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "images",
+     "name": "images",
+     "type": "IMAGE",
+     "link": 39
+    }
+   ],
+   "outputs": [],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "Edited crops"
+  },
+  {
+   "id": 40,
+   "type": "H3MDKeyframeAssemble",
+   "pos": [
+    650,
+    100
+   ],
+   "size": [
+    340,
+    160
+   ],
+   "flags": {},
+   "order": 40,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "job",
+     "name": "job",
+     "type": "H3MD_KEYFRAME_JOB",
+     "link": 41
+    },
+    {
+     "localized_name": "edited",
+     "name": "edited",
+     "type": "IMAGE",
+     "link": 40
+    },
+    {
+     "localized_name": "name",
+     "name": "name",
+     "type": "STRING",
+     "widget": {
+      "name": "name"
+     },
+     "link": null
+    },
+    {
+     "localized_name": "save_zip",
+     "name": "save_zip",
+     "type": "BOOLEAN",
+     "widget": {
+      "name": "save_zip"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "keyframes_sheet",
+     "name": "keyframes_sheet",
+     "type": "IMAGE",
+     "links": [
+      28
+     ]
+    },
+    {
+     "localized_name": "plan_json",
+     "name": "plan_json",
+     "type": "STRING",
+     "links": []
+    },
+    {
+     "localized_name": "zip_path",
+     "name": "zip_path",
+     "type": "STRING",
+     "links": [
+      29
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "H3MDKeyframeAssemble"
+   },
+   "widgets_values": [
+    "multiswap",
+    true
+   ]
+  },
+  {
+   "id": 41,
+   "type": "PreviewImage",
+   "pos": [
+    1020,
+    100
+   ],
+   "size": [
+    520,
+    420
+   ],
+   "flags": {},
+   "order": 41,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "images",
+     "name": "images",
+     "type": "IMAGE",
+     "link": 28
+    }
+   ],
+   "outputs": [],
+   "properties": {
+    "Node name for S&R": "PreviewImage"
+   },
+   "widgets_values": [],
+   "title": "关键帧总览 Keyframes"
+  },
+  {
+   "id": 42,
+   "type": "PreviewAny",
+   "pos": [
+    1020,
+    560
+   ],
+   "size": [
+    520,
+    120
+   ],
+   "flags": {},
+   "order": 42,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "source",
+     "name": "source",
+     "type": "*",
+     "link": 29
+    }
+   ],
+   "outputs": [],
+   "properties": {
+    "Node name for S&R": "PreviewAny"
+   },
+   "widgets_values": [],
+   "title": "Plan zip"
+  },
+  {
+   "id": 50,
+   "type": "MarkdownNote",
+   "pos": [
+    -1300,
+    1200
+   ],
+   "size": [
+    700,
+    760
+   ],
+   "flags": {},
+   "order": 50,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "properties": {
+    "Node name for S&R": "MarkdownNote"
+   },
+   "widgets_values": [
+    "**0.5.7：串行换人** — Recast 节点一个人一个人修，后一个人从已换好前面人的帧上裁。原角色轮廓大（cos 服、长假发、尾巴）把 mask_grow 调到 0.25-0.35。\n\n## H3MD 多人换人：关键帧 + 计划包（H3MD 0.5.5）\n\n**做什么**：一次运行把原片里要换的人在几个时刻画成新角色（关键帧），再写好 Remake 计划，打成计划包 zip。之后到导演台出片：打开 `H3MD Director Remake.json` →「导入计划」选这个 zip → 运行。\n\n**怎么用**\n1. 把原片拖进左上角的「Source video 原片」（加载视频）节点。只想换其中一段，就在 Prepare 填 `start_s`（起始秒）和 `end_s`（结束秒，0 = 到片尾），这一段连同原声截出来当原片用。横屏出 1664×960，竖屏出 960×1664（居中裁）。\n2. 角色图接到 picture_1…5。\n3. `mapping` 写\"图1换左二\"：人按**开头第一帧清楚的画面从左到右**编号，先跑一次看「认人表」核对编号。\n4. `descriptions` 每张图一行：人种、年龄、长相、发型、每件衣服（建议英文，会写进 Remake 提示词）。**必须照你自己的图写对**：示例三行写的是示例里的三张角色图，换了图就要改；性别、人种、衣服写反了，修图会照错的画。`people_at_start` 可选：原片开头从左到右每人一行现在的样子，帮修图认准人。\n5. 运行。看「关键帧总览」，满意就去导演台导入 `output/H3MD_plans/<名字>.zip`；不满意换修图种子再跑。\n\n**修图模型可以换**：中间这组是示例（Qwen Image 2.1 编辑 + 2 步 LoRA，提示词直接用 Prepare 写好的，不做增强）。换成任何\"图1 + 图2 + 提示词 → 新图\"的编辑模型都行：输入接 Prepare 的 crops（图1）、pictures（图2）、prompts，输出接 Assemble 的 edited。\n\n**效果上限**：被换的人和角色发型长短、体型、性别接近时最好；差很多时不完美，但能用。人走出画面再回来可能被当成新的人（看 info 里的提醒）。\n\n---\n\n**What it does**: one run redraws the recast people at a few moments (keyframes), writes the Remake plan and packs a plan zip. Then open `H3MD Director Remake.json`, Import plan → the zip, run.\n\n**Steps**: drag the source video into the \"Source video\" (Load Video) node, optional `start_s` / `end_s` to recast only that part (cut with its sound); character pictures on picture_1…5; `mapping` like \"picture 1 -> left 2\" (people numbered **left to right in the first clear frame**: check the people sheet); one description line per picture (race, age, face, hair, every garment) - **it must match your own picture**: the three example lines describe the example pictures; if a line contradicts the picture (gender, race, clothes) the edit follows the wrong text; run; check the keyframe sheet.\n\n**Any image-edit model works in the middle**: crops = image 1, pictures = image 2, prompts = prompt, its output → Assemble `edited`.\n\n**Models (this example)**: Qwen Image 2.1 int8 / text encoder / VAE from [Comfy-Org/Qwen-Image-2.1](https://huggingface.co/Comfy-Org/Qwen-Image-2.1); 2-step LoRA [linoyts/Qwen-Image-2.1-DMD2-2steps](https://huggingface.co/linoyts/Qwen-Image-2.1-DMD2-2steps) (sigmas 1.0, 0.5, 0; shift 1; cfg 1); people tracking: ComfyUI core SAM3.1 `sam3.1_multiplex_fp16.safetensors` in models/checkpoints.\n"
+   ],
+   "title": "Note: 怎么用 How to use"
+  },
+  {
+   "id": 51,
+   "type": "Label (rgthree)",
+   "pos": [
+    -1260,
+    -530
+   ],
+   "size": [
+    1984,
+    120
+   ],
+   "flags": {
+    "allow_interaction": true
+   },
+   "order": 23,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "Qwen Image 2.1 Keyframe 关键帧",
+   "properties": {
+    "fontSize": 120,
+    "fontFamily": "Arial",
+    "fontColor": "#ffff00",
+    "textAlign": "left",
+    "backgroundColor": "transparent",
+    "padding": 0,
+    "borderRadius": 0,
+    "angle": 0
+   },
+   "color": "#fff0",
+   "bgcolor": "#fff0"
+  },
+  {
+   "id": 52,
+   "type": "Label (rgthree)",
+   "pos": [
+    744,
+    -450
+   ],
+   "size": [
+    75,
+    30
+   ],
+   "flags": {
+    "allow_interaction": true
+   },
+   "order": 24,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "by YJ",
+   "properties": {
+    "fontSize": 30,
+    "fontFamily": "Arial",
+    "fontColor": "#ffffff",
+    "textAlign": "center",
+    "backgroundColor": "transparent",
+    "padding": 0,
+    "borderRadius": 0,
+    "angle": 0
+   },
+   "color": "#fff0",
+   "bgcolor": "#fff0"
+  },
+  {
+   "id": 53,
+   "type": "Label (rgthree)",
+   "pos": [
+    -1250,
+    -380
+   ],
+   "size": [
+    798,
+    40
+   ],
+   "flags": {
+    "allow_interaction": true
+   },
+   "order": 25,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "https://huggingface.co/yj0942/H3MD-Director",
+   "properties": {
+    "fontSize": 40,
+    "fontFamily": "Arial",
+    "fontColor": "#ffffff",
+    "textAlign": "left",
+    "backgroundColor": "transparent",
+    "padding": 0,
+    "borderRadius": 0,
+    "angle": 0
+   },
+   "color": "#fff0",
+   "bgcolor": "#fff0"
+  },
+  {
+   "id": 54,
+   "type": "Label (rgthree)",
+   "pos": [
+    -330,
+    -380
+   ],
+   "size": [
+    921,
+    40
+   ],
+   "flags": {
+    "allow_interaction": true
+   },
+   "order": 26,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "https://github.com/1113800942/comfy-h3md-director",
+   "properties": {
+    "fontSize": 40,
+    "fontFamily": "Arial",
+    "fontColor": "#ffffff",
+    "textAlign": "left",
+    "backgroundColor": "transparent",
+    "padding": 0,
+    "borderRadius": 0,
+    "angle": 0
+   },
+   "color": "#fff0",
+   "bgcolor": "#fff0"
+  },
+  {
+   "id": 55,
+   "type": "Label (rgthree)",
+   "pos": [
+    -1180,
+    -280
+   ],
+   "size": [
+    690,
+    40
+   ],
+   "flags": {
+    "allow_interaction": true
+   },
+   "order": 27,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "https://civitai.com/user/1113800942188",
+   "properties": {
+    "fontSize": 40,
+    "fontFamily": "Arial",
+    "fontColor": "#ffffff",
+    "textAlign": "left",
+    "backgroundColor": "transparent",
+    "padding": 0,
+    "borderRadius": 0,
+    "angle": 0
+   },
+   "color": "#fff0",
+   "bgcolor": "#fff0"
+  },
+  {
+   "id": 56,
+   "type": "Label (rgthree)",
+   "pos": [
+    -200,
+    -280
+   ],
+   "size": [
+    898,
+    40
+   ],
+   "flags": {
+    "allow_interaction": true
+   },
+   "order": 28,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "B站：YJ0942, https://space.bilibili.com/299509194",
+   "properties": {
+    "fontSize": 40,
+    "fontFamily": "Arial",
+    "fontColor": "#ffffff",
+    "textAlign": "left",
+    "backgroundColor": "transparent",
+    "padding": 0,
+    "borderRadius": 0,
+    "angle": 0
+   },
+   "color": "#fff0",
+   "bgcolor": "#fff0"
+  },
+  {
+   "id": 57,
+   "type": "Label (rgthree)",
+   "pos": [
+    -1250,
+    -180
+   ],
+   "size": [
+    940,
+    40
+   ],
+   "flags": {
+    "allow_interaction": true
+   },
+   "order": 29,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "Youtube: YJ0942, https://www.youtube.com/@yj0942",
+   "properties": {
+    "fontSize": 40,
+    "fontFamily": "Arial",
+    "fontColor": "#ffffff",
+    "textAlign": "left",
+    "backgroundColor": "transparent",
+    "padding": 0,
+    "borderRadius": 0,
+    "angle": 0
+   },
+   "color": "#fff0",
+   "bgcolor": "#fff0"
+  },
+  {
+   "id": 58,
+   "type": "Label (rgthree)",
+   "pos": [
+    -260,
+    -180
+   ],
+   "size": [
+    864,
+    40
+   ],
+   "flags": {
+    "allow_interaction": true
+   },
+   "order": 30,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "https://www.runninghub.ai?inviteCode=aolwbd1n",
+   "properties": {
+    "fontSize": 40,
+    "fontFamily": "Arial",
+    "fontColor": "#ffffff",
+    "textAlign": "left",
+    "backgroundColor": "transparent",
+    "padding": 0,
+    "borderRadius": 0,
+    "angle": 0
+   },
+   "color": "#fff0",
+   "bgcolor": "#fff0"
+  },
+  {
+   "id": 59,
+   "type": "LoadVideo",
+   "pos": [
+    -1680,
+    100
+   ],
+   "size": [
+    340,
+    560
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 0,
+   "inputs": [
+    {
+     "localized_name": "file",
+     "name": "file",
+     "type": "COMBO",
+     "widget": {
+      "name": "file"
+     },
+     "link": null
+    }
+   ],
+   "outputs": [
+    {
+     "localized_name": "VIDEO",
+     "name": "VIDEO",
+     "type": "VIDEO",
+     "links": [
+      30
+     ]
+    }
+   ],
+   "title": "Source video 原片（拖进来）",
+   "properties": {
+    "Node name for S&R": "LoadVideo"
+   },
+   "widgets_values": [
+    "source_video.mp4",
+    "image"
+   ]
+  },
+  {
+   "id": 33,
+   "type": "H3MDKeyframeRecast",
+   "pos": [
+    -50,
+    100
+   ],
+   "size": [
+    420,
+    330
+   ],
+   "flags": {},
+   "order": 27,
+   "mode": 0,
+   "title": "H3MD Keyframe 1b: Recast 串行换人（一个人一个人换）",
+   "inputs": [
+    {
+     "name": "job",
+     "type": "H3MD_KEYFRAME_JOB",
+     "link": 31
+    },
+    {
+     "name": "pictures",
+     "type": "IMAGE",
+     "link": 32
+    },
+    {
+     "name": "prompts",
+     "type": "STRING",
+     "link": 33
+    },
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 34
+    },
+    {
+     "name": "clip",
+     "type": "CLIP",
+     "link": 35
+    },
+    {
+     "name": "vae",
+     "type": "VAE",
+     "link": 36
+    },
+    {
+     "name": "sampler",
+     "type": "SAMPLER",
+     "link": 37
+    },
+    {
+     "name": "sigmas",
+     "type": "SIGMAS",
+     "link": 38
+    }
+   ],
+   "outputs": [
+    {
+     "name": "edited",
+     "type": "IMAGE",
+     "links": [
+      39,
+      40
+     ],
+     "shape": 6
+    },
+    {
+     "name": "job",
+     "type": "H3MD_KEYFRAME_JOB",
+     "links": [
+      41
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "H3MDKeyframeRecast"
+   },
+   "widgets_values": [
+    0,
+    "randomize",
+    1.0,
+    0.25,
+    -0.05
+   ]
+  }
+ ],
+ "links": [
+  [
+   1,
+   1,
+   0,
+   10,
+   8,
+   "IMAGE"
+  ],
+  [
+   2,
+   2,
+   0,
+   10,
+   9,
+   "IMAGE"
+  ],
+  [
+   3,
+   3,
+   0,
+   10,
+   10,
+   "IMAGE"
+  ],
+  [
+   4,
+   10,
+   4,
+   11,
+   0,
+   "IMAGE"
+  ],
+  [
+   5,
+   10,
+   5,
+   12,
+   0,
+   "STRING"
+  ],
+  [
+   6,
+   20,
+   0,
+   21,
+   0,
+   "MODEL"
+  ],
+  [
+   7,
+   21,
+   0,
+   22,
+   0,
+   "MODEL"
+  ],
+  [
+   28,
+   40,
+   0,
+   41,
+   0,
+   "IMAGE"
+  ],
+  [
+   29,
+   40,
+   2,
+   42,
+   0,
+   "STRING"
+  ],
+  [
+   30,
+   59,
+   0,
+   10,
+   13,
+   "VIDEO"
+  ],
+  [
+   31,
+   10,
+   3,
+   33,
+   0,
+   "H3MD_KEYFRAME_JOB"
+  ],
+  [
+   32,
+   10,
+   1,
+   33,
+   1,
+   "IMAGE"
+  ],
+  [
+   33,
+   10,
+   2,
+   33,
+   2,
+   "STRING"
+  ],
+  [
+   34,
+   22,
+   0,
+   33,
+   3,
+   "MODEL"
+  ],
+  [
+   35,
+   23,
+   0,
+   33,
+   4,
+   "CLIP"
+  ],
+  [
+   36,
+   24,
+   0,
+   33,
+   5,
+   "VAE"
+  ],
+  [
+   37,
+   28,
+   0,
+   33,
+   6,
+   "SAMPLER"
+  ],
+  [
+   38,
+   29,
+   0,
+   33,
+   7,
+   "SIGMAS"
+  ],
+  [
+   39,
+   33,
+   0,
+   32,
+   0,
+   "IMAGE"
+  ],
+  [
+   40,
+   33,
+   0,
+   40,
+   1,
+   "IMAGE"
+  ],
+  [
+   41,
+   33,
+   1,
+   40,
+   0,
+   "H3MD_KEYFRAME_JOB"
+  ]
+ ],
+ "groups": [
+  {
+   "id": 1,
+   "title": "1 认人 + 挑关键帧 Prepare",
+   "bounding": [
+    -1320,
+    20,
+    820,
+    1430
+   ],
+   "color": "#3f789e",
+   "flags": {}
+  },
+  {
+   "id": 2,
+   "title": "2 修图（可换成任何修图模型）Edit - any image-edit model",
+   "bounding": [
+    -470,
+    20,
+    1090,
+    1140
+   ],
+   "color": "#8A8",
+   "flags": {}
+  },
+  {
+   "id": 3,
+   "title": "3 贴回 + 计划包 Assemble",
+   "bounding": [
+    630,
+    20,
+    930,
+    700
+   ],
+   "color": "#b06634",
+   "flags": {}
+  },
+  {
+   "id": 4,
+   "title": "",
+   "bounding": [
+    -1320,
+    -600,
+    2384,
+    520
+   ],
+   "color": "#3f789e",
+   "font_size": 24,
+   "flags": {}
+  }
+ ],
+ "config": {},
+ "extra": {
+  "h3md": "H3MD 0.5.0 multi-person swap keyframes (Qwen Image 2.1 example)",
+  "ds": {
+   "scale": 0.6,
+   "offset": [
+    1400,
+    100
+   ]
+  }
+ },
+ "version": 0.4
 }
