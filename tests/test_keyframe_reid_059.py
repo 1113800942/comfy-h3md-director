@@ -141,8 +141,8 @@ def test_only_extreme_closeups_skipped():
 
 def test_cut_off_prompt():
     assert K.cut_at_bottom((0.1, 0.2, 0.3, 1.0)) and not K.cut_at_bottom((0.1, 0.2, 0.3, 0.9))
-    assert "bottom edge" in K.swap_prompt_one(1, 3, "a man", "", True)
-    assert "bottom edge" not in K.swap_prompt_one(1, 3, "a man", "", False)
+    assert "bottom edge" in K.swap_instruction([{"rank": 1, "ref": 2, "desc": "a man", "cut_bottom": True}])
+    assert "bottom edge" not in K.swap_instruction([{"rank": 1, "ref": 2, "desc": "a man"}])
 
 
 def test_finish_moments_caps_four_per_part_and_never_empty():
@@ -224,17 +224,3 @@ def test_prefer_full_does_not_cross_a_place_change():
     frames = [_f(i / 6, close if i < 24 else swapped) for i in range(6 * 8)]
     out, notes = K.prefer_full(frames, [(6, "swap")], {0, 1}, [], 8.0, 5.0)
     assert out == [(6, "swap")] and not notes
-
-
-def test_swap_prompt_follows_the_model_card():
-    """0.5.91: the character-swap model card's prompt; pose / position / scale / gaze held; nothing named item by
-    item (user rule after runs 40/41)"""
-    p = K.swap_prompt_one(2, 4, "a woman in a blue dress", "the man in grey")
-    assert p.startswith("Swap the person second from the left (the man in grey) in <Picture 1> with the character "
-                        "in <Picture 2> (a woman in a blue dress).")
-    assert "same pose, position, scale and gaze" in p and "including the other 3 people" in p
-    for w in ("glove", "sleeve", "stocking", "hand"):
-        assert w not in p.lower()
-    b = K.swap_prompt_all([{"rank": 3, "ref": 3, "desc": "B"}, {"rank": 1, "ref": 2, "desc": "A"}], 4)
-    assert b.index("first from the left") < b.index("third from the left")
-    assert "<Picture 2> (A)" in b and "<Picture 3> (B)" in b

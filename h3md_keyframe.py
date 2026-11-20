@@ -3,8 +3,8 @@
 The nodes in h3md_keyframe_nodes.py wrap this file:
   1 Prepare: who is who (numbered left to right at the start), which moments become keyframes, where every person to
     recast stands at every moment.
-  1b Recast (0.5.91): MiniMax H3 Image + the character-swap LoRA redraw the WHOLE keyframe, one person after another
-    (no crop, no paste-back), with automatic checks.
+  1b Recast (0.5.91): MiniMax H3 Image + the character-swap LoRA redraw the WHOLE keyframe, everybody in one edit,
+    the prompt written by the official H3 Image prompt enhancer (no crop, no paste-back).
   2 Assemble: the keyframes are saved and the Remake plan is written.
 
 Method = skill 12d, line A, measured in demo5 (2026-11-16: our own 26 s five-person clip, 4 keyframes, Remake swapped
@@ -727,24 +727,10 @@ def _who(rank, look=""):
     return f"the person {ordinal(rank)} from the left" + (f" ({look})" if look else "")
 
 
-KEEP_ONE = ("Keep the replacement character's face, hair, identity and outfit exactly as in <Picture 2>, including "
-            "its art style. The replacement must hold the same pose, position, scale and gaze.")
-CUT_ONE = (" This person is cut off by the bottom edge of <Picture 1>; the replacement is cut off at the same place "
-           "and is just as large.")
-
-
-def swap_prompt_one(rank, n_people, desc="", look="", cut_bottom=False):
-    """0.5.91: one person, the character-swap model card's prompt as it is (<Picture 1> = the keyframe, <Picture 2> =
-    the character); only 'the man in the purple shirt' becomes where she stands now + what she looks like."""
-    others = f", including the other {n_people - 1} {'person' if n_people == 2 else 'people'}" if n_people > 1 else ""
-    return (f"Swap {_who(rank, look)} in <Picture 1> with the character in <Picture 2>"
-            + (f" ({desc})" if desc else "") + ". " + KEEP_ONE
-            + f" Preserve everything else in <Picture 1> unchanged{others}." + (CUT_ONE if cut_bottom else ""))
-
-
-def swap_prompt_all(people, n_people):
-    """0.5.91 test variant B: every person of the keyframe in one edit, people = [{rank, ref, desc, look,
-    cut_bottom}], ref = the <Picture n> of her character."""
+def swap_instruction(people):
+    """0.5.91: everybody recast at a keyframe in ONE edit (test 13:58: the only variant that named the right people,
+    5 of 5).  people = [{rank, ref, desc, look, cut_bottom}], ref = the <Picture n> of her character.  This is the
+    user instruction given to the official MiniMax H3 Image prompt enhancer, which writes the final prompt."""
     lines = []
     for p in sorted(people, key=lambda q: q["rank"]):
         line = f"- {_who(p['rank'], p.get('look', ''))} with the character in <Picture {p['ref']}>"
@@ -755,54 +741,23 @@ def swap_prompt_all(people, n_people):
     return ("Swap these people in <Picture 1>, each with one character:\n" + "\n".join(lines) + "\n"
             "Keep each replacement character's face, hair, identity and outfit exactly as in its picture, including "
             "its art style. Each replacement must hold the same pose, position, scale and gaze as the person it "
-            "replaces. Preserve everything else in <Picture 1> unchanged, including everybody not listed.")
+            "replaces. Keep the camera framing, the crop and the composition of <Picture 1> exactly. Preserve "
+            "everything else in <Picture 1> unchanged, including everybody not listed.")
 
 
-# ---------------------------------------------------------------------------------------------------- checks
-SWAP_CHANGED = 0.60       # the recast person's look (hair / clothes histograms) before vs after below this = changed
-SWAP_KEPT = 0.70          # another person's look before vs after at least this = left alone
-LAYOUT_IOU = 0.45         # every source person has a person box in the keyframe overlapping at least this
-LAYOUT_SCALE = 0.25       # ... whose height differs by at most this share
-
-
-def box_look(img_u8, box):
-    """hair / clothes histograms of one box (pixels) of one image, like appearance() does per track"""
-    x0, y0, x1, y1 = [int(round(v)) for v in box]
-    bw, bh = x1 - x0, y1 - y0
-    if bw < 4 or bh < 8:
+def pe_caption(text):
+    """the official prompt enhancer answers one JSON object; its expanded_caption is the prompt.  -> str or None"""
+    import json as _json
+    if not text:
         return None
-    hair = img_u8[y0:y0 + max(2, int(bh * 0.15)), x0 + int(bw * 0.2):x1 - int(bw * 0.2)].reshape(-1, 3)
-    body = img_u8[y0 + int(bh * 0.25):y0 + int(bh * 0.70), x0 + int(bw * 0.25):x1 - int(bw * 0.25)].reshape(-1, 3)
-    a, b = _hsv_hist(hair), _hsv_hist(body)
-    return None if a is None or b is None else (a, b)
-
-
-def check_swap(before, after, own, others):
-    """0.5.91: did the edit recast THIS person and leave the others alone?  -> (ok, target_sim, [other sims])
-    Others overlapping her box are skipped (their pixels change with hers)."""
-    t = look_similarity(box_look(before, own), box_look(after, own))
-    sims = []
-    for b in others:
-        if iou(own, b) > CLEAR_IOU or covered(b, own) > COVERED:
-            continue
-        sims.append(look_similarity(box_look(before, b), box_look(after, b)))
-    return (t < SWAP_CHANGED and all(s >= SWAP_KEPT for s in sims)), t, sims
-
-
-def check_layout(src_boxes, out_boxes):
-    """0.5.91: everybody of the source frame still there, in place and as large?  boxes normalised.  -> [problems]"""
-    probs = []
-    if len(out_boxes) != len(src_boxes):
-        probs.append(f"{len(out_boxes)} people found, the source frame has {len(src_boxes)}")
-    for k, s in enumerate(sorted(src_boxes, key=lambda b: (b[0] + b[2]) / 2), 1):
-        best = max(out_boxes, key=lambda o: iou(s, o), default=None)
-        if best is None or iou(s, best) < LAYOUT_IOU:
-            probs.append(f"left {k}: moved or missing (overlap {0 if best is None else iou(s, best):.2f})")
-            continue
-        sh, oh = s[3] - s[1], best[3] - best[1]
-        if sh > 0 and abs(oh - sh) / sh > LAYOUT_SCALE:
-            probs.append(f"left {k}: height {oh / sh:.0%} of the source")
-    return probs
+    a, b = text.find("{"), text.rfind("}")
+    if a < 0 or b <= a:
+        return None
+    try:
+        cap = _json.loads(text[a:b + 1]).get("expanded_caption")
+    except Exception:
+        return None
+    return cap.strip() if isinstance(cap, str) and cap.strip() else None
 
 
 # ---------------------------------------------------------------------------------------------------- plan

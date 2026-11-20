@@ -2,8 +2,8 @@
 
   H3MD Keyframe 1: Prepare  - source video + character pictures + "图1换左二" -> who is who, keyframe moments, where
                               every person to recast stands then.
-  H3MD Keyframe 1b: Recast  - 0.5.91: MiniMax H3 Image + the character-swap LoRA redraw the whole keyframe, one person
-                              after another (no crop, no paste-back), with automatic checks.
+  H3MD Keyframe 1b: Recast  - 0.5.91: MiniMax H3 Image + the character-swap LoRA redraw the whole keyframe, everybody
+                              in one edit, prompt by the official H3 Image prompt enhancer (no crop, no paste-back).
   H3MD Keyframe 2: Assemble - keyframes saved -> H3MD plan + plan zip for the Director's "Import plan"
                               (H3MD Director Remake.json).
 
@@ -594,8 +594,7 @@ class H3MDKeyframeAssemble:
 
     RETURN_TYPES = ("IMAGE", "STRING", "STRING")
     RETURN_NAMES = ("keyframes_sheet", "plan_json", "zip_path")
-    OUTPUT_TOOLTIPS = ("All keyframes with their times (a warning sign marks a keyframe the checks flagged): check "
-                       "them before running the Director.",
+    OUTPUT_TOOLTIPS = ("All keyframes with their times: check them before running the Director.",
                        "The H3MD plan (paste it into the Director's plan box, or import the zip).",
                        "Where the plan zip was written.")
     OUTPUT_NODE = True
@@ -616,7 +615,6 @@ class H3MDKeyframeAssemble:
         kdir = _unique_dir(os.path.join(inp, KF_SUBDIR), name)
         os.makedirs(kdir, exist_ok=True)
         rel = os.path.relpath(kdir, inp).replace("\\", "/")
-        flags = (job.get("recast") or {}).get("flags", {})
         kfs, imgs, labels = [], [], []
         for mi, m in enumerate(job["moments"]):
             out = job["recast_frames"].get(m["at"], job["frames"][m["at"]])
@@ -627,7 +625,7 @@ class H3MDKeyframeAssemble:
             imgs.append(out)
             label = f"{m['at']:.2f} s  " + ("pic " + ", ".join(str(i["picture"]) for i in m["items"])
                                              if m["items"] else "source frame")
-            labels.append(("[!] " if flags.get(str(m["at"])) else "") + label)
+            labels.append(label)
         plan = K.build_plan(job["video"], job["duration"], job["has_audio"], (W, H), job["length"], kfs,
                             job["prompt"], name)
         if job.get("source_trim"):
@@ -656,19 +654,16 @@ class H3MDKeyframeAssemble:
             LOG.info("%s plan zip: %s (%.1f MB)", TAG, zip_path, len(data) / 1e6)
         sheet = contact_sheet(imgs, labels)
         msg = f"{len(kfs)} keyframes -> input/{rel}/" + (f"\nplan zip: {zip_path}" if zip_path else "")
-        if flags:
-            msg += f"\n{len(flags)} keyframe(s) flagged by the checks: see recast_report.txt"
         return {"ui": {"text": [msg]}, "result": (to_tensor(sheet), plan_s, zip_path)}
 
 
 class H3MDKeyframeRecast:
     """0.5.91: MiniMax H3 Image + the character-swap LoRA (akatz-ai, as published with
-    akhaliq/MiniMax-H3-Image-Character-Swap) redraw the WHOLE keyframe: <Picture 1> = the keyframe, <Picture 2> = the
-    character, the model card's prompt naming the person by where she stands now.  No crop, no paste-back.  After
-    every edit: did it recast this person and leave the others alone (else one retry with the next seed); at the end:
-    is everybody still in place and as large (SAM3).  Flags go to the report, never silently used."""
-
-    MODES = ("one_by_one", "all_at_once")
+    akhaliq/MiniMax-H3-Image-Character-Swap) redraw the WHOLE keyframe, everybody to recast in ONE edit: <Picture 1> =
+    the keyframe, <Picture 2>... = the characters.  The prompt is written by the official MiniMax H3 Image prompt
+    enhancer exactly as the official character-swap workflow wires it (it sees every picture; our instruction names the
+    people by where they stand now).  No crop, no paste-back.  Test 2026-11-20 13:58: one-by-one edits and the pDMD
+    2-step LoRA lost (wrong people, worse picture) and are gone."""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -676,17 +671,18 @@ class H3MDKeyframeRecast:
             "required": {
                 "job": ("H3MD_KEYFRAME_JOB", {"tooltip": "From H3MD Keyframe 1: Prepare"}),
                 "pictures": ("IMAGE", {"tooltip": "Prepare's pictures output"}),
-                "model": ("MODEL", {"tooltip": "MiniMax H3 Image (minimax_h3_image_pruned_bf16) with the character-"
-                                    "swap LoRA h3_character_swap_v1.5 at 1.0 (and, for 2 steps, the pDMD 2-step "
-                                    "LoRA + MiniMax H3 Sigma Shift 12)"}),
+                "model": ("MODEL", {"tooltip": "MiniMax H3 Image (minimax_h3_image_pruned_int8_convrot) with the "
+                                    "character-swap LoRA h3_character_swap_v1.5 at 1.0"}),
                 "clip": ("CLIP", {"tooltip": "qwen3vl_32b_minimax_h3 (type minimax)"}),
                 "vae": ("VAE", {"tooltip": "minimax_h3_image_vae"}),
                 "sampler": ("SAMPLER", {"tooltip": "euler"}),
-                "sigmas": ("SIGMAS", {"tooltip": "BasicScheduler simple: 6 steps (stock), or 2 with the pDMD LoRA"}),
+                "sigmas": ("SIGMAS", {"tooltip": "6 steps (the workflow uses the tuned 6-step PDD sigmas)"}),
+                "pe_clip": ("CLIP", {"tooltip": "The prompt enhancer's text model: qwen3.5_9b (type minimax), as in "
+                                     "the official character-swap workflow"}),
+                "pe_system_prompt": ("STRING", {"forceInput": True, "tooltip": "The official enhancer system prompt"}),
+                "pe_task_prompt": ("STRING", {"forceInput": True, "tooltip": "The official enhancer task prompt (with "
+                                              "{input text})"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "control_after_generate": True}),
-                "mode": (list(cls.MODES), {"default": "one_by_one", "tooltip":
-                         "one_by_one: one person per edit, several people = several edits on the whole frame (how the "
-                         "LoRA was trained). all_at_once: everybody in one edit (test only). 一次换一个 / 一次全换"}),
             }
         }
 
@@ -696,13 +692,20 @@ class H3MDKeyframeRecast:
     OUTPUT_IS_LIST = (True, False, False)
     OUTPUT_TOOLTIPS = ("The finished keyframes, one per swap moment (whole frames).",
                        "The job with the keyframes (connect to Assemble).",
-                       "Prompts, timings and the checks of every keyframe.")
+                       "Instruction, enhanced prompt and time of every keyframe.")
     FUNCTION = "recast"
     CATEGORY = CATEGORY
     DESCRIPTION = ("Multi-person swap keyframes, step 1b (0.5.91): MiniMax H3 Image character swap on the whole "
-                   "keyframe, one person after another, with automatic checks. Then H3MD Keyframe 2: Assemble.")
+                   "keyframe, everybody in one edit, the prompt written by the official H3 Image prompt enhancer. "
+                   "Then H3MD Keyframe 2: Assemble.")
 
-    def recast(self, job, pictures, model, clip, vae, sampler, sigmas, seed, mode):
+    # the official character-swap workflow's prompt-enhancer settings (TextGenerateV2)
+    PE_MAX = 8196
+    PE_SAMPLING = {"sampling_mode": "on", "temperature": 1.0, "top_k": 20, "top_p": 0.95, "min_p": 0.0,
+                   "repetition_penalty": 1.0, "presence_penalty": 0.0}
+
+    def recast(self, job, pictures, model, clip, vae, sampler, sigmas, pe_clip, pe_system_prompt, pe_task_prompt,
+               seed):
         import time
         import numpy as np
         import comfy.utils
@@ -710,10 +713,14 @@ class H3MDKeyframeRecast:
         from PIL import Image
         from comfy_extras.nodes_minimax_h3 import MiniMaxH3ImageConditioning
         from comfy_extras.nodes_custom_sampler import SamplerCustom
+        from comfy_extras.nodes_textgen import TextGenerateV2
         one = lambda v: v[0] if isinstance(v, list) else v
-        job, model, clip, vae, sampler, sigmas = (one(job), one(model), one(clip), one(vae), one(sampler),
-                                                  one(sigmas))
-        seed, mode = int(one(seed)), str(one(mode))
+        job, model, clip, vae, sampler, sigmas, pe_clip = (one(job), one(model), one(clip), one(vae), one(sampler),
+                                                           one(sigmas), one(pe_clip))
+        system, task, seed = str(one(pe_system_prompt)), str(one(pe_task_prompt)), int(one(seed))
+        if "{input text}" not in task:
+            raise K.KeyframeError(f"{TAG} pe_task_prompt has no '{{input text}}': connect the official enhancer task "
+                                  "prompt. 增强器任务提示词里没有 {input text}。")
         pics = [p[b:b + 1] for p in pictures for b in range(int(p.shape[0]))]
         need = sum(len(m["items"]) for m in job["moments"])
         if len(pics) != need:
@@ -722,110 +729,61 @@ class H3MDKeyframeRecast:
         W, H = job["size"]
         gw, gh = K.swap_size(W, H)
         steps = max(1, int(len(sigmas)) - 1)
-        edits = need if mode == "one_by_one" else sum(1 for m in job["moments"] if m["items"])
-        pbar = comfy.utils.ProgressBar(max(1, edits))
-
-        def edit(img_u8, refs, prompt, s):
-            t = comfy.utils.common_upscale(to_tensor(img_u8).movedim(-1, 1), gw, gh, "lanczos",
-                                           "disabled").movedim(1, -1).clamp(0, 1)
-            images = {"image_1": t}
+        todo = sum(1 for m in job["moments"] if m["items"])
+        pbar = comfy.utils.ProgressBar(max(1, todo))
+        done, out_imgs, lines, n = {}, [], [], 0
+        t_all = time.time()
+        for m in job["moments"]:
+            if not m["items"]:
+                continue
+            refs = pics[n:n + len(m["items"])]
+            n += len(m["items"])
+            frame = comfy.utils.common_upscale(to_tensor(job["frames"][m["at"]]).movedim(-1, 1), gw, gh, "lanczos",
+                                               "disabled").movedim(1, -1).clamp(0, 1)
+            people = [{"rank": it["rank"], "ref": j + 2, "desc": it.get("desc", ""), "look": it.get("look", ""),
+                       "cut_bottom": it.get("cut_bottom", False)} for j, it in enumerate(m["items"])]
+            instruction = K.swap_instruction(people)
+            t0 = time.time()
+            pe = TextGenerateV2.execute(clip=pe_clip, prompt=task.replace("{input text}", instruction),
+                                        max_length=self.PE_MAX, sampling_mode=dict(self.PE_SAMPLING, seed=seed),
+                                        thinking=True, use_default_template=True, mtp="auto", system_prompt=system,
+                                        images={f"image{j + 1}": im for j, im in enumerate([frame] + refs)})
+            caption = K.pe_caption(pe.result[0])
+            t_pe = time.time() - t0
+            lines.append(f"{m['at']:.2f} s ({gw}x{gh}, {steps} steps, {len(people)} people):")
+            lines.append("  instruction: " + instruction.replace("\n", " | "))
+            if caption is None:
+                lines.append(f"  ENHANCER GAVE NO expanded_caption ({t_pe:.1f} s) - the instruction itself was used; "
+                             f"enhancer output: {pe.result[0][:300]!r}")
+                prompt = instruction
+            else:
+                lines.append(f"  enhanced ({t_pe:.1f} s): {caption}")
+                prompt = caption
+            t1 = time.time()
+            images = {"image_1": frame}
             for j, r in enumerate(refs):
                 images[f"image_{j + 2}"] = r
             enc = MiniMaxH3ImageConditioning.execute(clip=clip, prompt=prompt, width=gw, height=gh, vae=vae,
                                                      images=images)
             pos, lat = enc.result[0], enc.result[1]
             neg = nodes.ConditioningZeroOut().zero_out(pos)[0]     # CFG 1 (the model is distilled)
-            res = SamplerCustom.execute(model=model, add_noise=True, noise_seed=s, cfg=1.0, positive=pos,
+            res = SamplerCustom.execute(model=model, add_noise=True, noise_seed=seed, cfg=1.0, positive=pos,
                                         negative=neg, sampler=sampler, sigmas=sigmas, latent_image=lat)
             img = nodes.VAEDecode().decode(vae, res.result[0])[0]
             img = img.reshape(-1, img.shape[-3], img.shape[-2], img.shape[-1])[:1].clamp(0, 1)
             out = to_u8(img)
             if out.shape[1] != W or out.shape[0] != H:
                 out = np.asarray(Image.fromarray(out).resize((W, H), Image.LANCZOS))
-            return out
-
-        def checked(before, refs, prompt, it, others):
-            """one edit + the swap check; one retry with the next seed. -> (frame, line, ok)"""
-            tries = []
-            for s in (seed, seed + 1):
-                t0 = time.time()
-                out = edit(before, refs, prompt, s)
-                ok, tsim, sims = K.check_swap(before, out, it["own"], others)
-                tries.append((out, ok, tsim, sims, s, time.time() - t0))
-                if ok:
-                    break
-            out, ok, tsim, sims, s, dt = tries[-1]
-            line = (f"  pic {it['picture']} -> left {it['left']} (now {K.ordinal(it['rank'])} of {it['n']}): "
-                    f"{'OK' if ok else 'CHECK FAILED'} - her look before/after {tsim:.2f} (changed below "
-                    f"{K.SWAP_CHANGED}), others {['%.2f' % v for v in sims]} (kept from {K.SWAP_KEPT}); seed {s}, "
-                    f"{len(tries)} edit(s), last {dt:.1f} s")
-            return out, line, ok
-
-        done, out_imgs, lines, flags, n = {}, [], [], {}, 0
-        t_all = time.time()
-        for m in job["moments"]:
-            if not m["items"]:
-                continue
-            src = job["frames"][m["at"]]
-            refs = pics[n:n + len(m["items"])]
-            n += len(m["items"])
-            lines.append(f"{m['at']:.2f} s ({mode}, {gw}x{gh}, {steps} steps):")
-            ok_all = True
-            if mode == "one_by_one":
-                cur = src
-                for it, ref in sorted(zip(m["items"], refs), key=lambda q: q[0]["rank"]):
-                    prompt = K.swap_prompt_one(it["rank"], it["n"], it.get("desc", ""), it.get("look", ""),
-                                               it.get("cut_bottom", False))
-                    lines.append("  prompt: " + prompt)
-                    cur, line, ok = checked(cur, [ref], prompt, it, it["others"])
-                    lines.append(line)
-                    ok_all &= ok
-                    pbar.update(1)
-                frame = cur
-            else:
-                people = [{"rank": it["rank"], "ref": j + 2, "desc": it.get("desc", ""), "look": it.get("look", ""),
-                           "cut_bottom": it.get("cut_bottom", False)} for j, it in enumerate(m["items"])]
-                prompt = K.swap_prompt_all(people, max(it["n"] for it in m["items"]))
-                lines.append("  prompt: " + prompt.replace("\n", " | "))
-                recast_ids = {it["id"] for it in m["items"]}
-                t0 = time.time()
-                frame = edit(src, refs, prompt, seed)
-                lines.append(f"  one edit {time.time() - t0:.1f} s, seed {seed}")
-                for it in m["items"]:
-                    keep = [b for q, b in zip(it["others_ids"], it["others"]) if q not in recast_ids]
-                    ok, tsim, sims = K.check_swap(src, frame, it["own"], keep)
-                    ok_all &= ok
-                    lines.append(f"  pic {it['picture']} -> left {it['left']}: {'OK' if ok else 'CHECK FAILED'} - "
-                                 f"her look {tsim:.2f}, others {['%.2f' % v for v in sims]}")
-                pbar.update(1)
-            done[m["at"]] = frame
-            out_imgs.append(to_tensor(frame))
-            if not ok_all:
-                flags[str(m["at"])] = "swap"
-        # everybody still in place and as large?  SAM3 on every keyframe (one frame at a time: they are unrelated)
-        try:
-            for m in job["moments"]:
-                if m["at"] not in done:
-                    continue
-                img = done[m["at"]]
-                s = TRACK_SHORT / min(img.shape[:2])
-                small = np.asarray(Image.fromarray(img).resize((max(16, int(img.shape[1] * s)),
-                                                                max(16, int(img.shape[0] * s))), Image.BILINEAR))
-                rows = track_people(small[None], max_people=max(8, len(m.get("boxes", [])) + 2))
-                found = list((rows[0][0] if rows and rows[0] else {}).values())
-                probs = K.check_layout(m.get("boxes", []), found)
-                lines.append(f"{m['at']:.2f} s layout: " + ("OK" if not probs else "; ".join(probs)))
-                if probs:
-                    flags[str(m["at"])] = flags.get(str(m["at"]), "") + " layout"
-        except Exception as exc:
-            lines.append(f"layout check skipped: {exc}")
-            LOG.warning("%s layout check skipped: %s", TAG, exc)
-        lines.append(f"total {time.time() - t_all:.1f} s for {edits} edit pass(es); {len(flags)} keyframe(s) "
-                     "flagged")
+            lines.append(f"  edit {time.time() - t1:.1f} s, seed {seed}")
+            done[m["at"]] = out
+            out_imgs.append(to_tensor(out))
+            pbar.update(1)
+        lines.append(f"total {time.time() - t_all:.1f} s for {todo} keyframe(s)")
         report = "\n".join(lines)
         LOG.info("%s recast report:\n%s", TAG, report)
-        job = dict(job, recast_frames=done, recast={"method": f"H3 Image character swap, {mode}", "seed": seed,
-                                                    "steps": steps, "flags": flags, "report": report})
+        job = dict(job, recast_frames=done, recast={"method": "H3 Image character swap, all at once, official prompt "
+                                                              "enhancer", "seed": seed, "steps": steps,
+                                                    "report": report})
         return {"ui": {"text": [report]}, "result": (out_imgs, job, report)}
 
 

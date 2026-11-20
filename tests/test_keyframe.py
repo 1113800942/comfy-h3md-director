@@ -99,7 +99,8 @@ def test_people_looks():
     pr = K.swap_prompt(617, [(1, 2, 12)], {1: "a man"}, 3, [], {11: "the man in a beanie", 12: None, 13: "the girl"},
                        {1: "the man in a beanie", 2: "the woman in red", 3: "the girl"})
     assert "left at the start, the woman in red." in pr and "the man in a beanie and the girl" in pr
-    assert "second from the left (the woman in red)" in K.swap_prompt_one(2, 3, "a man", "the woman in red")
+    assert "second from the left (the woman in red)" in K.swap_instruction(
+        [{"rank": 2, "ref": 2, "desc": "a man", "look": "the woman in red"}])
 
 
 def test_place_changes_far_swap():
