@@ -500,6 +500,18 @@ class DirectorEditor {
       getMinHeight: () => 320,
     });
     this.widget.serialize = false; // not part of widgets_values: plan_json/width/height keep their slots
+    // Nodes 2.0 (Vue nodes) can write a stale/narrow grid-cell width onto the widget
+    // (`widget.width`), which makes the DOM editor shrink to a fraction of the node on
+    // selection. Keep width unset so the DOM widget always falls back to the node width.
+    // (fix contributed by zhendao on Civitai)
+    try {
+      Object.defineProperty(this.widget, "width", {
+        configurable: true,
+        enumerable: false,
+        get: () => undefined,
+        set: () => {},
+      });
+    } catch { /* older frontends never set widget.width */ }
     this.reload();
   }
 

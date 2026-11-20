@@ -23,8 +23,10 @@ LOOK_S = 3.0              # the numbering moment is searched in the first second
 CLEAR_IOU = 0.2
 COVERED = 0.3
 SPACING = 0.7            # keyframes are picked in (prev + 0.7 * max_gap, prev + max_gap]: as few as the gap allows
-MASK_GROW = 0.08          # 0.5.91: a person's mask grows by this share of her box height (room for another build)
-MASK_FEATHER = 0.01       # ... and its edge is softened over this share of the frame height
+SCAIL_MP = 0.92           # 0.5.91: SCAIL-2 keyframe canvas, about 1280x720 (Wan 2.1 14B's top size)
+SCAIL_LEN = 17            # ... frames of the source around a keyframe it is driven by (4n+1)
+SCAIL_COLOURS = 6         # SCAIL-2 binds people to references by 6 trained mask colours
+SCAIL_MATCH_IOU = 0.3     # a tracked person in the window = the one we recast if their boxes overlap this
 
 CN = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
 ORDINAL = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"]
@@ -704,70 +706,63 @@ def cover_crop(src_w, src_h, tw, th):
     return int(round((src_w - w) / 2)), int(round((src_h - h) / 2)), int(round(w)), int(round(h))
 
 
-def canvas_size(w, h, grid=32):
-    """0.5.91: the H3 Image canvas = the keyframe's own size on the 32 grid (test 14:2x: a 4 MP canvas then scaled
-    down to the keyframe took 2.5x the time for no use)"""
-    return max(grid, round(w / grid) * grid), max(grid, round(h / grid) * grid)
+def scail_size(w, h, mp=SCAIL_MP, grid=32):
+    """0.5.91: the SCAIL-2 canvas for a keyframe of w x h: within 10 % of mp megapixels, multiples of 32, the one
+    closest to the keyframe's aspect (it is scaled back to w x h, so a wrong aspect would stretch the people)"""
+    asp, area = w / float(h), mp * 1e6
+    best = None
+    for gh in range(grid, 4096 + grid, grid):
+        for gw in {max(grid, math.floor(gh * asp / grid) * grid), max(grid, math.ceil(gh * asp / grid) * grid)}:
+            if abs(gw * gh - area) <= 0.1 * area:
+                err = abs(gw / float(gh) - asp)
+                if best is None or err < best[0] - 1e-9:
+                    best = (err, gw, gh)
+    if best is None:
+        sc = math.sqrt(area / max(1, w * h))
+        return max(grid, round(w * sc / grid) * grid), max(grid, round(h * sc / grid) * grid)
+    return best[1], best[2]
 
 
-def _grow1(m, r, ax):
-    """binary dilation along one axis by r pixels (window sum > 0)"""
-    import numpy as np
-    pad = [(0, 0), (0, 0)]
-    pad[ax] = (r + 1, r)
-    c = np.cumsum(np.pad(m.astype(np.int32), pad), axis=ax)
-    n = m.shape[ax]
-    hi = np.take(c, np.arange(2 * r + 1, 2 * r + 1 + n), axis=ax)
-    lo = np.take(c, np.arange(0, n), axis=ax)
-    return (hi - lo) > 0
+def window_times(at, duration, length=SCAIL_LEN, fps=FPS):
+    """0.5.91: the length source frames SCAIL-2 is driven by for the keyframe at `at` s: centred on it, moved inside
+    the clip at its ends.  -> (times, index of the keyframe among them)"""
+    last = max(0, int(math.floor(duration * fps + 1e-6)) - 1)
+    k = int(round(at * fps))
+    a = min(max(0, k - length // 2), max(0, last - length + 1))
+    idx = [min(a + i, last) for i in range(length)]
+    return [round(i / fps, 4) for i in idx], min(k, last) - a
 
 
-def grow_mask(m, r):
-    """square dilation of a bool mask by r pixels"""
-    r = int(max(0, r))
-    return _grow1(_grow1(m, r, 0), r, 1) if r else m.copy()
+def match_people(obj_boxes, people_boxes, min_iou=SCAIL_MATCH_IOU):
+    """0.5.91: the tracked object (in the SCAIL window) that is each person we recast, by box overlap at the keyframe.
+    obj_boxes {object index: box}, people_boxes [box] (all normalised).  -> [object index or None] per person"""
+    pairs = sorted(((iou(pb, ob), j, o) for j, pb in enumerate(people_boxes) for o, ob in obj_boxes.items()),
+                   reverse=True)
+    out, used = [None] * len(people_boxes), set()
+    for v, j, o in pairs:
+        if v < min_iou:
+            break
+        if out[j] is None and o not in used:
+            out[j], used = o, used | {o}
+    return out
 
 
-def pack_mask(m):
-    import numpy as np
-    return {"bits": np.packbits(m.astype(bool), axis=None), "shape": list(m.shape)}
+def ref_columns(n, w, h, pad=0.04):
+    """0.5.91: the reference picture SCAIL-2 takes holds every character side by side: n columns of the w x h canvas
+    -> [(x0, y0, x1, y1)] in pixels, left to right"""
+    cw = w / float(n)
+    p = int(round(pad * min(cw, h)))
+    return [(int(round(i * cw)) + p, p, int(round((i + 1) * cw)) - p, h - p) for i in range(n)]
 
 
-def unpack_mask(p):
-    import numpy as np
-    h, w = p["shape"]
-    return np.unpackbits(p["bits"], count=h * w).reshape(h, w).astype(bool)
-
-
-def mask_for(box, masks, min_iou=0.5):
-    """the tracker mask whose box is this person's box (normalised).  masks = [(box, packed)] of that frame."""
-    best = max(masks or [], key=lambda bm: iou(box, bm[0]), default=None)
-    return best[1] if best is not None and iou(box, best[0]) >= min_iou else None
-
-
-def swap_mask(items, out_w, out_h, grow=MASK_GROW, feather=MASK_FEATHER):
-    """0.5.91: where H3 Image may draw at a keyframe = every recast person's tracker mask (a filled box where the
-    tracker gave none), grown by grow x her box height, softened at the edge -> float32 [out_h, out_w] 0..1"""
-    import numpy as np
-    from PIL import Image, ImageFilter
-    acc = None
-    for it in items:
-        if it.get("mask") is not None:
-            m = unpack_mask(it["mask"])
-        else:                                                   # box in output pixels, drawn on a small grid
-            m = np.zeros((out_h // 4, out_w // 4), bool)
-            x0, y0, x1, y1 = [int(round(v / 4)) for v in it["own"]]
-            m[max(0, y0):y1, max(0, x0):x1] = True
-        h, w = m.shape
-        box_h = (it["own"][3] - it["own"][1]) * h / float(out_h)
-        m = grow_mask(m, round(grow * box_h))
-        m = np.asarray(Image.fromarray(m.astype(np.uint8) * 255).resize((out_w, out_h), Image.BILINEAR)) > 127
-        acc = m if acc is None else (acc | m)
-    if acc is None:
-        return np.zeros((out_h, out_w), np.float32)
-    rad = max(1.0, feather * out_h)
-    soft = Image.fromarray(acc.astype(np.uint8) * 255).filter(ImageFilter.GaussianBlur(rad))
-    return np.maximum(np.asarray(soft, np.float32) / 255.0, acc.astype(np.float32))
+def column_objects(objs, cols):
+    """0.5.91: the person found in each column of the reference picture.  objs = [(centre x px, area)] of the
+    tracked objects -> [object index or None] per column (the biggest one whose centre is in the column)"""
+    out = []
+    for x0, _, x1, _ in cols:
+        inside = [(a, o) for o, (cx, a) in enumerate(objs) if x0 <= cx < x1 and a > 0]
+        out.append(max(inside)[1] if inside else None)
+    return out
 
 
 def frame_rank(own, others):
@@ -783,26 +778,14 @@ def parse_people(text: str) -> list:
     return [re.sub(r"^(?:左|left|L)?\s*\d+\s*[:：.、)]\s*", "", l, flags=re.I).rstrip("。.") for l in lines]
 
 
-def _who(rank, look=""):
-    return f"the person {ordinal(rank)} from the left" + (f" ({look})" if look else "")
-
-
-def swap_instruction(people):
-    """0.5.91: everybody recast at a keyframe in ONE edit (test 13:58: the only variant that named the right people,
-    5 of 5).  people = [{rank, ref, desc, look, cut_bottom}], ref = the <Picture n> of her character.  The prompt
-    goes to H3 Image as it is (test 14:2x: the official prompt enhancer changed the framing and took 45 s)."""
-    lines = []
-    for p in sorted(people, key=lambda q: q["rank"]):
-        line = f"- {_who(p['rank'], p.get('look', ''))} with the character in <Picture {p['ref']}>"
-        line += (f" ({p['desc']})" if p.get("desc") else "") + "."
-        if p.get("cut_bottom"):
-            line += " This person is cut off by the bottom edge; the replacement is cut off at the same place."
-        lines.append(line)
-    return ("Swap these people in <Picture 1>, each with one character:\n" + "\n".join(lines) + "\n"
-            "Keep each replacement character's face, hair, identity and outfit exactly as in its picture, including "
-            "its art style. Each replacement must hold the same pose, position, scale and gaze as the person it "
-            "replaces. Keep the camera framing, the crop and the composition of <Picture 1> exactly. Preserve "
-            "everything else in <Picture 1> unchanged, including everybody not listed.")
+def scail_prompt(people):
+    """0.5.91: the SCAIL-2 text prompt for a keyframe - what the recast people look like, by where they stand now
+    (the template's prompt describes the result).  people = [{rank, desc}]"""
+    parts = [f"the {ordinal(p['rank'])} person from the left is {p['desc'].rstrip('. ')}" if p.get("desc")
+             else f"the {ordinal(p['rank'])} person from the left is the character from the reference"
+             for p in sorted(people, key=lambda q: q["rank"])]
+    return ("The people keep the pose, movement and place of the people they replace, in the same scene. In this "
+            "shot " + "; ".join(parts) + ".")
 
 
 # ---------------------------------------------------------------------------------------------------- plan

@@ -141,8 +141,6 @@ def test_only_extreme_closeups_skipped():
 
 def test_cut_off_prompt():
     assert K.cut_at_bottom((0.1, 0.2, 0.3, 1.0)) and not K.cut_at_bottom((0.1, 0.2, 0.3, 0.9))
-    assert "bottom edge" in K.swap_instruction([{"rank": 1, "ref": 2, "desc": "a man", "cut_bottom": True}])
-    assert "bottom edge" not in K.swap_instruction([{"rank": 1, "ref": 2, "desc": "a man"}])
 
 
 def test_finish_moments_caps_four_per_part_and_never_empty():
