@@ -148,6 +148,10 @@ def link_windows(windows):
 # colour histograms.  Two ids seen together for more than REID_OVERLAP frames are never the same person.  When it is
 # not clear, nothing is joined and a warning says who could not be told apart.
 REID_OVERLAP = 2          # sampled frames two ids may share and still be one person (a ghost box lingering in the dark)
+REID_HANDOFF = 12        # sampled frames (2 s at 6 fps) an old and a new track of ONE person may run side by side when
+                          # SAM3 hands over (11-19 log: old track 0 ended 0.8 s = 6 frames after new track 3 began) -
+                          # allowed only if their boxes overlap there (a double box on one person) or they look alike
+REID_HANDOFF_IOU = 0.3
 REID_MIN_FRAMES = 2       # an id seen in fewer sampled frames is noise: never joined, never a candidate
 REID_SIM_ELIM = 0.25      # only one lost person it could be: join unless the look is clearly different
 REID_SIM_MIN = 0.55       # several lost people: the best look must reach this ...
@@ -254,16 +258,28 @@ def reid_merge(per_frame, looks=None, times=None, keep=None):
             if old == find(new):
                 continue
             span = frames_of[old]
-            together = len(span & frames_of[new])
+            shared = sorted(span & frames_of[new])
             if max(span) >= max(frames_of[new]):        # the old one is still there after the new one ends
                 why_not.append(f"{old}: still there after it")
                 continue
-            if together > REID_OVERLAP:
-                why_not.append(f"{old}: seen together {together} frames")
-                continue
-            if max(span) > f0 + REID_OVERLAP:            # both carry on side by side: two people
-                why_not.append(f"{old}: carries on beside it")
-                continue
+            if len(shared) > REID_OVERLAP or max(span) > f0 + REID_OVERLAP:
+                # side by side for a while: one person only if it is a short hand-over and the two boxes sit on
+                # each other there (a double box) or the two look alike
+                if len(shared) > REID_HANDOFF or max(span) > f0 + REID_HANDOFF:
+                    why_not.append(f"{old}: seen together {len(shared)} frames")
+                    continue
+                ious = []
+                for i in shared:
+                    ob = [b for q, b in per_frame[i].items() if find(q) == old]
+                    nb = per_frame[i].get(new)
+                    if ob and nb is not None:
+                        ious.append(max(iou(b, nb) for b in ob))
+                ov = sum(ious) / len(ious) if ious else 0.0
+                lk = look_similarity(looks.get(old), looks.get(new)) if looks else 0.0
+                if ov < REID_HANDOFF_IOU and lk < REID_SIM_MIN:
+                    why_not.append(f"{old}: seen together {len(shared)} frames, boxes apart (IoU {ov:.2f}), "
+                                   f"look {lk:.2f}")
+                    continue
             cands.append(old)
         notes.append(f"track {new} from {times[f0]:.1f} s: candidates {cands}; ruled out {why_not}")
         if not cands:

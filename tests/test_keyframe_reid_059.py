@@ -68,7 +68,8 @@ def test_new_extra_person_not_joined():
 
 
 def test_seen_together_never_joined():
-    rows = [{0: (L, A), 1: (C, B), 2: (R, D)}] * 6 + [{0: (L, A), 1: (C, B), 2: (R, D), 4: (C, D)}] * 4 \
+    # longer than a hand-over (REID_HANDOFF frames) side by side: two people, even if they look alike
+    rows = [{0: (L, A), 1: (C, B), 2: (R, D)}] * 6 + [{0: (L, A), 1: (C, B), 2: (R, D), 4: (C, D)}] * 14 \
          + [{0: (L, A), 1: (C, B), 4: (R, D)}] * 6
     out, joins, unsure = run(rows)
     assert not joins
@@ -94,3 +95,17 @@ def test_prepare_keeps_people_at_start_separate():
                encoding="utf-8").read()
     assert "track_looks = K.appearance(" in src
     assert "\n            looks = K.appearance(" not in src
+
+
+def test_handoff_double_box_joined():
+    """11-19 real log: old track ran 6 frames beside the new one (a double box on the same dancer), then ended."""
+    rows = [{0: (L, A), 1: (C, B), 2: (R, D)}] * 10 + [{0: (L, A), 1: (C, B), 2: (R, D), 3: (R, D)}] * 6 \
+         + [{0: (L, A), 1: (C, B), 3: (C, D)}] * 10
+    out, joins, unsure = run(rows)
+    assert joins and joins[0]["new"] == 3 and joins[0]["into"] == 2
+
+
+def test_handoff_different_people_side_by_side_not_joined():
+    rows = [{0: (L, A), 2: (R, D)}] * 10 + [{0: (L, A), 2: (R, D), 3: (C, B)}] * 6 + [{0: (L, A), 3: (C, B)}] * 10
+    out, joins, unsure = run(rows)
+    assert not joins
