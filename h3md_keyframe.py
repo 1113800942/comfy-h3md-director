@@ -400,8 +400,19 @@ FRAME_ASPECT = 16 / 9   # frame width / height; Prepare sets it (kept for caller
 
 
 def closeup(frame, chosen_ids):
-    """an extreme close-up: a chosen person fills the whole frame height (cut off at the top and the bottom)"""
-    return any(b[1] <= CLOSE_EDGE and b[3] >= 1 - CLOSE_EDGE for pid, b in visible(frame) if pid in chosen_ids)
+    """a frame the edit model cannot redraw at the right size: a chosen person (1) fills the whole frame height (cut
+    off at the top and the bottom), or (2) is cut off by the bottom AND a side edge - only part of her is in the
+    frame.  The crop is then clipped at the frame edge and the edit model draws a whole, smaller person inside it,
+    with the original's cut-off part left beside her (2026-11-19 run 38, 2.33 s: all three shrunk to full body and a
+    ghost of the original at the left edge; 0.33 s, same framing but nobody at a side edge, kept the size)."""
+    for pid, b in visible(frame):
+        if pid not in chosen_ids:
+            continue
+        if b[1] <= CLOSE_EDGE and b[3] >= 1 - CLOSE_EDGE:
+            return True
+        if b[3] >= 1 - CLOSE_EDGE and (b[0] <= CLOSE_EDGE or b[2] >= 1 - CLOSE_EDGE):
+            return True
+    return False
 
 
 def cut_at_bottom(box):
@@ -523,6 +534,86 @@ PART_FRAMES = 345          # Remake renders at most this per autosplit part ...
 PART_MAX_KF = 4            # ... and takes only the first 4 keyframes of a part (the rest are dropped - h3md_report)
 
 
+FULL_SHRINK = 0.85        # prefer_full: a frame of the same shot where the people are this much smaller (camera farther)
+
+
+def prefer_full(frames, moments, chosen_ids, cuts, duration, max_gap=5.0):
+    """0.5.9: a keyframe where a chosen person is cut off by the bottom edge (waist-up, chest-up) moves to a frame of
+    the SAME shot where every chosen person seen is whole (feet in the frame), else where they are clearly smaller
+    (camera farther, more of the body in the frame) - if the shot has one and the move keeps
+    every gap <= max_gap (or no worse than before) and nobody changes places in between (the keyframe still pins
+    the same left-to-right order).  The edit model tends to redraw a cut-off person as a smaller
+    full-body one (run 38, 2.33 s: the chest-up woman in the middle shrank although she was at no side edge; the
+    full-body keyframes 6.83/11.17/16.17 kept their size).  -> (moments sorted by time, notes)"""
+    out = sorted(moments, key=lambda m: frames[m[0]]["at"])
+    notes = []
+    bounds = [0.0] + sorted(c for c in cuts if 0.0 < c < duration) + [duration]
+    shot = lambda t_: max(k for k, b0 in enumerate(bounds) if b0 <= t_)
+
+    def cut(i):
+        return any(cut_at_bottom(b) for pid, b in visible(frames[i]) if pid in chosen_ids)
+
+    def seen(i):
+        return sum(1 for pid, _ in visible(frames[i]) if pid in chosen_ids)
+
+    def mh(i):
+        hs = [b[3] - b[1] for pid, b in visible(frames[i]) if pid in chosen_ids]
+        return sum(hs) / max(1, len(hs))
+
+    def worst_gap(ts):
+        pts = [0.0] + sorted(ts) + [duration]
+        return max(b - a for a, b in zip(pts, pts[1:]))
+
+    last = duration - 2.0 / FPS
+    try:
+        changes = place_changes(frames, sorted(chosen_ids))
+    except Exception:
+        changes = []
+    for k, (i, kind) in enumerate(list(out)):
+        if kind != "swap" or not cut(i):
+            continue
+        t, sh = frames[i]["at"], shot(frames[i]["at"])
+        ts = [frames[j]["at"] for j, _ in out]
+        limit = max(max_gap, worst_gap(ts))
+        others = ts[:k] + ts[k + 1:]
+        cand = [j for j, f in enumerate(frames)
+                if f["at"] <= last and shot(f["at"]) == sh and j != i and seen(j) >= seen(i)
+                and (not cut(j) or mh(j) <= FULL_SHRINK * mh(i))
+                and not any(min(t, f["at"]) <= c1 and c0 <= max(t, f["at"]) for c0, c1, _ in changes)
+                and score(frames, j, chosen_ids) is not None and f["at"] not in others
+                and worst_gap(others + [f["at"]]) <= limit]
+        if not cand:
+            continue
+        best = max(cand, key=lambda j: (not cut(j), score(frames, j, chosen_ids), -abs(frames[j]["at"] - t)))
+        out[k] = (best, kind)
+        notes.append(f"keyframe {t:.2f} s -> {frames[best]['at']:.2f} s (same shot, people "
+                     + ("whole instead of cut off by the bottom edge)" if not cut(best) else
+                        f"farther away: {mh(best):.2f} instead of {mh(i):.2f} of the frame height)"))
+    return sorted(out, key=lambda m: frames[m[0]]["at"]), notes
+
+
+def part_span(duration, part_frames=PART_FRAMES):
+    """seconds of new frames the biggest autosplit part can carry: the Director splits a shot evenly (h3md_autosplit
+    .plan_parts) and may move a cut point by one 17-frame unit, so this + 17 frames.  A smaller VRAM budget only makes
+    the parts smaller.  Falls back to part_frames.  (Run 38: a fixed 14.4 s window dropped the keyframe at 8.33 s
+    although the real parts were 0-8.7 s with 3 and 8.7-16.5 s with 2.)"""
+    try:
+        from . import h3md_autosplit as A
+    except ImportError:
+        try:
+            import h3md_autosplit as A
+        except ImportError:
+            return part_frames / FPS
+    n = int(round(duration * FPS))
+    try:
+        parts = A.plan_parts(n, 0, int(part_frames))
+    except Exception:
+        parts = None
+    if not parts:
+        return part_frames / FPS
+    return min(part_frames, max(parts) + 17 * getattr(A, "NUDGE_UNITS", 1)) / FPS
+
+
 def finish_moments(frames, moments, chosen_ids, duration, max_gap=5.0, part_frames=PART_FRAMES,
                    part_max=PART_MAX_KF, cuts=()):
     """0.5.9 cross-check of the moment rules (picks every <= max_gap s, one per shot, none on close-ups):
@@ -541,7 +632,7 @@ def finish_moments(frames, moments, chosen_ids, duration, max_gap=5.0, part_fram
                                              -_motion(frames, i, frames[i]["who"][0][0])))
             out = [(best, "swap")]
             notes.append(f"only close-ups found: one keyframe at {frames[best]['at']:.2f} s anyway")
-    span = part_frames / FPS
+    span = part_span(duration, part_frames)
     changed = True
     while changed:
         changed = False
@@ -560,7 +651,7 @@ def finish_moments(frames, moments, chosen_ids, duration, max_gap=5.0, part_fram
             pool = [j for j in win if j not in alone] or win      # the only keyframe of a shot stays if possible
             drop = min(pool, key=lambda j: (gap_without(j), -abs(ts[j] - ts[j - 1]) if j else 0))
             notes.append(f"{len(win)} keyframes within {span:.1f} s: dropped the one at {ts[drop]:.2f} s "
-                         f"(Remake keeps 4 per part)")
+                         f"(Remake keeps {part_max} per part)")
             out.pop(drop)
             changed = True
             break
@@ -661,12 +752,15 @@ def edit_prompt(description: str, lang: str = "zh", original: str = "", cut_bott
                 "of the original person's clothes stays, and every piece of the original person sticking out around "
                 "her (hair, wig, ears, tail, ribbons, apron, skirt, socks, shoes) is removed and filled with the "
                 "background. Keep the original pose, action, body direction, position, "
-                "size and any covered parts exactly the same; everybody else, their body parts and the background "
+                "size and any covered parts exactly the same; if the original person is seen from behind or from the "
+                "side, the new person is seen from behind or from the side in the same way (from behind her face is "
+                "not visible); everybody else, their body parts and the background "
                 "in image 1 stay completely unchanged, with the same composition as image 1. No beautifying, no "
                 "colour grading, no filter: a realistic photo exactly like image 1." + (CUT_EN if cut_bottom else ""))
     who = f"图1正中间的那个人（{original}）" if original else "图1正中间的那个人"
     return (f"图1是一张照片的局部，把{who}换成图2中的人：{description}。衣服完全换成图2里那个人的衣服，"
             "原来那个人的衣服一件都不留。原来那个人伸出来的头发、假发、耳朵、尾巴、蝴蝶结、围裙、裙摆、袜子和鞋也全部去掉，补成背景。保持原来的姿势、动作、身体朝向、在图中的位置、大小和被遮挡的部分不变；"
+            "原来的人如果是背对镜头或侧身，新的人也一样背对镜头或侧身（背对时看不到脸）；"
             "图1里其他人、其他人的身体部分和背景完全不变，画面构图和图1一样。不要美化，不要调色，不加滤镜，"
             "是和图1一样的写实照片。" + (CUT_ZH if cut_bottom else ""))
 

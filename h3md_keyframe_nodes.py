@@ -493,7 +493,9 @@ class H3MDKeyframePrepare:
         moments = K.ensure_per_shot(frames, moments, ids, cuts, dur)
         LOG.info("%s shot cuts at %s s: %d keyframe(s) added so every shot has one", TAG, cuts,
                  len(moments) - n_before)
+        moments, full_notes = K.prefer_full(frames, moments, ids, cuts, dur, max_gap_s)
         moments, fin_notes = K.finish_moments(frames, moments, ids, dur, max_gap_s, cuts=cuts)
+        fin_notes = full_notes + fin_notes
         for n_ in fin_notes:
             LOG.info("%s %s", TAG, n_)
         LOG.info("%s keyframes at %s s (close-ups skipped)", TAG, [round(frames[i]["at"], 2) for i, _ in moments])

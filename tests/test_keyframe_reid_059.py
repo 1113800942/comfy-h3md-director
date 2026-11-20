@@ -152,8 +152,11 @@ def test_finish_moments_caps_four_per_part_and_never_empty():
     ms = [(i, "swap") for i in (6, 18, 30, 42, 54, 66)]           # 6 keyframes in 10 s
     out, notes = K.finish_moments(frames, ms, {0, 1}, 16.0)
     ts = [frames[i]["at"] for i, _ in out]
-    for a in range(len(ts)):
-        assert len([t for t in ts if 0 <= t - ts[a] < 345 / 24]) <= 4
+    import h3md_autosplit as A
+    parts = A.plan_parts(16 * 24, 0, 345)
+    for nudge in (-17, 0, 17):                                     # the Director may move the cut point one unit
+        b = parts[0] + nudge
+        assert len([t for t in ts if t * 24 < b]) <= 4 and len([t for t in ts if t * 24 >= b]) <= 4
     assert notes
     close = {0: (0.05, 0.0, 0.35, 1.0)}
     frames2 = [_f(i / 6, close) for i in range(30)]
@@ -170,3 +173,60 @@ def test_finish_moments_keeps_only_keyframe_of_a_shot():
     ts = [frames[i]["at"] for i, _ in out]
     assert 5.0 in ts                                             # the only keyframe of shot 4.5-10 s stays
     assert 11.0 in ts
+
+
+def test_part_span_follows_the_director_split():
+    # run 38: 396 frames are split 209 + 187, not into one 345-frame part
+    assert abs(K.part_span(396 / 24) - (209 + 17) / 24) < 1e-6
+    assert K.part_span(10.0) >= 10.0                               # one part: no thinning needed below 4
+
+
+def test_partial_person_at_side_and_bottom_is_skipped():
+    # run 38, 2.33 s: cut off at the left edge and the bottom -> shrunk + ghost of the original
+    assert K.closeup(_f(0, {0: (0.0, 0.19, 0.16, 1.0), 1: (0.23, 0.3, 0.69, 1.0)}), {0, 1})
+    # run 38, 0.33 s: waist-up, nobody at a side edge -> kept the size -> usable
+    assert not K.closeup(_f(0, {0: (0.12, 0.19, 0.39, 1.0), 1: (0.35, 0.19, 0.66, 1.0)}), {0, 1})
+    # full body at the side edge but feet inside the frame -> usable
+    assert not K.closeup(_f(0, {0: (0.0, 0.3, 0.12, 0.9)}), {0})
+
+
+def _shot_frames():
+    close = {0: (0.1, 0.1, 0.3, 1.0), 1: (0.5, 0.1, 0.7, 1.0)}      # chest-up, cut by the bottom
+    far = {0: (0.2, 0.3, 0.3, 1.0), 1: (0.5, 0.3, 0.6, 1.0)}        # farther, feet on the edge
+    whole = {0: (0.2, 0.3, 0.3, 0.9), 1: (0.5, 0.3, 0.6, 0.9)}      # whole people
+    return close, far, whole
+
+
+def test_prefer_full_moves_within_the_shot():
+    close, far, whole = _shot_frames()
+    frames = [_f(i / 6, close if i < 30 else far) for i in range(6 * 8)]
+    out, notes = K.prefer_full(frames, [(6, "swap")], {0, 1}, [], 8.0, 5.0)
+    assert frames[out[0][0]]["at"] >= 5.0 and notes                 # moved to the farther frames
+    frames = [_f(i / 6, close if i < 30 else whole) for i in range(6 * 8)]
+    out, _ = K.prefer_full(frames, [(6, "swap")], {0, 1}, [], 8.0, 5.0)
+    assert K.cut_at_bottom(frames[out[0][0]]["who"][0][1]) is False
+
+
+def test_prefer_full_never_leaves_the_shot_or_breaks_the_gap():
+    close, far, whole = _shot_frames()
+    frames = [_f(i / 6, close if i < 30 else whole) for i in range(6 * 16)]
+    out, notes = K.prefer_full(frames, [(6, "swap")], {0, 1}, [4.0], 16.0, 5.0)
+    assert out == [(6, "swap")] and not notes                       # the whole frames are in the next shot
+    frames = [_f(i / 6, close if i < 6 * 10 else whole) for i in range(6 * 16)]
+    out, _ = K.prefer_full(frames, [(6, "swap"), (90, "swap")], {0, 1}, [], 16.0, 5.0)
+    ts = [frames[i]["at"] for i, _ in out]
+    pts = [0.0] + ts + [16.0]
+    assert max(b - a for a, b in zip(pts, pts[1:])) <= 15.0         # never worse than before (1 -> 15 s was 14 s)
+
+
+def test_prefer_full_does_not_cross_a_place_change():
+    close, far, whole = _shot_frames()
+    swapped = {0: whole[1], 1: whole[0]}
+    frames = [_f(i / 6, close if i < 24 else swapped) for i in range(6 * 8)]
+    out, notes = K.prefer_full(frames, [(6, "swap")], {0, 1}, [], 8.0, 5.0)
+    assert out == [(6, "swap")] and not notes
+
+
+def test_edit_prompt_keeps_back_view():
+    assert "from behind" in K.edit_prompt("a man", "en")
+    assert "背对" in K.edit_prompt("一个男人", "zh")
