@@ -120,3 +120,21 @@ def test_handoff_uniform_group_not_joined():
          + [{0: (L, U), 1: (C, U), 3: (E_, U)}] * 10
     out, joins, unsure = run(rows)
     assert not joins
+
+
+
+def _f(at, boxes):
+    return {"at": at, "who": [[i, list(b)] for i, b in boxes.items()]}
+
+
+def test_no_keyframe_on_closeups():
+    close = {0: (0.05, 0.15, 0.35, 1.0), 1: (0.35, 0.1, 0.65, 1.0), 2: (0.65, 0.15, 0.95, 1.0)}
+    wide = {0: (0.1, 0.2, 0.25, 0.9), 1: (0.42, 0.2, 0.57, 0.9), 2: (0.75, 0.2, 0.9, 0.9)}
+    frames = [_f(i / 6, close if i / 6 < 3.0 else wide) for i in range(6 * 12)]
+    ids = {0, 1, 2}
+    assert K.closeup(frames[0], ids) and not K.closeup(frames[-1], ids)
+    m = K.pick_moments(frames, ids, 12.0, 5.0)
+    m = K.ensure_per_shot(frames, m, ids, [3.0], 12.0)
+    ats = [frames[i]["at"] for i, _ in m]
+    assert ats and min(ats) >= 3.0, ats
+    assert all(k == "swap" for _, k in m)

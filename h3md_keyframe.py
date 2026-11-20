@@ -391,11 +391,23 @@ def _motion(frames, i, pid):
     return max(d) if d else 0.0
 
 
+CLOSE_BOTTOM, CLOSE_H = 0.97, 0.5   # 0.5.9: a chosen person cut off by the bottom edge and this tall = a close-up
+
+
+def closeup(frame, chosen_ids):
+    """skill 12d 'no keyframe on a close-up': a chosen person fills the frame and is cut off at the bottom - the edit
+    model then redraws a small full-body person (11-19: waist-up dancers came back knee-high, a pointing hand of the
+    original was left floating)"""
+    return any(b[3] >= CLOSE_BOTTOM and (b[3] - b[1]) >= CLOSE_H
+               for pid, b in visible(frame) if pid in chosen_ids)
+
+
 def score(frames, i, chosen_ids):
-    """(chosen people seen, smallest gap of a chosen person to anybody else (capped), -motion, mean height) or None"""
+    """(chosen people seen, smallest gap of a chosen person to anybody else (capped), -motion, mean height) or None
+    (nobody chosen seen, or a close-up)"""
     vis = visible(frames[i])
     ch = [w for w in vis if w[0] in chosen_ids]
-    if not ch:
+    if not ch or closeup(frames[i], chosen_ids):
         return None
     g = 0.05
     for pid, b in ch:
@@ -425,9 +437,16 @@ def pick_moments(frames, chosen_ids, duration, max_gap=5.0):
                 best, bs = i, s
         if best is None:
             present = [i for i in cand if any(w[0] in chosen_ids for w in frames[i].get("who") or ())]
-            if present:
-                best = max(present, key=lambda i: max(w[1][3] - w[1][1] for w in frames[i]["who"]
-                                                      if w[0] in chosen_ids))
+            usable = [i for i in present if not closeup(frames[i], chosen_ids)]
+            if present and not usable:
+                # only close-ups here: no keyframe, look further on (the next mid shot carries the swap)
+                lo, hi = hi, min(hi + max_gap, last)
+                if lo >= last:
+                    break
+                continue
+            if usable:
+                best = max(usable, key=lambda i: max(w[1][3] - w[1][1] for w in frames[i]["who"]
+                                                     if w[0] in chosen_ids))
                 out.append((best, "swap"))
             else:
                 best = cand[len(cand) // 2]
@@ -487,8 +506,9 @@ def ensure_per_shot(frames, moments, chosen_ids, cuts, duration, settle=SHOT_SET
                 break
         if scored:
             out.append((max(scored)[1], "swap"))
-        elif cand:
+        elif cand and not any(any(w[0] in chosen_ids for w in frames[i].get("who") or ()) for i in cand):
             out.append((cand[len(cand) // 2], "plain"))
+        # else: the chosen people are there but only in close-ups - no keyframe (an edited close-up does more harm)
     return sorted(out, key=lambda m: frames[m[0]]["at"])
 
 
