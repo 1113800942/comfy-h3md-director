@@ -109,3 +109,12 @@ def test_handoff_different_people_side_by_side_not_joined():
     rows = [{0: (L, A), 2: (R, D)}] * 10 + [{0: (L, A), 2: (R, D), 3: (C, B)}] * 6 + [{0: (L, A), 3: (C, B)}] * 10
     out, joins, unsure = run(rows)
     assert not joins
+
+
+def test_handoff_uniform_group_not_joined():
+    """everyone in the same outfit: a new dancer walking in while another leaves is not taken for her"""
+    U = ("black", "navy")
+    rows = [{0: (L, U), 1: (C, U), 2: (R, U)}] * 10 + [{0: (L, U), 1: (C, U), 2: (R, U), 3: ((0.3, 0.2, 0.42, 0.95), U)}] * 6 \
+         + [{0: (L, U), 1: (C, U), 3: ((0.3, 0.2, 0.42, 0.95), U)}] * 10
+    out, joins, unsure = run(rows)
+    assert not joins

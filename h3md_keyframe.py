@@ -276,6 +276,15 @@ def reid_merge(per_frame, looks=None, times=None, keep=None):
                         ious.append(max(iou(b, nb) for b in ob))
                 ov = sum(ious) / len(ious) if ious else 0.0
                 lk = look_similarity(looks.get(old), looks.get(new)) if looks else 0.0
+                # look alone only counts when the new track looks clearly more like the lost person than like
+                # anyone else on screen then (a group in the same uniform: everyone alike -> not joined)
+                if ov < REID_HANDOFF_IOU and lk >= REID_SIM_MIN and looks:
+                    others = {find(q) for q in per_frame[f0] if find(q) not in (old, find(new))}
+                    rival = max([look_similarity(looks.get(o), looks.get(new)) for o in others] or [0.0])
+                    if lk - rival < REID_MARGIN:
+                        why_not.append(f"{old}: seen together {len(shared)} frames, looks like others on screen too "
+                                       f"(look {lk:.2f} vs {rival:.2f})")
+                        continue
                 if ov < REID_HANDOFF_IOU and lk < REID_SIM_MIN:
                     why_not.append(f"{old}: seen together {len(shared)} frames, boxes apart (IoU {ov:.2f}), "
                                    f"look {lk:.2f}")
