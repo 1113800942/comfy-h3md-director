@@ -69,6 +69,10 @@ try:
     from . import h3md_face_redraw as RD
 except ImportError:  # flat import (tests)
     import h3md_face_redraw as RD
+try:
+    from . import h3md_model_paths as MP
+except ImportError:  # flat import (tests)
+    import h3md_model_paths as MP
 
 LOG = logging.getLogger("H3MD")
 _TAG = "[H3MD FaceRefineSave]"
@@ -1356,6 +1360,47 @@ _FALLBACK_STITCH = {
 }
 
 
+FR_MISSING_TIP = ("ComfyUI-H3-FaceRefine is not loaded, so face refine is skipped (the video is still saved). "
+                  "Install it, update ComfyUI (an old ComfyUI makes it fail to load), install its requirements, "
+                  "restart, and look for 'IMPORT FAILED' in the startup log. 修脸插件 ComfyUI-H3-FaceRefine 没加载："
+                  "装上它、更新 ComfyUI、装它的依赖后重启；启动日志里搜 IMPORT FAILED。视频照常保存，只是不修脸。")
+
+
+def _fallback_track():
+    """0.5.9: the widgets when ComfyUI-H3-FaceRefine is not loaded. Same choices it would give (detector files from
+    the folders H3MD registers, both cut modes), so a saved workflow still loads instead of turning red; running
+    then saves without face refine and says why."""
+    out = dict(_FALLBACK_TRACK)
+    try:
+        files = MP.detector_files()
+    except Exception:
+        files = []
+    out["detector"] = (["none"] + files, {"default": files[0] if files else "none", "tooltip": FR_MISSING_TIP})
+    out["fallback_detector"] = (["none"] + files, {"default": "none", "tooltip": FR_MISSING_TIP})
+    out["cut_detection"] = (["none", "auto (pyscenedetect)"], {"default": "none", "tooltip": FR_MISSING_TIP})
+    return out
+
+
+def refine_blocker(detector):
+    """0.5.9: why face refine cannot run (None = it can): FaceRefine missing or too old, no detector, or the
+    detector file not found. The node then saves the video without refine instead of failing."""
+    try:
+        _fr_module()
+    except RuntimeError as exc:
+        return FR_MISSING_TIP if "Track + Crop" in str(exc) else str(exc)
+    if not detector or detector == "none":
+        return ("no face detector chosen (detector = none): pick a face detector, e.g. face_yolov8m.pt in "
+                "models/ultralytics/bbox. 没选人脸检测模型。")
+    try:
+        found = MP.find_detector(detector)
+    except Exception:
+        found = True    # cannot check here: leave it to the detector loader
+    if not found:
+        return (f"face detector '{detector}' not found: put it in models/ultralytics/bbox and restart ComfyUI. "
+                f"找不到人脸检测模型 {detector}：放进 models/ultralytics/bbox 后重启。")
+    return None
+
+
 def _copy_spec(spec, **override):
     if len(spec) > 1 and isinstance(spec[1], dict):
         opts = dict(spec[1])
@@ -1375,7 +1420,7 @@ def _fr_specs():
         out_t = {k: track.get(k, _FALLBACK_TRACK[k]) for k in TRACK_REQUIRED + TRACK_OPTIONAL}
         out_s = {k: stitch.get(k, _FALLBACK_STITCH[k]) for k in STITCH_REQUIRED + STITCH_OPTIONAL}
     except Exception:
-        out_t, out_s = dict(_FALLBACK_TRACK), dict(_FALLBACK_STITCH)
+        out_t, out_s = _fallback_track(), dict(_FALLBACK_STITCH)
     for k in ("canvas_width", "canvas_height"):
         out_t[k] = _copy_spec(out_t[k], default=CANVAS_DEFAULT)
     return out_t, out_s
@@ -1526,6 +1571,14 @@ class H3MDSaveVideoFaceRefineInterp:
             path, frames, video, preview = res["result"]
             return {"ui": res["ui"], "result": (path, frames, video, "face_refine off: saved like H3MD Save Video "
                                                                      f"Interp ({frames} frames) -> {path}", preview)}
+        blocker = refine_blocker(track_kw.get("detector"))
+        if blocker:   # 0.5.9: a missing face-refine part never stops the save (Bilibili reports 2026-11-20)
+            LOG.warning("%s face refine skipped: %s Saving the video WITHOUT face refine.", _TAG, blocker)
+            res = S.H3MDSaveVideoInterp().save(segments=segments, prompt=prompt, extra_pnginfo=extra_pnginfo,
+                                               unique_id=unique_id, **save_kw)
+            path, frames, video, preview = res["result"]
+            return {"ui": res["ui"], "result": (path, frames, video, f"face refine SKIPPED ({blocker}); saved without "
+                                                                     f"refine ({frames} frames) -> {path}", preview)}
         if identity_reference is None and isinstance(segments, dict) and segments.get("id_ref_file"):
             # 2026-10-28 idref: the Director's ID Ref picture (a wired identity_reference still wins)
             try:
