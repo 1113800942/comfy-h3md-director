@@ -2,6 +2,27 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.5.8] - 2026-11-19
+
+### Fixed / 修复
+- Keyframe workflow (multi-person swap): Prepare now finds the source's shot cuts and makes sure every shot has a keyframe (the skill's rule 'one keyframe per shot'). Before, keyframes were only spaced by max_gap_s; after a cut with no keyframe Remake could not tell who is who in the new shot and drew one person twice (cosplay MV, cut at 14.3 s). The cuts are listed in Prepare's info and the log.
+  关键帧流程（多人换人）：Prepare 会找出原片的剪辑点，保证每个镜头都有一张关键帧。以前只按间隔挑，剪辑后的新镜头没有关键帧时，Remake 认不出谁是谁，会把一个人画成两个（cos 群舞片 14.3 秒剪辑处）。
+
+## [0.5.7] - 2026-11-19
+
+### Added / 新增
+- Keyframe workflow (multi-person swap): new node **H3MD Keyframe 1b: Recast** (sequential). It runs the image edit itself, one person after another; each crop is cut from the keyframe where the people before her are already recast, so the neighbours in a crop are the new characters, never the originals. Before, all crops were cut from the source frame at once, and bits of a bigger original (wig, ears, tail, wide skirt, apron, socks) stayed around the new person. Sliders: `mask_grow` (default 0.25: how far each recast person's own area reaches past her box; 0.25-0.35 for cosplay-sized originals) and `protect_others` (default -0.05, only for the other people being recast; people who are not recast always keep their source pixels). It replaces the Text Encode / Sampler / VAE Decode chain between Prepare and Assemble; Assemble takes its job. Tested on a three-person cosplay dance: clean keyframes.
+  关键帧流程（多人换人）：新节点 **H3MD Keyframe 1b: Recast 串行换人**。在节点里调用修图模型，一个人一个人换：后一个人从已经换好前面人的帧上裁，裁剪图里的旁人都是新角色，不会再是原角色。以前所有裁剪图一次从原帧裁出，原角色比新角色轮廓大时（假发、耳朵、尾巴、蓬裙、围裙、袜子），会残留在新人物周围。滑块：`mask_grow`（遮罩扩大，默认 0.25，cos 服 0.25-0.35）和 `protect_others`（只管要换的人，默认 -0.05；不换的人始终保留原图）。它替代 Prepare 和 Assemble 中间的 Text Encode / Sampler / VAE Decode；三人 cos 群舞实测关键帧干净。
+
+### Changed / 修改
+- The example workflow `Qwen Image 2.1 Keyframe.json` now uses Recast; the old parallel chain is no longer shipped (Assemble still accepts it, and has `mask_grow` / `protect_others` too, default as before).
+  示例工作流 `Qwen Image 2.1 Keyframe.json` 改用 Recast；旧的并行链路不再随包（Assemble 仍兼容，也带两个滑块，默认值和以前一样）。
+- The edit prompt also asks to remove every piece of the original sticking out around the new person and fill it with the background.
+  修图提示词加了一句：原角色伸出来的部分全部去掉，补成背景。
+- The keyframe nodes show the version in their names, like the Director. / 关键帧节点名字里显示版本号，和导演台一样。
+- Tip: write shoes and legwear in each description line and what she does NOT wear (e.g. "bare legs and black stiletto heels; no socks, no boots, no apron"), or the editor copies the original's.
+  提示：每行描述写上鞋和腿（光腿、袜子），再写明没有什么（如 "no socks, no boots, no apron"），否则修图会照抄原角色的鞋袜。
+
 ## [0.5.6] - 2026-11-18
 
 ### Added / 新增

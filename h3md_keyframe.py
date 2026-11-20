@@ -25,6 +25,10 @@ GEN_MP = 1.6              # edit size (megapixels), multiples of 32
 SPACING = 0.7            # keyframes are picked in (prev + 0.7 * max_gap, prev + max_gap]: as few as the gap allows
 FEATHER = 0.08            # paste feather, share of the crop width
 PROTECT_PAD = 0.06        # other people's boxes grown by this (share of their size) are kept from the source
+                          # (0.5.7 test: -0.05 made it worse - every crop is cut from the SOURCE frame, so its
+                          # neighbours are the originals and less protection pastes them back)
+OWN_GROW = 0.0            # 0.5.7 (default off = 0.5.6): this person's own box grown by this (share of its width; half of it up/down) is never
+                          # protected, so wigs, tails, ears and wide skirts of the original sticking out get covered
 
 CN = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
 ORDINAL = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"]
@@ -243,6 +247,57 @@ def pick_moments(frames, chosen_ids, duration, max_gap=5.0):
     return out
 
 
+
+# ---------------------------------------------------------------------------------------------------- cuts (0.5.8)
+CUT_HIST, CUT_PIX, CUT_HIST_RATIO, CUT_PIX_RATIO, CUT_MIN_SHOT = 0.10, 0.12, 3.0, 2.5, 0.5
+SHOT_SETTLE, SHOT_LOOK = 0.3, 2.5
+
+
+def cuts_from(times, hist_d, pix_d):
+    """shot cuts from per-frame distances to the previous frame: colour-histogram distance (1 - intersection) and mean
+    pixel difference (0-1).  A cut is a jump in both, well above the level of the frames around it (a fast dance or a
+    camera move stays below).  Tested 2026-11-19 on 8 clips: the 3 cuts of the cosplay MV found, no false cut in 5
+    single-shot dances."""
+    import numpy as np
+    hd, pd = np.asarray(hist_d, np.float32), np.asarray(pix_d, np.float32)
+    cuts = []
+    for i in range(1, len(times)):
+        lo, hi = max(1, i - 12), min(len(times), i + 13)
+        if hi - lo <= 2:
+            continue
+        lh = float(np.median(np.r_[hd[lo:i], hd[i + 1:hi]]))
+        lp = float(np.median(np.r_[pd[lo:i], pd[i + 1:hi]]))
+        if (hd[i] > CUT_HIST and pd[i] > CUT_PIX and hd[i] > CUT_HIST_RATIO * max(lh, 0.02)
+                and pd[i] > CUT_PIX_RATIO * max(lp, 0.01)):
+            if not cuts or times[i] - cuts[-1] >= CUT_MIN_SHOT:
+                cuts.append(round(float(times[i]), 3))
+    return cuts
+
+
+def ensure_per_shot(frames, moments, chosen_ids, cuts, duration, settle=SHOT_SETTLE, look=SHOT_LOOK):
+    """skill 12d rule 'one keyframe per shot': a shot without a keyframe gets one - the best scored frame (most chosen
+    people seen, standing apart, little motion) in the first `look` s after the cut (skipping `settle` s), else
+    anywhere in the shot.  Without a keyframe after a cut Remake cannot tell who is who in the new shot (2026-11-19:
+    a person drawn twice after the cut at 14.3 s).  -> moments sorted by time."""
+    bounds = [0.0] + sorted(c for c in cuts if 0.0 < c < duration) + [duration]
+    out = list(moments)
+    have = [frames[i]["at"] for i, _ in out]
+    for s0, s1 in zip(bounds, bounds[1:]):
+        if s1 - s0 < 0.4 or any(s0 <= t < s1 for t in have):
+            continue
+        cand, scored = [], []
+        for lo, hi in ((s0 + settle, min(s1, s0 + settle + look)), (s0 + settle, s1)):
+            cand = [i for i, f in enumerate(frames) if lo <= f["at"] < hi - 1.0 / FPS]
+            scored = [(s, i) for i in cand for s in [score(frames, i, chosen_ids)] if s is not None]
+            if scored:
+                break
+        if scored:
+            out.append((max(scored)[1], "swap"))
+        elif cand:
+            out.append((cand[len(cand) // 2], "plain"))
+    return sorted(out, key=lambda m: frames[m[0]]["at"])
+
+
 def place_changes(frames, ids, min_hold=0.5):
     """[(t0, t1, [(a, b), ...])]: moments where the left-to-right order of `ids` changes, with the pairs that swapped.
     Only frames where all of them are seen count; an order has to hold min_hold seconds to count."""
@@ -326,13 +381,15 @@ def edit_prompt(description: str, lang: str = "zh", original: str = "") -> str:
         who = f"the person in the middle of image 1 ({original})" if original else "the person in the middle of image 1"
         return (f"Image 1 is a part of a photo. Replace {who} with the person from "
                 f"image 2: {description}. The clothes become entirely the clothes of the person in image 2; nothing "
-                "of the original person's clothes stays. Keep the original pose, action, body direction, position, "
+                "of the original person's clothes stays, and every piece of the original person sticking out around "
+                "her (hair, wig, ears, tail, ribbons, apron, skirt, socks, shoes) is removed and filled with the "
+                "background. Keep the original pose, action, body direction, position, "
                 "size and any covered parts exactly the same; everybody else, their body parts and the background "
                 "in image 1 stay completely unchanged, with the same composition as image 1. No beautifying, no "
                 "colour grading, no filter: a realistic photo exactly like image 1.")
     who = f"图1正中间的那个人（{original}）" if original else "图1正中间的那个人"
     return (f"图1是一张照片的局部，把{who}换成图2中的人：{description}。衣服完全换成图2里那个人的衣服，"
-            "原来那个人的衣服一件都不留。保持原来的姿势、动作、身体朝向、在图中的位置、大小和被遮挡的部分不变；"
+            "原来那个人的衣服一件都不留。原来那个人伸出来的头发、假发、耳朵、尾巴、蝴蝶结、围裙、裙摆、袜子和鞋也全部去掉，补成背景。保持原来的姿势、动作、身体朝向、在图中的位置、大小和被遮挡的部分不变；"
             "图1里其他人、其他人的身体部分和背景完全不变，画面构图和图1一样。不要美化，不要调色，不加滤镜，"
             "是和图1一样的写实照片。")
 
@@ -354,11 +411,13 @@ def colour_match(edit, orig, inner):
     return np.clip(e, 0, 255)
 
 
-def paste_alpha(crop, W, H, own, others):
+def paste_alpha(crop, W, H, own, others, own_grow=None, protect=None, protects=None):
     """alpha [h, w] for pasting an edited crop: linear feather on the sides inside the frame, and 0 (feathered) over
     every OTHER person's box (grown by PROTECT_PAD) except where it overlaps this person's own box - so the people
     around keep their source pixels and an earlier pasted recast stays."""
     import numpy as np
+    own_grow = OWN_GROW if own_grow is None else max(0.0, float(own_grow))
+    protect = PROTECT_PAD if protect is None else float(protect)
     x0, y0, x1, y1 = crop
     w, h = x1 - x0, y1 - y0
     a = np.ones((h, w), np.float32)
@@ -373,16 +432,18 @@ def paste_alpha(crop, W, H, own, others):
     if y1 < H:
         a[h - f:, :] *= r[::-1][:, None]
     keep = np.zeros((h, w), np.float32)
-    for b in others:
+    for j, b in enumerate(others):
         bw, bh = b[2] - b[0], b[3] - b[1]
-        px, py = PROTECT_PAD * bw, PROTECT_PAD * bh
+        pr = protect if protects is None else float(protects[j])   # 0.5.7 sequential: per person
+        px, py = pr * bw, pr * bh
         bx0, by0 = int(max(x0, b[0] - px)) - x0, int(max(y0, b[1] - py)) - y0
         bx1, by1 = int(min(x1, b[2] + px)) - x0, int(min(y1, b[3] + py)) - y0
         if bx1 > bx0 and by1 > by0:
             keep[by0:by1, bx0:bx1] = 1.0
     if keep.any():
-        ox0, oy0 = int(max(x0, own[0])) - x0, int(max(y0, own[1])) - y0
-        ox1, oy1 = int(min(x1, own[2])) - x0, int(min(y1, own[3])) - y0
+        gw, gh = own_grow * (own[2] - own[0]), 0.5 * own_grow * (own[3] - own[1])
+        ox0, oy0 = int(max(x0, own[0] - gw)) - x0, int(max(y0, own[1] - gh)) - y0
+        ox1, oy1 = int(min(x1, own[2] + gw)) - x0, int(min(y1, own[3] + gh)) - y0
         if ox1 > ox0 and oy1 > oy0:
             keep[oy0:oy1, ox0:ox1] = 0.0
         k = max(1, f // 2)                      # soften the protected edges a little

@@ -123,12 +123,16 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
 的换人模型,高清这一遍照常用 H3MD 自己的。
 
 1. **关键帧 + 计划包,本地一次跑完**:打开 `example_workflows/Qwen Image 2.1 Keyframe.json`。把原片拖进「加载视频」节点
-   (只换其中一段就在 Prepare 填 `start_s` 起始秒、`end_s` 结束秒,连同原声一起截出来),接上角色图,写"图1换左二"(人按开头第一帧清楚的画面从左到右编号,看「认人表」核对),每张图写一行外貌描述。
-   **H3MD Keyframe 1: Prepare 准备关键帧** 用 ComfyUI 自带的 SAM3.1 跟踪每个人,挑关键帧时刻(相邻不超过约 5 秒,
-   避开人贴在一起),把每个要换的人裁出来;中间用任何修图模型重画(示例是 Qwen Image 2.1 编辑 + 2 步 LoRA,提示词直接用
-   Prepare 写好的,也可以换 Flux 等);**H3MD Keyframe 2: Assemble 打包计划** 对色、贴回、写 Remake 计划,计划包存到
-   `output/H3MD_plans/`。看「关键帧总览」,姿势或手不对就换种子重跑。也可以不用这个工作流,让智能体画关键帧、
-   写计划(`skills/h3md-prompt` 第 12d 节)。Remake 很听关键帧的话,关键帧画得好不好直接决定成片。
+   (只换其中一段就在 Prepare 填 `start_s` 起始秒、`end_s` 结束秒,连同原声一起截出来),接上角色图,写"图1换左二"(人按开头第一帧清楚的画面从左到右编号,看「认人表」核对),
+   每张图写一行外貌描述:人种、年龄、长相、发型、每件衣服,**还要写鞋和腿(光腿 / 袜子),以及没有什么**
+   (如 "bare legs and black stiletto heels; no socks, no boots, no apron"),否则修图会照抄原角色的鞋袜。
+   **H3MD Keyframe 1: Prepare 准备关键帧** 用 ComfyUI 自带的 SAM3.1 跟踪每个人,找出原片的剪辑点,挑关键帧时刻:
+   **每个镜头至少一张**(0.5.8),相邻不超过约 5 秒,避开人贴在一起。
+   **H3MD Keyframe 1b: Recast 串行换人**(0.5.7)用 Qwen Image 2.1 编辑 + 2 步 LoRA 重画,**一个人一个人换**:后一个人
+   从已经换好前面人的帧上裁,原角色不会被贴回去。新人物周围还残留原角色的假发、耳朵、尾巴、蓬裙时,把 `mask_grow`
+   (默认 0.25)调到 0.3-0.35。**H3MD Keyframe 2: Assemble 打包计划** 写 Remake 计划,计划包存到 `output/H3MD_plans/`。
+   看「关键帧总览」,姿势或手不对就换种子重跑。也可以不用这个工作流,让智能体画关键帧、写计划(`skills/h3md-prompt`
+   第 12d 节)。Remake 很听关键帧的话,关键帧画得好不好直接决定成片。
 2. **计划**:在导演台(本地或 RunningHub)导入这个 zip。
 3. **运行**:打开 `example_workflows/H3MD Director Remake.json`(总控台风格 **多人换人**,Loop 的 `remake_model`
    已接好 Remake 模型)。先只跑第一段低清,满意了再跑全片。
