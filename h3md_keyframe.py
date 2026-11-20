@@ -152,6 +152,7 @@ REID_HANDOFF = 12        # sampled frames (2 s at 6 fps) an old and a new track 
                           # SAM3 hands over (11-19 log: old track 0 ended 0.8 s = 6 frames after new track 3 began) -
                           # allowed only if their boxes overlap there (a double box on one person) or they look alike
 REID_HANDOFF_IOU = 0.3
+REID_EDGE = 0.03          # a box this close to the left / right frame edge = walking out or in
 REID_MIN_FRAMES = 2       # an id seen in fewer sampled frames is noise: never joined, never a candidate
 REID_SIM_ELIM = 0.25      # only one lost person it could be: join unless the look is clearly different
 REID_SIM_MIN = 0.55       # several lost people: the best look must reach this ...
@@ -192,6 +193,11 @@ def appearance(frames_u8, per_frame):
     import numpy as np
     acc = {}
     for img, fr in zip(frames_u8, per_frame):
+        # grey-world white balance per frame: coloured stage light (pink / violet / cyan washes) tints everyone the
+        # same way and would make one dancer look like another from frame to frame
+        f = img.astype(np.float32)
+        m = f.reshape(-1, 3).mean(0)
+        img = np.clip(f * (m.mean() / np.maximum(m, 1.0)), 0, 255).astype(np.uint8)
         hh, ww = img.shape[:2]
         items = list(fr.items())
         for pid, b in items:
@@ -249,6 +255,13 @@ def reid_merge(per_frame, looks=None, times=None, keep=None):
     start_ids = set(per_frame[0]) if per_frame else set()
     joins, unsure = [], []
     notes = []
+    def box_of(pid_root, i, latest=True):
+        bs = [bx for q, bx in per_frame[i].items() if find(q) == pid_root]
+        return bs[-1] if bs else None
+
+    def at_edge(bx):
+        return bx is not None and (bx[0] <= REID_EDGE or bx[2] >= 1 - REID_EDGE)
+
     for new in sorted(real - start_ids, key=lambda q: first[q]):
         if new in keep:
             continue
@@ -262,52 +275,55 @@ def reid_merge(per_frame, looks=None, times=None, keep=None):
             if max(span) >= max(frames_of[new]):        # the old one is still there after the new one ends
                 why_not.append(f"{old}: still there after it")
                 continue
+            ov = 0.0
             if len(shared) > REID_OVERLAP or max(span) > f0 + REID_OVERLAP:
-                # side by side for a while: one person only if it is a short hand-over and the two boxes sit on
-                # each other there (a double box) or the two look alike
                 if len(shared) > REID_HANDOFF or max(span) > f0 + REID_HANDOFF:
                     why_not.append(f"{old}: seen together {len(shared)} frames")
                     continue
                 ious = []
                 for i in shared:
-                    ob = [b for q, b in per_frame[i].items() if find(q) == old]
+                    ob = [bx for q, bx in per_frame[i].items() if find(q) == old]
                     nb = per_frame[i].get(new)
                     if ob and nb is not None:
-                        ious.append(max(iou(b, nb) for b in ob))
+                        ious.append(max(iou(bx, nb) for bx in ob))
                 ov = sum(ious) / len(ious) if ious else 0.0
-                lk = look_similarity(looks.get(old), looks.get(new)) if looks else 0.0
-                # look alone only counts when the new track looks clearly more like the lost person than like
-                # anyone else on screen then (a group in the same uniform: everyone alike -> not joined)
-                if ov < REID_HANDOFF_IOU and lk >= REID_SIM_MIN and looks:
-                    others = {find(q) for q in per_frame[f0] if find(q) not in (old, find(new))}
-                    rival = max([look_similarity(looks.get(o), looks.get(new)) for o in others] or [0.0])
-                    if lk - rival < REID_MARGIN:
-                        why_not.append(f"{old}: seen together {len(shared)} frames, looks like others on screen too "
-                                       f"(look {lk:.2f} vs {rival:.2f})")
-                        continue
-                if ov < REID_HANDOFF_IOU and lk < REID_SIM_MIN:
-                    why_not.append(f"{old}: seen together {len(shared)} frames, boxes apart (IoU {ov:.2f}), "
-                                   f"look {lk:.2f}")
-                    continue
-            cands.append(old)
-        notes.append(f"track {new} from {times[f0]:.1f} s: candidates {cands}; ruled out {why_not}")
+            # walked out of the frame / walked in: then it can be a different person - do not decide by elimination
+            edge = at_edge(box_of(old, max(span))) or at_edge(per_frame[f0].get(new))
+            cands.append((old, ov, edge, len(shared)))
+        notes.append(f"track {new} from {times[f0]:.1f} s: candidates "
+                     f"{[(c[0], 'overlap %d IoU %.2f' % (c[3], c[1]), 'edge' if c[2] else 'inside') for c in cands]}; "
+                     f"ruled out {why_not}")
         if not cands:
             continue
-        sims = sorted(((look_similarity(looks.get(o), looks.get(new)) if looks else 0.0, o) for o in cands),
-                      reverse=True)
-        best_s, best = sims[0]
+        nl = looks.get(new) if looks else None
+        scored = []
+        for old, ov, edge, sh in cands:
+            lk = look_similarity(looks.get(old), nl) if looks else 0.0
+            scored.append((lk, old, ov, edge))
+        scored.sort(reverse=True)
+        lk, best, ov, edge = scored[0]
+        others = {find(q) for q in per_frame[f0] if find(q) not in {c[0] for c in cands} | {find(new)}}
+        rival = max([look_similarity(looks.get(o), nl) for o in others] or [0.0]) if looks else 0.0
         why = None
-        if len(sims) == 1 and (not looks or best_s >= REID_SIM_ELIM or looks.get(new) is None
-                               or looks.get(best) is None):
-            why = "elimination"
-        elif len(sims) > 1 and best_s >= REID_SIM_MIN and best_s - sims[1][0] >= REID_MARGIN:
-            why = "look"
+        if len(scored) == 1:
+            if ov >= REID_HANDOFF_IOU:
+                why = "double box"                       # the two tracks sat on one person during the hand-over
+            elif not edge and (nl is None or (lk >= REID_SIM_ELIM and lk >= rival - REID_MARGIN)):
+                why = "elimination"                      # the only person missing, nobody walked out or in, and
+                                                         # the look does not point to someone else
+            elif lk >= REID_SIM_MIN and lk - rival >= REID_MARGIN:
+                why = "look"
+        else:
+            if lk >= REID_SIM_MIN and lk - scored[1][0] >= REID_MARGIN and lk - rival >= REID_MARGIN:
+                why = "look"
         if not why:
-            unsure.append({"new": new, "at": times[f0], "candidates": [[o, round(s, 3)] for s, o in sims]})
+            unsure.append({"new": new, "at": times[f0], "candidates": [[o, round(s_, 3)] for s_, o, _, _ in scored]})
+            notes.append(f"track {new}: not joined (look {lk:.2f}, best other on screen {rival:.2f}, "
+                         f"{'edge' if edge else 'inside'})")
             continue
         root[new] = best
         frames_of[best] = frames_of[best] | frames_of[new]
-        joins.append({"new": new, "into": best, "at": times[f0], "why": why, "look": round(best_s, 3)})
+        joins.append({"new": new, "into": best, "at": times[f0], "why": why, "look": round(lk, 3)})
     out = []
     for i, fr in enumerate(per_frame):
         row = {}
