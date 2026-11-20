@@ -458,11 +458,23 @@ class H3MDKeyframePrepare:
         # 0.5.9: join people the tracker split (blackout, cut, spin, out and back in) - elimination, then hair /
         # clothes colour.  Before, the person a picture is mapped to was "lost" and later keyframes missed her.
         try:
-            looks = K.appearance(small, per_frame)
-            per_frame, reid_joins, reid_unsure = K.reid_merge(per_frame, looks, times)
+            track_looks = K.appearance(small, per_frame)
+            per_frame, reid_joins, reid_unsure = K.reid_merge(per_frame, track_looks, times)
         except Exception as exc:
             reid_joins, reid_unsure = [], []
             LOG.warning("%s re-identification failed (%s): tracks used as they are", TAG, exc)
+        try:   # 0.5.9 diagnostics: every track's time span, and why a new track was or was not joined
+            spans = {}
+            for t_, fr in zip(times, per_frame):
+                for q in fr:
+                    a = spans.setdefault(q, [t_, t_, 0])
+                    a[1], a[2] = t_, a[2] + 1
+            LOG.info("%s tracks after re-identification: %s", TAG,
+                     "; ".join(f"{q}: {a[0]:.1f}-{a[1]:.1f} s ({a[2]} frames)" for q, a in sorted(spans.items())))
+            for n_ in getattr(K.reid_merge, "notes", []):
+                LOG.info("%s re-id %s", TAG, n_)
+        except Exception:
+            pass
         for j in reid_joins:
             LOG.info("%s person found again at %.1f s (track %s = track %s, %s, look %.2f)", TAG, j["at"], j["new"],
                      j["into"], j["why"], j["look"])

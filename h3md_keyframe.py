@@ -244,22 +244,28 @@ def reid_merge(per_frame, looks=None, times=None, keep=None):
     keep = set(keep or ())
     start_ids = set(per_frame[0]) if per_frame else set()
     joins, unsure = [], []
+    notes = []
     for new in sorted(real - start_ids, key=lambda q: first[q]):
         if new in keep:
             continue
         f0 = first[new]
-        cands = []
-        for old in {find(q) for q in real if first[q] < f0}:
+        cands, why_not = [], []
+        for old in sorted({find(q) for q in real if first[q] < f0}):
             if old == find(new):
                 continue
             span = frames_of[old]
+            together = len(span & frames_of[new])
             if max(span) >= max(frames_of[new]):        # the old one is still there after the new one ends
+                why_not.append(f"{old}: still there after it")
                 continue
-            if len(span & frames_of[new]) > REID_OVERLAP:
+            if together > REID_OVERLAP:
+                why_not.append(f"{old}: seen together {together} frames")
                 continue
             if max(span) > f0 + REID_OVERLAP:            # both carry on side by side: two people
+                why_not.append(f"{old}: carries on beside it")
                 continue
             cands.append(old)
+        notes.append(f"track {new} from {times[f0]:.1f} s: candidates {cands}; ruled out {why_not}")
         if not cands:
             continue
         sims = sorted(((look_similarity(looks.get(o), looks.get(new)) if looks else 0.0, o) for o in cands),
@@ -283,6 +289,7 @@ def reid_merge(per_frame, looks=None, times=None, keep=None):
         for pid, b in sorted(fr.items(), key=lambda kv: first[kv[0]]):
             row[find(pid)] = b                           # where both were seen, the newer track's box wins
         out.append(row)
+    reid_merge.notes = notes
     return out, joins, unsure
 
 

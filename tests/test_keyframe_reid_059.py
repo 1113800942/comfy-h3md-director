@@ -85,3 +85,12 @@ def test_ghost_overlap_allowed():
     out, joins, unsure = run(rows)
     assert joins and joins[0]["into"] == 1
     assert out[7][1] == C                                   # newer track's box wins where both were seen
+
+
+def test_prepare_keeps_people_at_start_separate():
+    """11-19 bug: the track appearance overwrote `looks` (people_at_start), so the edit prompts got colour
+    histograms as 'the original person' and the log said 'people_at_start has 5 line(s)'."""
+    src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "h3md_keyframe_nodes.py"),
+               encoding="utf-8").read()
+    assert "track_looks = K.appearance(" in src
+    assert "\n            looks = K.appearance(" not in src
