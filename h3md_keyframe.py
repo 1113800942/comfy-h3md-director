@@ -1,9 +1,11 @@
 """H3MD Keyframe - pure logic for the multi-person swap keyframes (2026-11-17, H3MD 0.5.0).
 
-The two nodes in h3md_keyframe_nodes.py wrap this file:
-  1 Prepare: who is who (numbered left to right at the start), which moments become keyframes, and for every person to
-    recast at every moment a crop + an edit prompt for ANY image-edit model (Qwen Image 2.1, Flux, ...).
-  2 Assemble: the edited crops are colour-matched and pasted back, and the Remake plan is written.
+The nodes in h3md_keyframe_nodes.py wrap this file:
+  1 Prepare: who is who (numbered left to right at the start), which moments become keyframes, where every person to
+    recast stands at every moment.
+  1b Recast (0.5.91): MiniMax H3 Image + the character-swap LoRA redraw the WHOLE keyframe, one person after another
+    (no crop, no paste-back), with automatic checks.
+  2 Assemble: the keyframes are saved and the Remake plan is written.
 
 Method = skill 12d, line A, measured in demo5 (2026-11-16: our own 26 s five-person clip, 4 keyframes, Remake swapped
 3 people correctly the whole time).  Numbering rule and mapping text from the exp MultiSwap pack (11-14/15).
@@ -20,15 +22,8 @@ LINK_IOU = 0.3            # same person in two tracking windows: boxes on the sh
 LOOK_S = 3.0              # the numbering moment is searched in the first seconds
 CLEAR_IOU = 0.2
 COVERED = 0.3
-PAD_X, PAD_TOP, PAD_BOTTOM = 0.45, 0.12, 0.08   # skill 12d step 4: crop = person box + 45 % left/right, 12 % up, 8 % down
-GEN_MP = 1.6              # edit size (megapixels), multiples of 32
 SPACING = 0.7            # keyframes are picked in (prev + 0.7 * max_gap, prev + max_gap]: as few as the gap allows
-FEATHER = 0.08            # paste feather, share of the crop width
-PROTECT_PAD = 0.06        # other people's boxes grown by this (share of their size) are kept from the source
-                          # (0.5.7 test: -0.05 made it worse - every crop is cut from the SOURCE frame, so its
-                          # neighbours are the originals and less protection pastes them back)
-OWN_GROW = 0.0            # 0.5.7 (default off = 0.5.6): this person's own box grown by this (share of its width; half of it up/down) is never
-                          # protected, so wigs, tails, ears and wide skirts of the original sticking out get covered
+SWAP_MP = 4.0             # 0.5.91: H3 Image character-swap canvas (megapixels)
 
 CN = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
 ORDINAL = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"]
@@ -708,24 +703,18 @@ def cover_crop(src_w, src_h, tw, th):
     return int(round((src_w - w) / 2)), int(round((src_h - h) / 2)), int(round(w)), int(round(h))
 
 
-def crop_box(b, W, H):
-    """person box in pixels -> crop box in pixels (skill 12d step 4): +45 % left/right, +12 % up, +8 % down,
-    at least 1:2 wide, clipped to the frame"""
-    x0, y0, x1, y1 = b
-    w, h = x1 - x0, y1 - y0
-    cx0, cx1 = x0 - PAD_X * w, x1 + PAD_X * w
-    cy0, cy1 = y0 - PAD_TOP * h, y1 + PAD_BOTTOM * h
-    cw = cx1 - cx0
-    if (cy1 - cy0) > 2 * cw:
-        pad = ((cy1 - cy0) / 2 - cw) / 2
-        cx0, cx1 = cx0 - pad, cx1 + pad
-    return [int(max(0, math.floor(cx0))), int(max(0, math.floor(cy0))),
-            int(min(W, math.ceil(cx1))), int(min(H, math.ceil(cy1)))]
-
-
-def gen_size(w, h, mp=GEN_MP, grid=32):
+def swap_size(w, h, mp=SWAP_MP, grid=32):
+    """0.5.91: the H3 Image edit canvas for a keyframe - about mp megapixels (character-swap model card: about 4 MP;
+    H3 Image does not work well at low resolution), the keyframe's aspect, multiples of 32"""
     s = math.sqrt(mp * 1e6 / max(1, w * h))
     return max(grid, round(w * s / grid) * grid), max(grid, round(h * s / grid) * grid)
+
+
+def frame_rank(own, others):
+    """(place from the left, people in the frame) of a person in THIS keyframe, by box centre.  The mapping number
+    (left k at the start) is the person's ID; where she stands at a later keyframe can differ."""
+    cx = (own[0] + own[2]) / 2.0
+    return 1 + sum(1 for b in others if (b[0] + b[2]) / 2.0 < cx), 1 + len(others)
 
 
 def parse_people(text: str) -> list:
@@ -734,102 +723,86 @@ def parse_people(text: str) -> list:
     return [re.sub(r"^(?:左|left|L)?\s*\d+\s*[:：.、)]\s*", "", l, flags=re.I).rstrip("。.") for l in lines]
 
 
-CUT_EN = (" That person reaches the bottom edge of image 1: the new person stays exactly as large, her head at the same "
-          "height, and her body reaches the bottom edge at exactly the same place as the original's (if the original "
-          "is cut off there, she is cut off there too); do not make her smaller and do not move her up.")
-CUT_ZH = ("这个人碰到了图1的下边：新的人保持一样大，头在同样的高度，身体在和原来完全相同的位置碰到画面下边"
-          "（原来在那里被截断，她也在那里被截断）；不要把人缩小，不要往上挪。")
+def _who(rank, look=""):
+    return f"the person {ordinal(rank)} from the left" + (f" ({look})" if look else "")
 
 
-def edit_prompt(description: str, lang: str = "zh", original: str = "", cut_bottom: bool = False) -> str:
-    """skill 12d step 4 template (line A: the crop is a part of a photo, the person to replace is in the middle).
-    original: what the person to replace looks like (optional; helps in crowded crops).  cut_bottom (0.5.9): she is
-    cut off by the bottom edge - the edit model otherwise redraws a small full-body person (11-19)."""
-    if lang == "en":
-        who = f"the person in the middle of image 1 ({original})" if original else "the person in the middle of image 1"
-        return (f"Image 1 is a part of a photo. Replace {who} with the person from "
-                f"image 2: {description}. She wears the complete outfit of the person in image 2 from head to toe; "
-                "nothing the original person wore stays, and anything of the original person sticking out around "
-                "her is filled with the background. Keep the original pose, action, body direction, position, "
-                "size and any covered parts exactly the same; if the original person is seen from behind or from the "
-                "side, the new person is seen from behind or from the side in the same way; everybody else, their "
-                "body parts and the background in image 1 stay completely unchanged, with the same composition as "
-                "image 1. No beautifying, no colour grading, no filter: a realistic photo exactly like image 1."
-                + (CUT_EN if cut_bottom else ""))
-    who = f"图1正中间的那个人（{original}）" if original else "图1正中间的那个人"
-    return (f"图1是一张照片的局部，把{who}换成图2中的人：{description}。她从头到脚穿图2里那个人的全套服饰，"
-            "原来那个人的服饰一样都不留，原来那个人露在她身边的部分全部补成背景。"
-            "保持原来的姿势、动作、身体朝向、在图中的位置、大小和被遮挡的部分不变；原来的人如果背对镜头或侧身，新的人也一样；"
-            "图1里其他人、其他人的身体部分和背景完全不变，画面构图和图1一样。不要美化，不要调色，不加滤镜，"
-            "是和图1一样的写实照片。" + (CUT_ZH if cut_bottom else ""))
+KEEP_ONE = ("Keep the replacement character's face, hair, identity and outfit exactly as in <Picture 2>, including "
+            "its art style. The replacement must hold the same pose, position, scale and gaze.")
+CUT_ONE = (" This person is cut off by the bottom edge of <Picture 1>; the replacement is cut off at the same place "
+           "and is just as large.")
 
 
-# ---------------------------------------------------------------------------------------------------- paste
-def colour_match(edit, orig, inner):
-    """per-channel mean/std of the ring outside the person box (inner, crop pixels) matched to the source"""
-    import numpy as np
-    m = np.ones(orig.shape[:2], bool)
-    x0, y0, x1, y1 = [int(v) for v in inner]
-    m[max(0, y0):max(0, y1), max(0, x0):max(0, x1)] = False
-    if m.sum() < 64:
-        return edit.astype(np.float32)
-    e, o = edit.astype(np.float32), orig.astype(np.float32)
-    for c in range(3):
-        em, es = e[..., c][m].mean(), e[..., c][m].std() + 1e-6
-        om, osd = o[..., c][m].mean(), o[..., c][m].std() + 1e-6
-        e[..., c] = (e[..., c] - em) * (osd / es) + om
-    return np.clip(e, 0, 255)
+def swap_prompt_one(rank, n_people, desc="", look="", cut_bottom=False):
+    """0.5.91: one person, the character-swap model card's prompt as it is (<Picture 1> = the keyframe, <Picture 2> =
+    the character); only 'the man in the purple shirt' becomes where she stands now + what she looks like."""
+    others = f", including the other {n_people - 1} {'person' if n_people == 2 else 'people'}" if n_people > 1 else ""
+    return (f"Swap {_who(rank, look)} in <Picture 1> with the character in <Picture 2>"
+            + (f" ({desc})" if desc else "") + ". " + KEEP_ONE
+            + f" Preserve everything else in <Picture 1> unchanged{others}." + (CUT_ONE if cut_bottom else ""))
 
 
-def paste_alpha(crop, W, H, own, others, own_grow=None, protect=None, protects=None):
-    """alpha [h, w] for pasting an edited crop: linear feather on the sides inside the frame, and 0 (feathered) over
-    every OTHER person's box (grown by PROTECT_PAD) except where it overlaps this person's own box - so the people
-    around keep their source pixels and an earlier pasted recast stays."""
-    import numpy as np
-    own_grow = OWN_GROW if own_grow is None else max(0.0, float(own_grow))
-    protect = PROTECT_PAD if protect is None else float(protect)
-    x0, y0, x1, y1 = crop
-    w, h = x1 - x0, y1 - y0
-    a = np.ones((h, w), np.float32)
-    f = max(2, int(FEATHER * w))
-    r = np.linspace(0, 1, f + 2, dtype=np.float32)[1:-1]
-    if x0 > 0:
-        a[:, :f] *= r[None]
-    if x1 < W:
-        a[:, w - f:] *= r[::-1][None]
-    if y0 > 0:
-        a[:f, :] *= r[:, None]
-    if y1 < H:
-        a[h - f:, :] *= r[::-1][:, None]
-    keep = np.zeros((h, w), np.float32)
-    for j, b in enumerate(others):
-        bw, bh = b[2] - b[0], b[3] - b[1]
-        pr = protect if protects is None else float(protects[j])   # 0.5.7 sequential: per person
-        px, py = pr * bw, pr * bh
-        bx0, by0 = int(max(x0, b[0] - px)) - x0, int(max(y0, b[1] - py)) - y0
-        bx1, by1 = int(min(x1, b[2] + px)) - x0, int(min(y1, b[3] + py)) - y0
-        if bx1 > bx0 and by1 > by0:
-            keep[by0:by1, bx0:bx1] = 1.0
-    if keep.any():
-        gw, gh = own_grow * (own[2] - own[0]), 0.5 * own_grow * (own[3] - own[1])
-        ox0, oy0 = int(max(x0, own[0] - gw)) - x0, int(max(y0, own[1] - gh)) - y0
-        ox1, oy1 = int(min(x1, own[2] + gw)) - x0, int(min(y1, own[3] + gh)) - y0
-        if ox1 > ox0 and oy1 > oy0:
-            keep[oy0:oy1, ox0:ox1] = 0.0
-        k = max(1, f // 2)                      # soften the protected edges a little
-        from numpy.lib.stride_tricks import sliding_window_view as swv
-        pad = np.pad(keep, k, mode="edge")
-        keep = swv(pad, (2 * k + 1, 2 * k + 1)).mean(axis=(-1, -2)).astype(np.float32)
-        a *= (1.0 - keep)
-    return a
+def swap_prompt_all(people, n_people):
+    """0.5.91 test variant B: every person of the keyframe in one edit, people = [{rank, ref, desc, look,
+    cut_bottom}], ref = the <Picture n> of her character."""
+    lines = []
+    for p in sorted(people, key=lambda q: q["rank"]):
+        line = f"- {_who(p['rank'], p.get('look', ''))} with the character in <Picture {p['ref']}>"
+        line += (f" ({p['desc']})" if p.get("desc") else "") + "."
+        if p.get("cut_bottom"):
+            line += " This person is cut off by the bottom edge; the replacement is cut off at the same place."
+        lines.append(line)
+    return ("Swap these people in <Picture 1>, each with one character:\n" + "\n".join(lines) + "\n"
+            "Keep each replacement character's face, hair, identity and outfit exactly as in its picture, including "
+            "its art style. Each replacement must hold the same pose, position, scale and gaze as the person it "
+            "replaces. Preserve everything else in <Picture 1> unchanged, including everybody not listed.")
 
 
-def paste(full, patch, crop, alpha):
-    import numpy as np
-    x0, y0, x1, y1 = crop
-    reg = full[y0:y1, x0:x1].astype(np.float32)
-    full[y0:y1, x0:x1] = np.clip(patch * alpha[..., None] + reg * (1 - alpha[..., None]), 0, 255).astype(np.uint8)
-    return full
+# ---------------------------------------------------------------------------------------------------- checks
+SWAP_CHANGED = 0.60       # the recast person's look (hair / clothes histograms) before vs after below this = changed
+SWAP_KEPT = 0.70          # another person's look before vs after at least this = left alone
+LAYOUT_IOU = 0.45         # every source person has a person box in the keyframe overlapping at least this
+LAYOUT_SCALE = 0.25       # ... whose height differs by at most this share
+
+
+def box_look(img_u8, box):
+    """hair / clothes histograms of one box (pixels) of one image, like appearance() does per track"""
+    x0, y0, x1, y1 = [int(round(v)) for v in box]
+    bw, bh = x1 - x0, y1 - y0
+    if bw < 4 or bh < 8:
+        return None
+    hair = img_u8[y0:y0 + max(2, int(bh * 0.15)), x0 + int(bw * 0.2):x1 - int(bw * 0.2)].reshape(-1, 3)
+    body = img_u8[y0 + int(bh * 0.25):y0 + int(bh * 0.70), x0 + int(bw * 0.25):x1 - int(bw * 0.25)].reshape(-1, 3)
+    a, b = _hsv_hist(hair), _hsv_hist(body)
+    return None if a is None or b is None else (a, b)
+
+
+def check_swap(before, after, own, others):
+    """0.5.91: did the edit recast THIS person and leave the others alone?  -> (ok, target_sim, [other sims])
+    Others overlapping her box are skipped (their pixels change with hers)."""
+    t = look_similarity(box_look(before, own), box_look(after, own))
+    sims = []
+    for b in others:
+        if iou(own, b) > CLEAR_IOU or covered(b, own) > COVERED:
+            continue
+        sims.append(look_similarity(box_look(before, b), box_look(after, b)))
+    return (t < SWAP_CHANGED and all(s >= SWAP_KEPT for s in sims)), t, sims
+
+
+def check_layout(src_boxes, out_boxes):
+    """0.5.91: everybody of the source frame still there, in place and as large?  boxes normalised.  -> [problems]"""
+    probs = []
+    if len(out_boxes) != len(src_boxes):
+        probs.append(f"{len(out_boxes)} people found, the source frame has {len(src_boxes)}")
+    for k, s in enumerate(sorted(src_boxes, key=lambda b: (b[0] + b[2]) / 2), 1):
+        best = max(out_boxes, key=lambda o: iou(s, o), default=None)
+        if best is None or iou(s, best) < LAYOUT_IOU:
+            probs.append(f"left {k}: moved or missing (overlap {0 if best is None else iou(s, best):.2f})")
+            continue
+        sh, oh = s[3] - s[1], best[3] - best[1]
+        if sh > 0 and abs(oh - sh) / sh > LAYOUT_SCALE:
+            probs.append(f"left {k}: height {oh / sh:.0%} of the source")
+    return probs
 
 
 # ---------------------------------------------------------------------------------------------------- plan

@@ -71,31 +71,10 @@ def test_place_changes():
     assert 4.0 <= ch[0][0] <= ch[0][1] <= 5.2
 
 
-def test_crop_and_gen_size():
-    c = K.crop_box([800, 100, 900, 900], 1664, 960)
-    assert c[0] < 800 - 40 and c[2] > 900 + 40 and c[1] >= 0 and c[3] <= 960
-    assert (c[3] - c[1]) <= 2 * (c[2] - c[0]) + 2
-    w, h = K.gen_size(c[2] - c[0], c[3] - c[1])
-    assert w % 32 == 0 and h % 32 == 0 and 1.4e6 < w * h < 1.8e6
+def test_swap_size():
+    w, h = K.swap_size(1664, 960)
+    assert w % 32 == 0 and h % 32 == 0 and 3.6e6 < w * h < 4.4e6 and abs(w / h - 1664 / 960) < 0.02
     assert K.cover_crop(1920, 1080, 1664, 960)[2:] == (1872, 1080)
-
-
-def test_paste_keeps_other_people():
-    W, H = 400, 200
-    full = np.zeros((H, W, 3), np.uint8)
-    crop = [100, 0, 300, 200]
-    patch = np.full((200, 200, 3), 255, np.float32)
-    a = K.paste_alpha(crop, W, H, own=[160, 20, 240, 200], others=[[250, 20, 330, 200]])
-    K.paste(full, patch, crop, a)
-    assert full[100, 200].min() > 200          # own person replaced
-    assert full[100, 290].max() < 30           # the neighbour keeps the source
-
-
-def test_colour_match():
-    o = np.full((50, 50, 3), 100, np.float32) + np.random.RandomState(0).rand(50, 50, 3) * 10
-    e = o * 1.3 + 20
-    m = K.colour_match(e, o, [20, 20, 30, 30])
-    assert abs(m.mean() - o.mean()) < 1.0
 
 
 def test_plan():
@@ -120,8 +99,7 @@ def test_people_looks():
     pr = K.swap_prompt(617, [(1, 2, 12)], {1: "a man"}, 3, [], {11: "the man in a beanie", 12: None, 13: "the girl"},
                        {1: "the man in a beanie", 2: "the woman in red", 3: "the girl"})
     assert "left at the start, the woman in red." in pr and "the man in a beanie and the girl" in pr
-    assert "(the woman in red)" in K.edit_prompt("a man", "en", "the woman in red")
-    assert "（the woman in red）" in K.edit_prompt("a man", "zh", "the woman in red")
+    assert "second from the left (the woman in red)" in K.swap_prompt_one(2, 3, "a man", "the woman in red")
 
 
 def test_place_changes_far_swap():

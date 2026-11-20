@@ -1,10 +1,11 @@
 """H3MD Keyframe nodes (2026-11-17, H3MD 0.5.0): keyframes + plan package for the multi-person swap (Remake).
 
-  H3MD Keyframe 1: Prepare  - source video + character pictures + "图1换左二" -> one crop per person per moment, the
-                              matching character picture and an edit prompt (lists: the edit nodes in between run once
-                              per crop).  Any image-edit model works there (example: Qwen Image 2.1).
-  H3MD Keyframe 2: Assemble - edited crops -> colour-matched and pasted back -> keyframes saved -> H3MD plan + plan zip
-                              for the Director's "Import plan" (H3MD Director Remake.json).
+  H3MD Keyframe 1: Prepare  - source video + character pictures + "图1换左二" -> who is who, keyframe moments, where
+                              every person to recast stands then.
+  H3MD Keyframe 1b: Recast  - 0.5.91: MiniMax H3 Image + the character-swap LoRA redraw the whole keyframe, one person
+                              after another (no crop, no paste-back), with automatic checks.
+  H3MD Keyframe 2: Assemble - keyframes saved -> H3MD plan + plan zip for the Director's "Import plan"
+                              (H3MD Director Remake.json).
 
 Pure logic in h3md_keyframe.py.  People are tracked with ComfyUI's core SAM3.1 (models/checkpoints/
 sam3.1_multiplex_fp16.safetensors, the same file the depth / pose control uses)."""
@@ -27,7 +28,7 @@ SAM3_CKPT = "sam3.1_multiplex_fp16.safetensors"
 SAMPLE_FPS = 6.0          # tracking / moment search rate
 TRACK_SHORT = 480         # tracking frames: short side in pixels
 WINDOW_S = 5.0            # SAM3 tracking window (consecutive windows share one frame)
-PICTURE_MP = 1.0          # character pictures are scaled down to about this before the edit
+PICTURE_MP = 4.0          # character pictures are scaled down to at most this (0.5.91: H3 Image wants detail)
 KF_SUBDIR = "H3MD_keyframes"
 PLANS_SUBDIR = "H3MD_plans"
 TAG = K.TAG
@@ -396,7 +397,6 @@ class H3MDKeyframePrepare:
                 "max_gap_s": ("FLOAT", {"default": 5.0, "min": 2.0, "max": 8.0, "step": 0.5, "tooltip":
                                         "Largest distance between two keyframes (Remake splits long videos into "
                                         "parts; each part needs a keyframe)."}),
-                "prompt_language": (["en", "zh"], {"default": "en", "tooltip": "Language of the edit prompt template"}),
                 "threshold": ("FLOAT", {"default": 0.4, "min": 0.05, "max": 0.95, "step": 0.05,
                                         "tooltip": "SAM3 detection threshold for 'person'"}),
                 "max_people": ("INT", {"default": 8, "min": 1, "max": 20}),
@@ -413,14 +413,11 @@ class H3MDKeyframePrepare:
                                                          "its sound and becomes the plan's source. 到这一秒（0 = 片尾）。"})),
         }
 
-    RETURN_TYPES = ("IMAGE", "IMAGE", "STRING", "H3MD_KEYFRAME_JOB", "IMAGE", "STRING")
-    RETURN_NAMES = ("crops", "pictures", "prompts", "job", "people_sheet", "info")
-    OUTPUT_IS_LIST = (True, True, True, False, False, False)
-    OUTPUT_TOOLTIPS = ("One crop per recast person per keyframe, already at the edit size (about 1.6 MP): image 1 "
-                       "of the edit.",
-                       "The matching character picture for every crop: image 2 of the edit.",
-                       "The matching edit prompt for every crop.",
-                       "Everything Assemble needs (connect it there).",
+    RETURN_TYPES = ("IMAGE", "H3MD_KEYFRAME_JOB", "IMAGE", "STRING")
+    RETURN_NAMES = ("pictures", "job", "people_sheet", "info")
+    OUTPUT_IS_LIST = (True, False, False, False)
+    OUTPUT_TOOLTIPS = ("The character picture of every recast person at every keyframe, in order (connect to Recast).",
+                       "Everything Recast and Assemble need (connect it there).",
                        "First clear frame with every person numbered left to right: check the numbers match "
                        "your mapping.",
                        "Moments, people, warnings (JSON).")
@@ -428,10 +425,10 @@ class H3MDKeyframePrepare:
     CATEGORY = CATEGORY
     DESCRIPTION = ("Multi-person swap keyframes, step 1. Finds and numbers the people in the source (left to right "
                    "at the start), picks keyframe moments at most max_gap_s apart (people standing apart, little "
-                   "motion), and gives one crop + character picture + prompt per recast person per moment. Put any "
-                   "image-edit model after it (lists: it runs once per crop), then H3MD Keyframe 2: Assemble.")
+                   "motion) and notes where every person to recast stands then. Then H3MD Keyframe 1b: Recast "
+                   "(MiniMax H3 Image character swap on the whole keyframe) and H3MD Keyframe 2: Assemble.")
 
-    def prepare(self, video, mapping, descriptions, people_at_start, max_gap_s, prompt_language, threshold, max_people,
+    def prepare(self, video, mapping, descriptions, people_at_start, max_gap_s, threshold, max_people,
                 source_video=None, start_s=0.0, end_s=0.0, **pics):
         import comfy.utils
         mp = K.parse_mapping(mapping)
@@ -524,7 +521,7 @@ class H3MDKeyframePrepare:
         sheet = people_sheet(small[frames.index(nf)], K.visible(nf), chosen, nf["at"])
         full = read_frames(path, [frames[i]["at"] for i, _ in moments], size)
         W, H = size
-        crops, pictures, prompts, job_moments = [], [], [], []
+        pictures, job_moments = [], []
         pic_t = {p: fit_picture(pics[f"picture_{p}"]) for p in mp}
         pbar = comfy.utils.ProgressBar(len(moments))
         for i, kind in moments:
@@ -538,19 +535,16 @@ class H3MDKeyframePrepare:
                 if own is None:
                     continue
                 ob = [own[0] * W, own[1] * H, own[2] * W, own[3] * H]
-                cb = K.crop_box(ob, W, H)
                 others = [[b[0] * W, b[1] * H, b[2] * W, b[3] * H] for q, b in allb if q != pid]
-                gw, gh = K.gen_size(cb[2] - cb[0], cb[3] - cb[1])
-                crop = full[t][cb[1]:cb[3], cb[0]:cb[2]]
-                ct = comfy.utils.common_upscale(to_tensor(crop).movedim(-1, 1), gw, gh, "lanczos",
-                                                "disabled").movedim(1, -1)
-                crops.append(ct.clamp(0, 1))
+                rank, n_here = K.frame_rank(ob, others)
                 pictures.append(pic_t[p])
-                prompts.append(K.edit_prompt(descs[p], prompt_language, looks.get(k, ""), K.cut_at_bottom(own)))
-                items.append({"picture": p, "left": k, "id": pid, "crop": cb, "own": ob, "others": others,
-                              "others_ids": [q for q, b in allb if q != pid],
-                              "inner": [ob[0] - cb[0], ob[1] - cb[1], ob[2] - cb[0], ob[3] - cb[1]]})
-            job_moments.append({"at": t, "kind": "swap" if items else "plain", "items": items})
+                # 0.5.91: where she stands in THIS keyframe + what she looked like at the start (the prompt names
+                # her by both), and her own / the others' boxes for the automatic checks
+                items.append({"picture": p, "left": k, "id": pid, "own": ob, "others": others,
+                              "others_ids": [q for q, b in allb if q != pid], "rank": rank, "n": n_here,
+                              "desc": descs[p], "look": looks.get(k, ""), "cut_bottom": bool(K.cut_at_bottom(own))})
+            job_moments.append({"at": t, "kind": "swap" if items else "plain", "items": items,
+                                "boxes": [list(b) for q, b in allb]})
             pbar.update(1)
         names = {pid: (None if pid in ids else (looks.get(n) or
                                                 f"the unchanged performer who starts {K.ordinal(n)} from the left"))
@@ -572,95 +566,68 @@ class H3MDKeyframePrepare:
                 "keyframes": [{"at": m["at"], "recast": [it["picture"] for it in m["items"]]} for m in job_moments],
                 "place_changes": [{"from": a, "to": b} for a, b, pr in changes if pr],
                 "cuts": cuts,
-                "edits": len(crops), "warnings": warnings, "reid": reid_joins}
+                "recasts": len(pictures), "warnings": warnings, "reid": reid_joins}
         info_s = json.dumps(text, ensure_ascii=False, indent=1)
         for w in warnings:
             LOG.warning("%s %s", TAG, w)
-        LOG.info("%s %d keyframes, %d edits", TAG, len(job_moments), len(crops))
-        if not crops:
+        LOG.info("%s %d keyframes, %d people to recast", TAG, len(job_moments), len(pictures))
+        if not pictures:
             raise K.KeyframeError(f"{TAG} none of the chosen people was found at any keyframe. 一个要换的人都没找到。")
         return {"ui": {"text": [info_s]},
-                "result": (crops, pictures, prompts, job, to_tensor(sheet), info_s)}
+                "result": (pictures, job, to_tensor(sheet), info_s)}
 
 
 class H3MDKeyframeAssemble:
-    """Edited crops -> keyframes -> H3MD plan + plan zip."""
+    """Recast keyframes -> saved keyframes -> H3MD plan + plan zip."""
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "job": ("H3MD_KEYFRAME_JOB", {"tooltip": "From H3MD Keyframe 1: Prepare"}),
-                "edited": ("IMAGE", {"tooltip": "The edited crops, in the order Prepare gave them (the edit model's "
-                                                "output)."}),
+                "job": ("H3MD_KEYFRAME_JOB", {"tooltip": "From H3MD Keyframe 1b: Recast (the job with the keyframes)"}),
                 "name": ("STRING", {"default": "multiswap", "tooltip": "Plan name: keyframes go to input/"
                                     "H3MD_keyframes/<name>/, the zip to output/H3MD_plans/<name>.zip"}),
                 "save_zip": ("BOOLEAN", {"default": True, "tooltip": "Also write the plan zip (source video + "
                                          "keyframes + plan) for the Director's Import plan / RunningHub."}),
-                "mask_grow": ("FLOAT", {"default": K.OWN_GROW, "min": 0.0, "max": 0.5, "step": 0.05, "tooltip":
-                              "How far each recast person's own area reaches past her box (share of its width; half of "
-                              "it up and down). Raise it (0.25-0.35) when bits of the original (wig, ears, tail, wide "
-                              "skirt) are left around the new person. \u906e\u7f69\u6269\u5927\uff1a\u539f\u89d2\u8272\u8fb9\u7f18\u6e05\u4e0d\u5e72\u51c0\u5c31\u8c03\u5927\uff080.25-0.35\uff09\u3002"}),
-                "protect_others": ("FLOAT", {"default": K.PROTECT_PAD, "min": -0.3, "max": 0.3, "step": 0.05,
-                                   "tooltip": "How much of the people around is kept from the source while pasting "
-                                   "(share of their box; below 0 = only their body core). Raise it toward 0 or above "
-                                   "when a neighbour that was already recast gets damaged. \u4fdd\u62a4\u65c1\u4eba\uff1a"
-                                   "\u65c1\u8fb9\u5df2\u6362\u597d\u7684\u4eba\u88ab\u753b\u574f\u5c31\u8c03\u5927\u3002"}),
             }
         }
 
-    INPUT_IS_LIST = True
     RETURN_TYPES = ("IMAGE", "STRING", "STRING")
     RETURN_NAMES = ("keyframes_sheet", "plan_json", "zip_path")
-    OUTPUT_TOOLTIPS = ("All keyframes with their times: check them before running the Director.",
+    OUTPUT_TOOLTIPS = ("All keyframes with their times (a warning sign marks a keyframe the checks flagged): check "
+                       "them before running the Director.",
                        "The H3MD plan (paste it into the Director's plan box, or import the zip).",
                        "Where the plan zip was written.")
     OUTPUT_NODE = True
     FUNCTION = "assemble"
     CATEGORY = CATEGORY
-    DESCRIPTION = ("Multi-person swap keyframes, step 2. Colour-matches every edited crop to the source, pastes it "
-                   "back (the people around keep their source pixels), saves the keyframes and writes the Remake "
-                   "plan + plan zip. Then: Director workflow 'H3MD Director Remake.json' -> Import plan.")
+    DESCRIPTION = ("Multi-person swap keyframes, step 2. Saves Recast's keyframes and writes the Remake plan + plan "
+                   "zip. Then: Director workflow 'H3MD Director Remake.json' -> Import plan.")
 
-    def assemble(self, job, edited, name, save_zip, mask_grow=None, protect_others=None):
-        import numpy as np
+    def assemble(self, job, name, save_zip):
         import folder_paths
         from PIL import Image
-        job = job[0]
-        name = _plan_io().safe_name((name or ["multiswap"])[0], "multiswap")
-        save_zip = bool(save_zip[0]) if isinstance(save_zip, list) else bool(save_zip)
-        mask_grow = float((mask_grow or [K.OWN_GROW])[0] if isinstance(mask_grow, list) else (K.OWN_GROW if mask_grow is None else mask_grow))
-        protect_others = float((protect_others or [K.PROTECT_PAD])[0] if isinstance(protect_others, list) else (K.PROTECT_PAD if protect_others is None else protect_others))
-        flat = [to_u8(e[b:b + 1]) for e in edited for b in range(int(e.shape[0]))]
-        need = sum(len(m["items"]) for m in job["moments"])
-        if len(flat) != need:
-            raise K.KeyframeError(f"{TAG} {len(flat)} edited image(s) for {need} crop(s): connect the edit model's "
-                                  "output for all crops (one image each). 修好的图数量和裁块数量不一致。")
+        if not job.get("recast_frames"):
+            raise K.KeyframeError(f"{TAG} no keyframes in the job: connect H3MD Keyframe 1b: Recast's job output. "
+                                  "请接 Recast 的 job 输出。")
+        name = _plan_io().safe_name(name or "multiswap", "multiswap")
         W, H = job["size"]
         inp = folder_paths.get_input_directory()
         kdir = _unique_dir(os.path.join(inp, KF_SUBDIR), name)
         os.makedirs(kdir, exist_ok=True)
         rel = os.path.relpath(kdir, inp).replace("\\", "/")
-        n, kfs, imgs, labels = 0, [], [], []
+        flags = (job.get("recast") or {}).get("flags", {})
+        kfs, imgs, labels = [], [], []
         for mi, m in enumerate(job["moments"]):
-            src = job["frames"][m["at"]]
-            out = src.copy()
-            if job.get("recast_frames") and m["at"] in job["recast_frames"]:   # 0.5.7: done by Recast
-                out = job["recast_frames"][m["at"]].copy()
-                n += len(m["items"])
-            for it in ([] if job.get("recast_frames") and m["at"] in job["recast_frames"] else m["items"]):
-                x0, y0, x1, y1 = it["crop"]
-                e = Image.fromarray(flat[n]).resize((x1 - x0, y1 - y0), Image.LANCZOS)
-                n += 1
-                patch = K.colour_match(np.asarray(e), src[y0:y1, x0:x1], it["inner"])
-                K.paste(out, patch, it["crop"], K.paste_alpha(it["crop"], W, H, it["own"], it["others"], mask_grow, protect_others))
+            out = job["recast_frames"].get(m["at"], job["frames"][m["at"]])
             fr = int(round(m["at"] * K.FPS))
             fn = f"kf_{fr:04d}.png"
             Image.fromarray(out).save(os.path.join(kdir, fn))
             kfs.append((f"kf{mi + 1}", f"{rel}/{fn}", m["at"]))
             imgs.append(out)
-            labels.append(f"{m['at']:.2f} s  " + ("pic " + ", ".join(str(i["picture"]) for i in m["items"])
-                                                   if m["items"] else "source frame"))
+            label = f"{m['at']:.2f} s  " + ("pic " + ", ".join(str(i["picture"]) for i in m["items"])
+                                             if m["items"] else "source frame")
+            labels.append(("[!] " if flags.get(str(m["at"])) else "") + label)
         plan = K.build_plan(job["video"], job["duration"], job["has_audio"], (W, H), job["length"], kfs,
                             job["prompt"], name)
         if job.get("source_trim"):
@@ -668,6 +635,10 @@ class H3MDKeyframeAssemble:
         plan_s = json.dumps(plan, ensure_ascii=False, indent=2)
         with open(os.path.join(kdir, "plan.json"), "w", encoding="utf-8") as fh:
             fh.write(plan_s)
+        report = (job.get("recast") or {}).get("report")
+        if report:
+            with open(os.path.join(kdir, "recast_report.txt"), "w", encoding="utf-8") as fh:
+                fh.write(report)
         zip_path = ""
         if save_zip:
             data, man = _plan_io().export_plan(plan, None, inp, with_media=True, include_big_videos=True, name=name)
@@ -685,13 +656,19 @@ class H3MDKeyframeAssemble:
             LOG.info("%s plan zip: %s (%.1f MB)", TAG, zip_path, len(data) / 1e6)
         sheet = contact_sheet(imgs, labels)
         msg = f"{len(kfs)} keyframes -> input/{rel}/" + (f"\nplan zip: {zip_path}" if zip_path else "")
+        if flags:
+            msg += f"\n{len(flags)} keyframe(s) flagged by the checks: see recast_report.txt"
         return {"ui": {"text": [msg]}, "result": (to_tensor(sheet), plan_s, zip_path)}
 
 
 class H3MDKeyframeRecast:
-    """0.5.7: the edit, one person after another. Every crop is cut from the keyframe where the people before her are
-    already recast, so the neighbours in it are the new characters, never the originals; a bigger original (wig,
-    ears, tail, wide skirt) can then be covered without the originals being pasted back."""
+    """0.5.91: MiniMax H3 Image + the character-swap LoRA (akatz-ai, as published with
+    akhaliq/MiniMax-H3-Image-Character-Swap) redraw the WHOLE keyframe: <Picture 1> = the keyframe, <Picture 2> = the
+    character, the model card's prompt naming the person by where she stands now.  No crop, no paste-back.  After
+    every edit: did it recast this person and leave the others alone (else one retry with the next seed); at the end:
+    is everybody still in place and as large (SAM3).  Flags go to the report, never silently used."""
+
+    MODES = ("one_by_one", "all_at_once")
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -699,92 +676,161 @@ class H3MDKeyframeRecast:
             "required": {
                 "job": ("H3MD_KEYFRAME_JOB", {"tooltip": "From H3MD Keyframe 1: Prepare"}),
                 "pictures": ("IMAGE", {"tooltip": "Prepare's pictures output"}),
-                "prompts": ("STRING", {"forceInput": True, "tooltip": "Prepare's prompts output"}),
-                "model": ("MODEL", {"tooltip": "The image-edit model (Qwen Image 2.1 + its LoRA / sampling patch)"}),
-                "clip": ("CLIP",),
-                "vae": ("VAE",),
-                "sampler": ("SAMPLER",),
-                "sigmas": ("SIGMAS",),
+                "model": ("MODEL", {"tooltip": "MiniMax H3 Image (minimax_h3_image_pruned_bf16) with the character-"
+                                    "swap LoRA h3_character_swap_v1.5 at 1.0 (and, for 2 steps, the pDMD 2-step "
+                                    "LoRA + MiniMax H3 Sigma Shift 12)"}),
+                "clip": ("CLIP", {"tooltip": "qwen3vl_32b_minimax_h3 (type minimax)"}),
+                "vae": ("VAE", {"tooltip": "minimax_h3_image_vae"}),
+                "sampler": ("SAMPLER", {"tooltip": "euler"}),
+                "sigmas": ("SIGMAS", {"tooltip": "BasicScheduler simple: 6 steps (stock), or 2 with the pDMD LoRA"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "control_after_generate": True}),
-                "cfg": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 20.0, "step": 0.1}),
-                "mask_grow": ("FLOAT", {"default": 0.25, "min": 0.0, "max": 0.6, "step": 0.05, "tooltip":
-                              "How far each recast person's own area reaches past her box (share of its width; half "
-                              "of it up and down). Cosplay-sized originals: 0.25-0.35. 遮罩扩大"}),
-                "protect_others": ("FLOAT", {"default": -0.05, "min": -0.3, "max": 0.3, "step": 0.05, "tooltip":
-                                   "Protection of the OTHER recast people while pasting (share of their box; below 0 "
-                                   "= only their body core). People who are not recast always keep +0.06. "
-                                   "保护旁人（只管要换的人；不换的人始终保护）"}),
+                "mode": (list(cls.MODES), {"default": "one_by_one", "tooltip":
+                         "one_by_one: one person per edit, several people = several edits on the whole frame (how the "
+                         "LoRA was trained). all_at_once: everybody in one edit (test only). 一次换一个 / 一次全换"}),
             }
         }
 
     INPUT_IS_LIST = True
-    RETURN_TYPES = ("IMAGE", "H3MD_KEYFRAME_JOB")
-    RETURN_NAMES = ("edited", "job")
-    OUTPUT_IS_LIST = (True, False)
-    OUTPUT_TOOLTIPS = ("The edited crops in Prepare's order (connect to Assemble 'edited').",
-                       "The job with the finished keyframes (connect to Assemble 'job').")
+    RETURN_TYPES = ("IMAGE", "H3MD_KEYFRAME_JOB", "STRING")
+    RETURN_NAMES = ("keyframes", "job", "report")
+    OUTPUT_IS_LIST = (True, False, False)
+    OUTPUT_TOOLTIPS = ("The finished keyframes, one per swap moment (whole frames).",
+                       "The job with the keyframes (connect to Assemble).",
+                       "Prompts, timings and the checks of every keyframe.")
     FUNCTION = "recast"
     CATEGORY = CATEGORY
-    DESCRIPTION = ("Multi-person swap keyframes, step 1b (0.5.7): runs the image edit itself, one person after "
-                   "another, each crop cut from the frame where the people before her are already recast. Replaces "
-                   "the Text Encode / Sampler / VAE Decode chain between Prepare and Assemble.")
+    DESCRIPTION = ("Multi-person swap keyframes, step 1b (0.5.91): MiniMax H3 Image character swap on the whole "
+                   "keyframe, one person after another, with automatic checks. Then H3MD Keyframe 2: Assemble.")
 
-    def recast(self, job, pictures, prompts, model, clip, vae, sampler, sigmas, seed, cfg, mask_grow,
-               protect_others):
+    def recast(self, job, pictures, model, clip, vae, sampler, sigmas, seed, mode):
+        import time
         import numpy as np
         import comfy.utils
         import nodes
         from PIL import Image
-        from comfy_extras.nodes_qwen import TextEncodeQwenImage21
+        from comfy_extras.nodes_minimax_h3 import MiniMaxH3ImageConditioning
         from comfy_extras.nodes_custom_sampler import SamplerCustom
         one = lambda v: v[0] if isinstance(v, list) else v
         job, model, clip, vae, sampler, sigmas = (one(job), one(model), one(clip), one(vae), one(sampler),
                                                   one(sigmas))
-        seed, cfg = int(one(seed)), float(one(cfg))
-        grow, prot = float(one(mask_grow)), float(one(protect_others))
+        seed, mode = int(one(seed)), str(one(mode))
         pics = [p[b:b + 1] for p in pictures for b in range(int(p.shape[0]))]
         need = sum(len(m["items"]) for m in job["moments"])
-        if len(pics) != need or len(prompts) != need:
-            raise K.KeyframeError(f"{TAG} {len(pics)} picture(s) / {len(prompts)} prompt(s) for {need} crop(s): "
-                                  "connect Prepare's pictures and prompts. 请接上 Prepare 的 pictures 和 prompts。")
+        if len(pics) != need:
+            raise K.KeyframeError(f"{TAG} {len(pics)} picture(s) for {need} recast person(s): connect Prepare's "
+                                  "pictures. 请接上 Prepare 的 pictures。")
         W, H = job["size"]
-        pbar = comfy.utils.ProgressBar(max(1, need))
-        edited, done, n = [], {}, 0
+        gw, gh = K.swap_size(W, H)
+        steps = max(1, int(len(sigmas)) - 1)
+        edits = need if mode == "one_by_one" else sum(1 for m in job["moments"] if m["items"])
+        pbar = comfy.utils.ProgressBar(max(1, edits))
+
+        def edit(img_u8, refs, prompt, s):
+            t = comfy.utils.common_upscale(to_tensor(img_u8).movedim(-1, 1), gw, gh, "lanczos",
+                                           "disabled").movedim(1, -1).clamp(0, 1)
+            images = {"image_1": t}
+            for j, r in enumerate(refs):
+                images[f"image_{j + 2}"] = r
+            enc = MiniMaxH3ImageConditioning.execute(clip=clip, prompt=prompt, width=gw, height=gh, vae=vae,
+                                                     images=images)
+            pos, lat = enc.result[0], enc.result[1]
+            neg = nodes.ConditioningZeroOut().zero_out(pos)[0]     # CFG 1 (the model is distilled)
+            res = SamplerCustom.execute(model=model, add_noise=True, noise_seed=s, cfg=1.0, positive=pos,
+                                        negative=neg, sampler=sampler, sigmas=sigmas, latent_image=lat)
+            img = nodes.VAEDecode().decode(vae, res.result[0])[0]
+            img = img.reshape(-1, img.shape[-3], img.shape[-2], img.shape[-1])[:1].clamp(0, 1)
+            out = to_u8(img)
+            if out.shape[1] != W or out.shape[0] != H:
+                out = np.asarray(Image.fromarray(out).resize((W, H), Image.LANCZOS))
+            return out
+
+        def checked(before, refs, prompt, it, others):
+            """one edit + the swap check; one retry with the next seed. -> (frame, line, ok)"""
+            tries = []
+            for s in (seed, seed + 1):
+                t0 = time.time()
+                out = edit(before, refs, prompt, s)
+                ok, tsim, sims = K.check_swap(before, out, it["own"], others)
+                tries.append((out, ok, tsim, sims, s, time.time() - t0))
+                if ok:
+                    break
+            out, ok, tsim, sims, s, dt = tries[-1]
+            line = (f"  pic {it['picture']} -> left {it['left']} (now {K.ordinal(it['rank'])} of {it['n']}): "
+                    f"{'OK' if ok else 'CHECK FAILED'} - her look before/after {tsim:.2f} (changed below "
+                    f"{K.SWAP_CHANGED}), others {['%.2f' % v for v in sims]} (kept from {K.SWAP_KEPT}); seed {s}, "
+                    f"{len(tries)} edit(s), last {dt:.1f} s")
+            return out, line, ok
+
+        done, out_imgs, lines, flags, n = {}, [], [], {}, 0
+        t_all = time.time()
         for m in job["moments"]:
+            if not m["items"]:
+                continue
             src = job["frames"][m["at"]]
-            cur = src.copy()
-            swapped = {it["id"] for it in m["items"]}
-            for it in m["items"]:
-                x0, y0, x1, y1 = it["crop"]
-                gw, gh = K.gen_size(x1 - x0, y1 - y0)
-                ct = comfy.utils.common_upscale(to_tensor(cur[y0:y1, x0:x1]).movedim(-1, 1), gw, gh, "lanczos",
-                                                "disabled").movedim(1, -1).clamp(0, 1)
-                enc = TextEncodeQwenImage21.execute(clip=clip, prompt=prompts[n], negative_prompt="", vae=vae,
-                                                    resolution=0, images={"image_1": ct, "image_2": pics[n]})
-                pos, neg, lat = enc.result[0], enc.result[1], enc.result[2]
-                out = SamplerCustom.execute(model=model, add_noise=True, noise_seed=seed, cfg=cfg, positive=pos,
-                                            negative=neg, sampler=sampler, sigmas=sigmas, latent_image=lat)
-                img = nodes.VAEDecode().decode(vae, out.result[0])[0]
-                if img.dim() == 5:
-                    img = img.reshape(-1, img.shape[-3], img.shape[-2], img.shape[-1])
-                img = img[:1].clamp(0, 1)
-                edited.append(img)
-                e = Image.fromarray(to_u8(img)).resize((x1 - x0, y1 - y0), Image.LANCZOS)
-                patch = K.colour_match(np.asarray(e), src[y0:y1, x0:x1], it["inner"])
-                ids = it.get("others_ids") or [None] * len(it["others"])
-                pads = [prot if q in swapped else K.PROTECT_PAD for q in ids]
-                K.paste(cur, patch, it["crop"], K.paste_alpha(it["crop"], W, H, it["own"], it["others"],
-                                                              own_grow=grow, protects=pads))
-                n += 1
+            refs = pics[n:n + len(m["items"])]
+            n += len(m["items"])
+            lines.append(f"{m['at']:.2f} s ({mode}, {gw}x{gh}, {steps} steps):")
+            ok_all = True
+            if mode == "one_by_one":
+                cur = src
+                for it, ref in sorted(zip(m["items"], refs), key=lambda q: q[0]["rank"]):
+                    prompt = K.swap_prompt_one(it["rank"], it["n"], it.get("desc", ""), it.get("look", ""),
+                                               it.get("cut_bottom", False))
+                    lines.append("  prompt: " + prompt)
+                    cur, line, ok = checked(cur, [ref], prompt, it, it["others"])
+                    lines.append(line)
+                    ok_all &= ok
+                    pbar.update(1)
+                frame = cur
+            else:
+                people = [{"rank": it["rank"], "ref": j + 2, "desc": it.get("desc", ""), "look": it.get("look", ""),
+                           "cut_bottom": it.get("cut_bottom", False)} for j, it in enumerate(m["items"])]
+                prompt = K.swap_prompt_all(people, max(it["n"] for it in m["items"]))
+                lines.append("  prompt: " + prompt.replace("\n", " | "))
+                recast_ids = {it["id"] for it in m["items"]}
+                t0 = time.time()
+                frame = edit(src, refs, prompt, seed)
+                lines.append(f"  one edit {time.time() - t0:.1f} s, seed {seed}")
+                for it in m["items"]:
+                    keep = [b for q, b in zip(it["others_ids"], it["others"]) if q not in recast_ids]
+                    ok, tsim, sims = K.check_swap(src, frame, it["own"], keep)
+                    ok_all &= ok
+                    lines.append(f"  pic {it['picture']} -> left {it['left']}: {'OK' if ok else 'CHECK FAILED'} - "
+                                 f"her look {tsim:.2f}, others {['%.2f' % v for v in sims]}")
                 pbar.update(1)
-            done[m["at"]] = cur
-        job = dict(job, recast_frames=done, recast={"mask_grow": grow, "protect_others": prot, "seed": seed})
-        LOG.info("%s recast one by one: %d edit(s), mask_grow %.2f, protect_others %.2f", TAG, n, grow, prot)
-        return (edited, job)
+            done[m["at"]] = frame
+            out_imgs.append(to_tensor(frame))
+            if not ok_all:
+                flags[str(m["at"])] = "swap"
+        # everybody still in place and as large?  SAM3 on every keyframe (one frame at a time: they are unrelated)
+        try:
+            for m in job["moments"]:
+                if m["at"] not in done:
+                    continue
+                img = done[m["at"]]
+                s = TRACK_SHORT / min(img.shape[:2])
+                small = np.asarray(Image.fromarray(img).resize((max(16, int(img.shape[1] * s)),
+                                                                max(16, int(img.shape[0] * s))), Image.BILINEAR))
+                rows = track_people(small[None], max_people=max(8, len(m.get("boxes", [])) + 2))
+                found = list((rows[0][0] if rows and rows[0] else {}).values())
+                probs = K.check_layout(m.get("boxes", []), found)
+                lines.append(f"{m['at']:.2f} s layout: " + ("OK" if not probs else "; ".join(probs)))
+                if probs:
+                    flags[str(m["at"])] = flags.get(str(m["at"]), "") + " layout"
+        except Exception as exc:
+            lines.append(f"layout check skipped: {exc}")
+            LOG.warning("%s layout check skipped: %s", TAG, exc)
+        lines.append(f"total {time.time() - t_all:.1f} s for {edits} edit pass(es); {len(flags)} keyframe(s) "
+                     "flagged")
+        report = "\n".join(lines)
+        LOG.info("%s recast report:\n%s", TAG, report)
+        job = dict(job, recast_frames=done, recast={"method": f"H3 Image character swap, {mode}", "seed": seed,
+                                                    "steps": steps, "flags": flags, "report": report})
+        return {"ui": {"text": [report]}, "result": (out_imgs, job, report)}
 
 
 NODE_CLASS_MAPPINGS = {"H3MDKeyframePrepare": H3MDKeyframePrepare, "H3MDKeyframeRecast": H3MDKeyframeRecast,
                        "H3MDKeyframeAssemble": H3MDKeyframeAssemble}
-NODE_DISPLAY_NAME_MAPPINGS = {"H3MDKeyframePrepare": "H3MD Keyframe 1: Prepare 准备关键帧",
-                              "H3MDKeyframeRecast": "H3MD Keyframe 1b: Recast 串行换人",
-                              "H3MDKeyframeAssemble": "H3MD Keyframe 2: Assemble 打包计划"}
+NODE_DISPLAY_NAME_MAPPINGS = {"H3MDKeyframePrepare": "H3MD Keyframe 1: Prepare 准备关键帧 0.5.91",
+                              "H3MDKeyframeRecast": "H3MD Keyframe 1b: Recast H3 Image 换人 0.5.91",
+                              "H3MDKeyframeAssemble": "H3MD Keyframe 2: Assemble 打包计划 0.5.91"}

@@ -141,9 +141,8 @@ def test_only_extreme_closeups_skipped():
 
 def test_cut_off_prompt():
     assert K.cut_at_bottom((0.1, 0.2, 0.3, 1.0)) and not K.cut_at_bottom((0.1, 0.2, 0.3, 0.9))
-    assert "bottom edge" in K.edit_prompt("a man", "en", "", True)
-    assert "bottom edge" not in K.edit_prompt("a man", "en", "", False)
-    assert "下边" in K.edit_prompt("一个男人", "zh", "", True)
+    assert "bottom edge" in K.swap_prompt_one(1, 3, "a man", "", True)
+    assert "bottom edge" not in K.swap_prompt_one(1, 3, "a man", "", False)
 
 
 def test_finish_moments_caps_four_per_part_and_never_empty():
@@ -227,17 +226,15 @@ def test_prefer_full_does_not_cross_a_place_change():
     assert out == [(6, "swap")] and not notes
 
 
-def test_edit_prompt_keeps_back_view():
-    assert "from behind" in K.edit_prompt("a man", "en")
-    assert "背对" in K.edit_prompt("一个男人", "zh")
-
-
-def test_edit_prompt_general_not_itemised():
-    # runs 40/41 + the user's rule: naming items (gloves, hands) makes the model add or cut them -> one general
-    # phrase for the whole outfit, no item list
-    en, zh = K.edit_prompt("a woman", "en"), K.edit_prompt("一个女人", "zh")
-    for w in ("glove", "wig", "tail", "socks", "finger"):
-        assert w not in en
-    for w in ("手套", "假发", "尾巴", "袜子", "手指"):
-        assert w not in zh
-    assert "complete outfit" in en and "全套服饰" in zh
+def test_swap_prompt_follows_the_model_card():
+    """0.5.91: the character-swap model card's prompt; pose / position / scale / gaze held; nothing named item by
+    item (user rule after runs 40/41)"""
+    p = K.swap_prompt_one(2, 4, "a woman in a blue dress", "the man in grey")
+    assert p.startswith("Swap the person second from the left (the man in grey) in <Picture 1> with the character "
+                        "in <Picture 2> (a woman in a blue dress).")
+    assert "same pose, position, scale and gaze" in p and "including the other 3 people" in p
+    for w in ("glove", "sleeve", "stocking", "hand"):
+        assert w not in p.lower()
+    b = K.swap_prompt_all([{"rank": 3, "ref": 3, "desc": "B"}, {"rank": 1, "ref": 2, "desc": "A"}], 4)
+    assert b.index("first from the left") < b.index("third from the left")
+    assert "<Picture 2> (A)" in b and "<Picture 3> (B)" in b
