@@ -764,6 +764,57 @@ def edit_prompt(description: str, lang: str = "zh", original: str = "", cut_bott
             "是和图1一样的写实照片。" + (CUT_ZH if cut_bottom else ""))
 
 
+def frame_rank(own, others):
+    """0.5.9 whole frame: (place from the left, people in the frame) of a person in THIS keyframe, by box centre.
+    The mapping number (left k at the start) is the person's ID; where she stands now can differ."""
+    cx = (own[0] + own[2]) / 2.0
+    return 1 + sum(1 for b in others if (b[0] + b[2]) / 2.0 < cx), 1 + len(others)
+
+
+ORD_ZH = "一二三四五六七八九十"
+
+
+def group_prompt(people, n_people, lang="en"):
+    """0.5.9 whole-frame edit (Viggle Remake's way: the whole keyframe goes to the edit model once, every person to
+    recast is drawn in the same edit; no crop, no paste).  people: [{"rank", "ref", "desc", "look", "cut_bottom"}],
+    ref = the slot number of the person's character picture (<image2> ...).  Slot names follow the Qwen Image 2.1
+    edit syntax (<image1> is the image being edited).  Kept general on purpose: nothing is named item by item
+    (user rule after runs 40/41)."""
+    if lang == "zh":
+        lines = []
+        for p in people:
+            k = p["rank"]
+            pos = f"左数第{ORD_ZH[k - 1] if k <= len(ORD_ZH) else k}个人"
+            who = f"{pos}（{p['look']}）" if p.get("look") else pos
+            line = f"- 把<image1>里{who}换成<image{p['ref']}>中的人：{p['desc']}。"
+            if p.get("cut_bottom"):
+                line += "这个人碰到画面下边：新的人一样大，在同样的位置被下边截断，不要缩小，不要往上挪。"
+            lines.append(line)
+        return (f"<image1>是一张有{n_people}个人的照片。只换下面这些人，其他一切不变：\n" + "\n".join(lines) + "\n"
+                "每个新的人从头到脚穿自己参考图里那个人的全套服饰，原来那个人的服饰一样都不留，原来的人不留任何痕迹。"
+                "每个人保持原来的姿势、动作、身体朝向、在画面中的位置、大小和被遮挡的部分不变；原来背对镜头或侧身的，"
+                "新的人也一样。没有提到的人、背景和构图和<image1>完全一样。不要美化，不要调色，不加滤镜，"
+                "是和<image1>一样的写实照片。")
+    lines = []
+    for p in people:
+        who = f"the person {ordinal(p['rank'])} from the left"
+        if p.get("look"):
+            who += f" ({p['look']})"
+        line = f"- {who} becomes the person in <image{p['ref']}>: {p['desc']}."
+        if p.get("cut_bottom"):
+            line += (" This person reaches the bottom edge: the new person is exactly as large and cut off at the "
+                     "same place; do not make them smaller or move them up.")
+        lines.append(line)
+    return (f"<image1> is a photo of {n_people} {'person' if n_people == 1 else 'people'}. Swap only these people "
+            "and keep everything else:\n" + "\n".join(lines) + "\n"
+            "Each new person wears the complete outfit of their reference person from head to toe; nothing the "
+            "original person wore stays and no trace of the original person is left. Every person keeps the "
+            "original pose, action, body direction, position, size and covered parts exactly as in <image1>; a "
+            "person seen from behind or from the side stays seen from behind or from the side. Everybody not "
+            "mentioned, the background and the composition stay exactly as in <image1>. No beautifying, no colour "
+            "grading, no filter: a realistic photo exactly like <image1>.")
+
+
 # ---------------------------------------------------------------------------------------------------- paste
 def colour_match(edit, orig, inner):
     """per-channel mean/std of the ring outside the person box (inner, crop pixels) matched to the source"""
