@@ -544,7 +544,7 @@ class H3MDKeyframePrepare:
                                                 "disabled").movedim(1, -1)
                 crops.append(ct.clamp(0, 1))
                 pictures.append(pic_t[p])
-                prompts.append(K.edit_prompt(descs[p], prompt_language, looks.get(k, "")))
+                prompts.append(K.edit_prompt(descs[p], prompt_language, looks.get(k, ""), K.cut_at_bottom(own)))
                 items.append({"picture": p, "left": k, "id": pid, "crop": cb, "own": ob, "others": others,
                               "others_ids": [q for q, b in allb if q != pid],
                               "inner": [ob[0] - cb[0], ob[1] - cb[1], ob[2] - cb[0], ob[3] - cb[1]]})

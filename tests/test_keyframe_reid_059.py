@@ -127,29 +127,23 @@ def _f(at, boxes):
     return {"at": at, "who": [[i, list(b)] for i, b in boxes.items()]}
 
 
-def test_no_keyframe_on_closeups():
-    close = {0: (0.05, 0.15, 0.35, 1.0), 1: (0.35, 0.1, 0.65, 1.0), 2: (0.65, 0.15, 0.95, 1.0)}
+def test_only_extreme_closeups_skipped():
+    head_cut = {0: (0.05, 0.0, 0.35, 1.0), 1: (0.35, 0.0, 0.65, 1.0), 2: (0.65, 0.0, 0.95, 1.0)}
+    waist_up = {0: (0.05, 0.15, 0.35, 1.0), 1: (0.35, 0.1, 0.65, 1.0), 2: (0.65, 0.15, 0.95, 1.0)}
     wide = {0: (0.1, 0.2, 0.25, 0.9), 1: (0.42, 0.2, 0.57, 0.9), 2: (0.75, 0.2, 0.9, 0.9)}
-    frames = [_f(i / 6, close if i / 6 < 3.0 else wide) for i in range(6 * 12)]
     ids = {0, 1, 2}
-    assert K.closeup(frames[0], ids) and not K.closeup(frames[-1], ids)
-    m = K.pick_moments(frames, ids, 12.0, 5.0)
-    m = K.ensure_per_shot(frames, m, ids, [3.0], 12.0)
-    ats = [frames[i]["at"] for i, _ in m]
-    assert ats and min(ats) >= 3.0, ats
-    assert all(k == "swap" for _, k in m)
+    assert K.closeup(_f(0, head_cut), ids)
+    assert not K.closeup(_f(0, waist_up), ids) and not K.closeup(_f(0, wide), ids)
+    frames = [_f(i / 6, head_cut if i / 6 < 3.0 else wide) for i in range(6 * 12)]
+    m = K.ensure_per_shot(frames, K.pick_moments(frames, ids, 12.0, 5.0), ids, [3.0], 12.0)
+    assert min(frames[i]["at"] for i, _ in m) >= 3.0
 
 
-
-def test_fullbody_touching_bottom_is_not_closeup():
-    """11-19: wide shots where the dancers' feet touch the bottom edge were taken for close-ups"""
-    K.FRAME_ASPECT = 1664 / 960
-    full = {0: (0.1, 0.3, 0.17, 0.99), 1: (0.45, 0.28, 0.53, 0.99), 2: (0.78, 0.3, 0.86, 0.99)}
-    mid = {0: (0.05, 0.2, 0.2, 1.0), 1: (0.4, 0.15, 0.58, 1.0), 2: (0.75, 0.2, 0.92, 1.0)}   # cut at the thighs
-    assert not K.closeup(_f(0, full), {0, 1, 2})
-    assert not K.closeup(_f(0, mid), {0, 1, 2})
-    assert K.closeup(_f(0, {0: (0.05, 0.15, 0.35, 1.0)}), {0})
-
+def test_cut_off_prompt():
+    assert K.cut_at_bottom((0.1, 0.2, 0.3, 1.0)) and not K.cut_at_bottom((0.1, 0.2, 0.3, 0.9))
+    assert "bottom edge" in K.edit_prompt("a man", "en", "", True)
+    assert "bottom edge" not in K.edit_prompt("a man", "en", "", False)
+    assert "下边" in K.edit_prompt("一个男人", "zh", "", True)
 
 
 def test_finish_moments_caps_four_per_part_and_never_empty():
@@ -161,7 +155,7 @@ def test_finish_moments_caps_four_per_part_and_never_empty():
     for a in range(len(ts)):
         assert len([t for t in ts if 0 <= t - ts[a] < 345 / 24]) <= 4
     assert notes
-    close = {0: (0.05, 0.15, 0.35, 1.0)}
+    close = {0: (0.05, 0.0, 0.35, 1.0)}
     frames2 = [_f(i / 6, close) for i in range(30)]
     out2, notes2 = K.finish_moments(frames2, [], {0}, 5.0)
     assert len(out2) == 1 and notes2

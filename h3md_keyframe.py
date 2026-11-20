@@ -391,21 +391,21 @@ def _motion(frames, i, pid):
     return max(d) if d else 0.0
 
 
-CLOSE_BOTTOM, CLOSE_H = 0.97, 0.5   # 0.5.9: a chosen person cut off by the bottom edge and this tall ...
-CLOSE_ASPECT = 1.9                  # ... and a box no taller than this (height / width in pixels) = upper body only;
-                                    # a standing full-body dancer whose feet touch the edge is about 2.5-5 (11-19:
-                                    # without this test the wide shots were taken for close-ups and 1 keyframe was left)
-FRAME_ASPECT = 16 / 9               # frame width / height; Prepare sets it
+CLOSE_EDGE = 0.03   # 0.5.9: a chosen person whose box runs from the top edge to the bottom edge (head and legs cut
+                    # off) is an extreme close-up: no keyframe there.  Waist-up / thigh-up shots stay usable - the edit
+                    # prompt then says she is cut off by the bottom edge (tested on the real 11-19 tracks: box shape
+                    # and height cannot tell a waist-up close-up from a thigh-up mid shot of dancers with arms out)
+FRAME_ASPECT = 16 / 9   # frame width / height; Prepare sets it (kept for callers)
 
 
 def closeup(frame, chosen_ids):
-    """skill 12d 'no keyframe on a close-up': a chosen person fills the frame and is cut off at the bottom - the edit
-    model then redraws a small full-body person (11-19: waist-up dancers came back knee-high, a pointing hand of the
-    original was left floating)"""
-    def upper_body(b):
-        h, w = b[3] - b[1], max(b[2] - b[0], 1e-6)
-        return b[3] >= CLOSE_BOTTOM and h >= CLOSE_H and h / (w * FRAME_ASPECT) <= CLOSE_ASPECT
-    return any(upper_body(b) for pid, b in visible(frame) if pid in chosen_ids)
+    """an extreme close-up: a chosen person fills the whole frame height (cut off at the top and the bottom)"""
+    return any(b[1] <= CLOSE_EDGE and b[3] >= 1 - CLOSE_EDGE for pid, b in visible(frame) if pid in chosen_ids)
+
+
+def cut_at_bottom(box):
+    """the person is cut off by the bottom edge (waist-up / thigh-up framing)"""
+    return box[3] >= 1 - CLOSE_EDGE
 
 
 def score(frames, i, chosen_ids):
@@ -638,9 +638,17 @@ def parse_people(text: str) -> list:
     return [re.sub(r"^(?:左|left|L)?\s*\d+\s*[:：.、)]\s*", "", l, flags=re.I).rstrip("。.") for l in lines]
 
 
-def edit_prompt(description: str, lang: str = "zh", original: str = "") -> str:
+CUT_EN = (" That person reaches the bottom edge of image 1: the new person stays exactly as large, her head at the same "
+          "height, and her body reaches the bottom edge at exactly the same place as the original's (if the original "
+          "is cut off there, she is cut off there too); do not make her smaller and do not move her up.")
+CUT_ZH = ("这个人碰到了图1的下边：新的人保持一样大，头在同样的高度，身体在和原来完全相同的位置碰到画面下边"
+          "（原来在那里被截断，她也在那里被截断）；不要把人缩小，不要往上挪。")
+
+
+def edit_prompt(description: str, lang: str = "zh", original: str = "", cut_bottom: bool = False) -> str:
     """skill 12d step 4 template (line A: the crop is a part of a photo, the person to replace is in the middle).
-    original: what the person to replace looks like (optional; helps in crowded crops)."""
+    original: what the person to replace looks like (optional; helps in crowded crops).  cut_bottom (0.5.9): she is
+    cut off by the bottom edge - the edit model otherwise redraws a small full-body person (11-19)."""
     if lang == "en":
         who = f"the person in the middle of image 1 ({original})" if original else "the person in the middle of image 1"
         return (f"Image 1 is a part of a photo. Replace {who} with the person from "
@@ -650,12 +658,12 @@ def edit_prompt(description: str, lang: str = "zh", original: str = "") -> str:
                 "background. Keep the original pose, action, body direction, position, "
                 "size and any covered parts exactly the same; everybody else, their body parts and the background "
                 "in image 1 stay completely unchanged, with the same composition as image 1. No beautifying, no "
-                "colour grading, no filter: a realistic photo exactly like image 1.")
+                "colour grading, no filter: a realistic photo exactly like image 1." + (CUT_EN if cut_bottom else ""))
     who = f"图1正中间的那个人（{original}）" if original else "图1正中间的那个人"
     return (f"图1是一张照片的局部，把{who}换成图2中的人：{description}。衣服完全换成图2里那个人的衣服，"
             "原来那个人的衣服一件都不留。原来那个人伸出来的头发、假发、耳朵、尾巴、蝴蝶结、围裙、裙摆、袜子和鞋也全部去掉，补成背景。保持原来的姿势、动作、身体朝向、在图中的位置、大小和被遮挡的部分不变；"
             "图1里其他人、其他人的身体部分和背景完全不变，画面构图和图1一样。不要美化，不要调色，不加滤镜，"
-            "是和图1一样的写实照片。")
+            "是和图1一样的写实照片。" + (CUT_ZH if cut_bottom else ""))
 
 
 # ---------------------------------------------------------------------------------------------------- paste
