@@ -548,7 +548,6 @@ class H3MDKeyframePrepare:
                 pictures.append(pic_t[p])
                 prompts.append(K.edit_prompt(descs[p], prompt_language, looks.get(k, ""), K.cut_at_bottom(own)))
                 items.append({"picture": p, "left": k, "id": pid, "crop": cb, "own": ob, "others": others,
-                              "desc": descs[p], "lang": prompt_language, "orig": looks.get(k, ""),
                               "others_ids": [q for q, b in allb if q != pid],
                               "inner": [ob[0] - cb[0], ob[1] - cb[1], ob[2] - cb[0], ob[3] - cb[1]]})
             job_moments.append({"at": t, "kind": "swap" if items else "plain", "items": items})
@@ -715,12 +714,6 @@ class H3MDKeyframeRecast:
                                    "Protection of the OTHER recast people while pasting (share of their box; below 0 "
                                    "= only their body core). People who are not recast always keep +0.06. "
                                    "保护旁人（只管要换的人；不换的人始终保护）"}),
-                "union_patch": ("MODEL_PATCH", {"tooltip": "From 'Load Qwen Image 2.1 UNION' "
-                                "(Qwen-Image-2.1-Fun-Controlnet-Union-ComfyUI.safetensors). 0.5.9: each person is "
-                                "erased first and drawn again on the empty place following her DWPose skeleton - "
-                                "nothing of the original can stay. 接 Union 模型"}),
-                "pose_strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 2.0, "step": 0.05, "tooltip":
-                                  "How strictly the skeleton is followed (Union strength). 骨骼强度"}),
             }
         }
 
@@ -732,13 +725,12 @@ class H3MDKeyframeRecast:
                        "The job with the finished keyframes (connect to Assemble 'job').")
     FUNCTION = "recast"
     CATEGORY = CATEGORY
-    DESCRIPTION = ("Multi-person swap keyframes, step 1b: one person after another, each crop cut from the frame "
-                   "where the people before her are already recast. 0.5.9: every person is first erased (Union "
-                   "masked inpaint) and then drawn again on the empty place following her DWPose skeleton (Union "
-                   "Pose + inpaint) - the original is never painted over, so nothing of her can stay.")
+    DESCRIPTION = ("Multi-person swap keyframes, step 1b (0.5.7): runs the image edit itself, one person after "
+                   "another, each crop cut from the frame where the people before her are already recast. Replaces "
+                   "the Text Encode / Sampler / VAE Decode chain between Prepare and Assemble.")
 
     def recast(self, job, pictures, prompts, model, clip, vae, sampler, sigmas, seed, cfg, mask_grow,
-               protect_others, union_patch=None, pose_strength=None):
+               protect_others):
         import numpy as np
         import comfy.utils
         import nodes
@@ -750,30 +742,6 @@ class H3MDKeyframeRecast:
                                                   one(sigmas))
         seed, cfg = int(one(seed)), float(one(cfg))
         grow, prot = float(one(mask_grow)), float(one(protect_others))
-        method = "erase + pose"
-        union_patch = one(union_patch)
-        pose_strength = float(one(pose_strength) if pose_strength is not None else 0.5)
-        dw = nodes.NODE_CLASS_MAPPINGS.get("DWPreprocessor")
-        union_apply = nodes.NODE_CLASS_MAPPINGS.get("QwenImage21UnionApply")
-        if dw is None or union_apply is None or union_patch is None:
-            raise K.KeyframeError(f"{TAG} Recast needs comfyui_controlnet_aux (DWPreprocessor), the Qwen Image 2.1 "
-                                  "Fun ControlNet Union pack, and 'Load Qwen Image 2.1 UNION' connected to "
-                                  "union_patch. 需要装 comfyui_controlnet_aux 和 Qwen Image 2.1 Fun ControlNet Union，"
-                                  "并把 Load Qwen Image 2.1 UNION 接到 union_patch。")
-
-        def sample(mdl, prompt, images):
-            enc = TextEncodeQwenImage21.execute(clip=clip, prompt=prompt, negative_prompt="", vae=vae,
-                                                resolution=0, images=images)
-            pos, neg, lat = enc.result[0], enc.result[1], enc.result[2]
-            out = SamplerCustom.execute(model=mdl, add_noise=True, noise_seed=seed, cfg=cfg, positive=pos,
-                                        negative=neg, sampler=sampler, sigmas=sigmas, latent_image=lat)
-            img = nodes.VAEDecode().decode(vae, out.result[0])[0]
-            if img.dim() == 5:
-                img = img.reshape(-1, img.shape[-3], img.shape[-2], img.shape[-1])
-            return img[:1].clamp(0, 1)
-
-        def fit(t, w, h):
-            return comfy.utils.common_upscale(t.movedim(-1, 1), w, h, "lanczos", "disabled").movedim(1, -1).clamp(0, 1)
         pics = [p[b:b + 1] for p in pictures for b in range(int(p.shape[0]))]
         need = sum(len(m["items"]) for m in job["moments"])
         if len(pics) != need or len(prompts) != need:
@@ -781,14 +749,6 @@ class H3MDKeyframeRecast:
                                   "connect Prepare's pictures and prompts. 请接上 Prepare 的 pictures 和 prompts。")
         W, H = job["size"]
         pbar = comfy.utils.ProgressBar(max(1, need))
-        import time as _time
-        import folder_paths
-        debug_dir = os.path.join(folder_paths.get_input_directory(), KF_SUBDIR, "_steps",
-                                 _time.strftime("recast_%Y%m%d_%H%M%S"))
-        try:
-            os.makedirs(debug_dir, exist_ok=True)
-        except Exception:
-            debug_dir = None
         edited, done, n = [], {}, 0
         for m in job["moments"]:
             src = job["frames"][m["at"]]
@@ -799,89 +759,28 @@ class H3MDKeyframeRecast:
                 gw, gh = K.gen_size(x1 - x0, y1 - y0)
                 ct = comfy.utils.common_upscale(to_tensor(cur[y0:y1, x0:x1]).movedim(-1, 1), gw, gh, "lanczos",
                                                 "disabled").movedim(1, -1).clamp(0, 1)
-                img, region = self._erase_pose(dict(it, at_frame=int(round(m["at"] * K.FPS))), src, ct, pics[n],
-                                               gw, gh, sample, fit, model, vae, dw, union_apply, union_patch,
-                                               pose_strength, grow, debug_dir)
+                enc = TextEncodeQwenImage21.execute(clip=clip, prompt=prompts[n], negative_prompt="", vae=vae,
+                                                    resolution=0, images={"image_1": ct, "image_2": pics[n]})
+                pos, neg, lat = enc.result[0], enc.result[1], enc.result[2]
+                out = SamplerCustom.execute(model=model, add_noise=True, noise_seed=seed, cfg=cfg, positive=pos,
+                                            negative=neg, sampler=sampler, sigmas=sigmas, latent_image=lat)
+                img = nodes.VAEDecode().decode(vae, out.result[0])[0]
+                if img.dim() == 5:
+                    img = img.reshape(-1, img.shape[-3], img.shape[-2], img.shape[-1])
+                img = img[:1].clamp(0, 1)
                 edited.append(img)
                 e = Image.fromarray(to_u8(img)).resize((x1 - x0, y1 - y0), Image.LANCZOS)
                 patch = K.colour_match(np.asarray(e), src[y0:y1, x0:x1], it["inner"])
                 ids = it.get("others_ids") or [None] * len(it["others"])
                 pads = [prot if q in swapped else K.PROTECT_PAD for q in ids]
-                alpha = K.paste_alpha(it["crop"], W, H, it["own"], it["others"], own_grow=grow, protects=pads)
-                if True:
-                    # only her redrawn area goes back - wherever the edit model touched anything outside it
-                    # (another person, the background) the frame keeps its pixels
-                    rm = np.asarray(Image.fromarray((region * 255).astype(np.uint8)).resize(
-                        (x1 - x0, y1 - y0), Image.BILINEAR), np.float32) / 255.0
-                    alpha = alpha * K.soften(rm, max(2, int(K.FEATHER * (x1 - x0))))
-                K.paste(cur, patch, it["crop"], alpha)
+                K.paste(cur, patch, it["crop"], K.paste_alpha(it["crop"], W, H, it["own"], it["others"],
+                                                              own_grow=grow, protects=pads))
                 n += 1
                 pbar.update(1)
             done[m["at"]] = cur
-        job = dict(job, recast_frames=done, recast={"mask_grow": grow, "protect_others": prot, "seed": seed,
-                                                    "method": method, "pose_strength": pose_strength})
-        LOG.info("%s recast one by one (%s): %d edit(s), mask_grow %.2f, protect_others %.2f; step images in %s", TAG,
-                 method, n, grow, prot, debug_dir)
+        job = dict(job, recast_frames=done, recast={"mask_grow": grow, "protect_others": prot, "seed": seed})
+        LOG.info("%s recast one by one: %d edit(s), mask_grow %.2f, protect_others %.2f", TAG, n, grow, prot)
         return (edited, job)
-
-    @staticmethod
-    def _erase_pose(it, src, ct, pic, gw, gh, sample, fit, model, vae, dw, union_apply, union_patch, strength, grow,
-                    debug_dir=None):
-        """0.5.9 'erase + pose': skeleton from the SOURCE crop -> erase the person from the current crop (plain edit)
-        -> draw the new person on the empty crop (edit + Union Pose control).  The step images go to debug_dir."""
-        import torch
-        x0, y0, x1, y1 = it["crop"]
-        lang, desc, orig = it.get("lang", "zh"), it.get("desc", ""), it.get("orig", "")
-        inner = it["inner"]
-        sw, sh = x1 - x0, y1 - y0
-        box = [inner[0] / sw, inner[1] / sh, inner[2] / sw, inner[3] / sh]
-        # 1. pose of the original (source pixels, at the edit size so the skeleton matches the canvas)
-        st = fit(to_tensor(src[y0:y1, x0:x1]), gw, gh)
-        res = dw().estimate_pose(image=st, detect_hand="enable", detect_body="enable", detect_face="enable",
-                                 resolution=max(gw, gh), bbox_detector="yolox_l.onnx",
-                                 pose_estimator="dw-ll_ucoco_384_bs5.torchscript.pt")
-        res = res.get("result", res) if isinstance(res, dict) else res
-        dicts = res[1] if len(res) > 1 else []
-        people = K.pose_people(dicts[0]) if dicts else []
-        k = K.pick_pose(people, box)
-        person = people[k] if k is not None else None
-        if person is None:
-            LOG.warning("%s person %s: no skeleton found (too small?) - erased and drawn in her area without a "
-                        "skeleton", TAG, it["id"])
-        elif not any(q is not None for q in (person["body"][0], person["body"][14], person["body"][15])) \
-                and not any(q is not None for q in (person.get("face") or [])):
-            LOG.info("%s person %s has no face in the skeleton (seen from behind)", TAG, it["id"])
-        pose = (torch.from_numpy(K.draw_pose(person, gw, gh)).float().unsqueeze(0) / 255.0
-                if person is not None else None)
-        sx, sy = gw / sw, gh / sh
-        m = K.redraw_mask([inner[0] * sx, inner[1] * sy, inner[2] * sx, inner[3] * sy], gw, gh, person, grow)
-
-        # Two complete stages, each one an ordinary, proven setup (the user's own Union workflow, 11-20):
-        # 1. erase: a plain image edit with the same model and sampler as every other edit here - no Union
-        erased = fit(sample(model, K.erase_prompt(lang, orig), {"image_1": ct}), gw, gh)
-        # 2. draw: the same edit, image 1 = the empty crop, image 2 = the character, the model patched by the Union
-        #    in Pose mode with the skeleton as control image - exactly how the user's workflow wires it (control
-        #    image only, no inpaint image / mask).  Only her area (box + skeleton) is pasted back afterwards.
-        if pose is not None:
-            r = union_apply().apply(model=model, union_patch=union_patch, vae=vae, control_mode="Pose",
-                                    strength=strength, start_percent=0.0, end_percent=1.0, control_image=pose)
-            pmodel = r[0] if isinstance(r, (tuple, list)) else r
-        else:
-            pmodel = model
-        drawn = sample(pmodel, K.pose_draw_prompt(desc, lang, pose is not None), {"image_1": erased,
-                                                                               "image_2": pic})
-        if debug_dir:
-            try:
-                from PIL import Image as _I
-                tag = f"{it.get('at_frame', 0):04d}_p{it['picture']}"
-                _I.fromarray(to_u8(ct)).save(os.path.join(debug_dir, f"{tag}_1_crop.png"))
-                if pose is not None:
-                    _I.fromarray(to_u8(pose)).save(os.path.join(debug_dir, f"{tag}_2_pose.png"))
-                _I.fromarray(to_u8(erased)).save(os.path.join(debug_dir, f"{tag}_3_erased.png"))
-                _I.fromarray(to_u8(drawn)).save(os.path.join(debug_dir, f"{tag}_4_drawn.png"))
-            except Exception as exc:
-                LOG.warning("%s could not save the step images (%s)", TAG, exc)
-        return drawn, m
 
 
 NODE_CLASS_MAPPINGS = {"H3MDKeyframePrepare": H3MDKeyframePrepare, "H3MDKeyframeRecast": H3MDKeyframeRecast,
