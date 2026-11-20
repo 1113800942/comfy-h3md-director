@@ -232,6 +232,9 @@ def test_edit_prompt_keeps_back_view():
     assert "背对" in K.edit_prompt("一个男人", "zh")
 
 
-def test_edit_prompt_removes_gloves():
-    # run 39, 3.33 s: the original's long light-blue gloves stayed on the raised arms
-    assert "gloves" in K.edit_prompt("a woman", "en") and "手套" in K.edit_prompt("一个女人", "zh")
+def test_edit_prompt_arms_positive_only():
+    # run 40: the original's gloves stayed on raised arms; run 41: naming gloves in the prompt put black gloves on
+    # a man and cut a woman's hands off -> describe the arms positively, never name what to remove there
+    for t in (K.edit_prompt("a woman", "en"), K.edit_prompt("一个女人", "zh")):
+        assert "glove" not in t and "手套" not in t
+    assert "arms and hands" in K.edit_prompt("a woman", "en") and "手臂和手" in K.edit_prompt("一个女人", "zh")
