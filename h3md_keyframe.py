@@ -197,7 +197,8 @@ def appearance(frames_u8, per_frame):
         # same way and would make one dancer look like another from frame to frame
         f = img.astype(np.float32)
         m = f.reshape(-1, 3).mean(0)
-        img = np.clip(f * (m.mean() / np.maximum(m, 1.0)), 0, 255).astype(np.uint8)
+        gain = np.clip(m.mean() / np.maximum(m, 1.0), 1 / 3.0, 3.0)   # capped: a near-black frame is not blown up
+        img = np.clip(f * gain, 0, 255).astype(np.uint8)
         hh, ww = img.shape[:2]
         items = list(fr.items())
         for pid, b in items:
@@ -523,7 +524,7 @@ PART_MAX_KF = 4            # ... and takes only the first 4 keyframes of a part 
 
 
 def finish_moments(frames, moments, chosen_ids, duration, max_gap=5.0, part_frames=PART_FRAMES,
-                   part_max=PART_MAX_KF):
+                   part_max=PART_MAX_KF, cuts=()):
     """0.5.9 cross-check of the moment rules (picks every <= max_gap s, one per shot, none on close-ups):
     (1) no keyframe at all (only close-ups found) -> the best frame anyway, close-ups allowed - a part without any
         keyframe is an error;
@@ -553,7 +554,11 @@ def finish_moments(frames, moments, chosen_ids, duration, max_gap=5.0, part_fram
                 rest = ts[:j] + ts[j + 1:]
                 pts = [0.0] + rest + [duration]
                 return max(b - a_ for a_, b in zip(pts, pts[1:]))
-            drop = min(win, key=lambda j: (gap_without(j), -abs(ts[j] - ts[j - 1]) if j else 0))
+            bounds = [0.0] + sorted(c for c in cuts if 0 < c < duration) + [duration]
+            shot = lambda t_: max(k for k, b0 in enumerate(bounds) if b0 <= t_)
+            alone = {j for j in win if sum(1 for t_ in ts if shot(t_) == shot(ts[j])) == 1}
+            pool = [j for j in win if j not in alone] or win      # the only keyframe of a shot stays if possible
+            drop = min(pool, key=lambda j: (gap_without(j), -abs(ts[j] - ts[j - 1]) if j else 0))
             notes.append(f"{len(win)} keyframes within {span:.1f} s: dropped the one at {ts[drop]:.2f} s "
                          f"(Remake keeps 4 per part)")
             out.pop(drop)

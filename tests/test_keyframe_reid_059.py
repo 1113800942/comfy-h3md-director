@@ -159,3 +159,14 @@ def test_finish_moments_caps_four_per_part_and_never_empty():
     frames2 = [_f(i / 6, close) for i in range(30)]
     out2, notes2 = K.finish_moments(frames2, [], {0}, 5.0)
     assert len(out2) == 1 and notes2
+
+
+
+def test_finish_moments_keeps_only_keyframe_of_a_shot():
+    wide = {0: (0.1, 0.2, 0.25, 0.9), 1: (0.42, 0.2, 0.57, 0.9)}
+    frames = [_f(i / 6, wide) for i in range(6 * 16)]
+    ms = [(i, "swap") for i in (6, 12, 18, 24, 66)]             # 1, 2, 3, 4 s in shot A, 11 s in shot B (cut at 10 s)
+    out, _ = K.finish_moments(frames, ms + [(30, "swap")], {0, 1}, 16.0, cuts=[4.5, 10.0])
+    ts = [frames[i]["at"] for i, _ in out]
+    assert 5.0 in ts                                             # the only keyframe of shot 4.5-10 s stays
+    assert 11.0 in ts
