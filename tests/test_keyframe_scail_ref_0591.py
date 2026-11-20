@@ -13,15 +13,15 @@ def _char(colour, w=100, h=200):
     rgb[:] = colour
     m = np.zeros((h, w), bool)
     m[20:, 30:70] = True
-    return rgb, m, [30, 0, 70, 200], [35, 20, 65, 50]          # head 30 x 30 at the top of the figure
+    return rgb, m, [30, 0, 70, 200], None, [35, 20, 65, 50]    # no face; head 30 x 30 at the top
 
 
 def test_aligned_reference():
     chars = [_char((200, 0, 0)), _char((0, 200, 0))]
-    targets = [([300, 100, 340, 300], [310, 100, 330, 120]),    # far (box bottom 300): head 20 px
-               ([90, 60, 170, 470], None)]                       # near, no head found: figure on her box
+    targets = [([300, 100, 340, 300], [310, 100, 330, 120], [310, 100, 330, 120]),   # far: face/head 20 px
+               ([90, 60, 170, 470], None, None)]                  # near, nothing found: figure on her box
     rgb, cm, how = N.aligned_reference(chars, targets, 512, 512)
-    assert how == ["head", "figure"]
+    assert how == ["head", "figure"]                              # no face in the picture: head on head
     assert tuple(rgb[150, 320]) == (200, 0, 0) and tuple(cm[150, 320]) == (0.0, 0.0, 1.0)   # first: blue
     assert tuple(rgb[300, 130]) == (0, 200, 0) and tuple(cm[300, 130]) == (1.0, 0.0, 0.0)   # second: red
     assert rgb[10, 10].sum() == 0 and cm[10, 10].sum() == 0                                  # black elsewhere

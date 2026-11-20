@@ -694,8 +694,14 @@ def _detect(sam, image_t, cond, threshold):
     return out
 
 
-def cut_character(sam, picture, cond_person, cond_head, threshold):
-    """the character in a picture: (rgb uint8, figure mask, figure box, head box or None)"""
+def find_parts(sam, image_t, cond_face, cond_head):
+    """face boxes and head boxes in an image (SAM3, several per image)"""
+    return ([b for b, _ in _detect(sam, image_t, cond_face, K.HEAD_THRESHOLD)],
+            [b for b, _ in _detect(sam, image_t, cond_head, K.HEAD_THRESHOLD)])
+
+
+def cut_character(sam, picture, cond_person, cond_face, cond_head, threshold):
+    """the character in a picture: (rgb uint8, figure mask, figure box, face box or None, head box or None)"""
     import numpy as np
     rgb = to_u8(picture)
     found = _detect(sam, picture[..., :3], cond_person, threshold)
@@ -707,14 +713,15 @@ def cut_character(sam, picture, cond_person, cond_head, threshold):
     else:                                       # nothing found: the whole picture is the character
         h, w = rgb.shape[:2]
         box, m = [0.0, 0.0, float(w), float(h)], np.ones((h, w), bool)
-    head = K.pick_head(box, [b for b, _ in _detect(sam, picture[..., :3], cond_head, threshold)])
-    return rgb, m, box, head
+    faces, heads = find_parts(sam, picture[..., :3], cond_face, cond_head)
+    return rgb, m, box, K.pick_head(box, faces), K.pick_head(box, heads)
 
 
 def aligned_reference(chars, targets, w, h):
     """0.5.91: SCAIL-2's reference picture, aligned with the keyframe: every character pasted where the person she
-    replaces stands, head on head at the same size; the nearer person (lower box bottom) last.  chars / targets:
-    lists in colour order; targets = (figure box px, head box px or None).  -> (rgb uint8 [h, w, 3], colour mask
+    replaces stands, face on face (else head on head, else figure on box) at the same size; the nearer person
+    (lower box bottom) last.  chars / targets: lists in colour order; chars = cut_character(); targets = (figure
+    box px, face box or None, head box or None).  -> (rgb uint8 [h, w, 3], colour mask
     float [h, w, 3] on black, notes)"""
     import numpy as np
     from PIL import Image
@@ -724,9 +731,13 @@ def aligned_reference(chars, targets, w, h):
     notes = []
     order = sorted(range(len(chars)), key=lambda k: targets[k][0][3])
     for k in order:
-        c_rgb, c_m, c_box, c_head = chars[k]
-        t_box, t_head = targets[k]
-        sc, dx, dy, how = K.place_character(t_box, c_box, t_head, c_head)
+        c_rgb, c_m, c_box, c_face, c_head = chars[k]
+        t_box, t_face, t_head = targets[k]
+        if t_face and c_face:
+            sc, dx, dy, _ = K.place_character(t_box, c_box, t_face, c_face)
+            how = "face"
+        else:
+            sc, dx, dy, how = K.place_character(t_box, c_box, t_head, c_head)
         notes.append(how)
         aff = (1.0 / sc, 0.0, -dx / sc, 0.0, 1.0 / sc, -dy / sc)
         im = np.asarray(Image.fromarray(c_rgb).transform((w, h), Image.AFFINE, aff, resample=Image.BILINEAR))
@@ -816,7 +827,8 @@ class H3MDKeyframeRecast:
         patchers = [sam] + ([sclip.patcher] if getattr(sclip, "patcher", None) is not None else [])
         try:
             cond = nodes.CLIPTextEncode().encode(sclip, "person")[0]
-            cond_head = nodes.CLIPTextEncode().encode(sclip, "head")[0]
+            cond_face = nodes.CLIPTextEncode().encode(sclip, K.PART_PROMPTS[0])[0]
+            cond_head = nodes.CLIPTextEncode().encode(sclip, K.PART_PROMPTS[1])[0]
             cut_cache = {}
             for m in job["moments"]:
                 if not m["items"]:
@@ -837,19 +849,21 @@ class H3MDKeyframeRecast:
                 notes = [f"picture {m['items'][j]['picture']} (left {m['items'][j]['left']}): not found in the "
                          "piece around the keyframe - left as in the source" for j in range(len(refs)) if j not in keep]
                 if keep:
-                    heads = [b_ for b_, _ in _detect(sam, drive[ki:ki + 1], cond_head, self.THRESHOLD)]
+                    faces, heads = find_parts(sam, drive[ki:ki + 1], cond_face, cond_head)
                     chars, targets = [], []
                     for j in keep:
                         p_ = m["items"][j]["picture"]
                         if p_ not in cut_cache:
-                            cut_cache[p_] = cut_character(sam, refs[j], cond, cond_head, self.THRESHOLD)
+                            cut_cache[p_] = cut_character(sam, refs[j], cond, cond_face, cond_head,
+                                                          self.THRESHOLD)
                         chars.append(cut_cache[p_])
                         ob = objs[got[j]]
                         tb = [ob[0] * gw, ob[1] * gh, ob[2] * gw, ob[3] * gh]
-                        targets.append((tb, K.pick_head(tb, heads)))
+                        targets.append((tb, K.pick_head(tb, faces), K.pick_head(tb, heads)))
                     ref_rgb, ref_cm, how = aligned_reference(chars, targets, gw, gh)
                     notes += [f"picture {m['items'][j]['picture']}: placed {how[k]} on {how[k]}"
-                              + ("" if how[k] == "head" else " (no head found - whole figure on the person's box)")
+                              + (" (no face or head found - whole figure on the person's box)"
+                                 if how[k] == "figure" else "")
                               for k, j in enumerate(keep)]
                     pose_mask = _render_colored_masks(_subset_track_data(track, [got[j] for j in keep]), "white")
                     ref_mask = torch.from_numpy(ref_cm)[None]

@@ -764,11 +764,15 @@ def pick_head(person, heads):
     return best[1] if best else None
 
 
+HEAD_THRESHOLD = 0.3      # 0.5.91: SAM3 "face" / "head" detection (small faces in wide shots score low)
+PART_PROMPTS = ("face:16", "head:16")   # ':N' = keep up to N detections (SAM3 keeps 1 without it)
+
+
 def place_character(t_box, c_box, t_head=None, c_head=None):
     """0.5.91: where a character picture goes on the SCAIL-2 reference (aligned with the keyframe): scale s and
-    shift (dx, dy) so that picture pixel (x, y) lands on (x * s + dx, y * s + dy).  Head on head (same size, same
-    top, same middle) when both heads are known - right for a half-body photo and a full-body one alike; else her
-    whole figure on the person's box (same height, same top, same middle)."""
+    shift (dx, dy) so that picture pixel (x, y) lands on (x * s + dx, y * s + dy).  Part on part (same size, same
+    top, same middle) when both parts are known - a face or a head, right for a half-body photo and a full-body one
+    alike; else her whole figure on the person's box (same height, same top, same middle)."""
     if t_head and c_head:
         tw, th = t_head[2] - t_head[0], t_head[3] - t_head[1]
         cw, ch = c_head[2] - c_head[0], c_head[3] - c_head[1]
