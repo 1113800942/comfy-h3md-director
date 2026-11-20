@@ -864,9 +864,8 @@ class H3MDKeyframeRecast:
         #    says WHERE (her area), so the right person goes even when she is not in the middle of the crop
         #    (frame edge) or stands close to others; plain edit if the Union refuses a mask without a control map.
         try:
-            # an empty (black) pose map = nobody there; strength 1 so the inpaint guidance is on
-            emodel = patched(control_mode="Pose", strength=1.0, control_image=torch.zeros_like(pose),
-                             inpaint_image=ct, mask=mask)
+            # mask-only inpaint (no control map) - a supported Union path (union_compat: control_image may be None)
+            emodel = patched(control_mode="Pose", strength=1.0, control_image=None, inpaint_image=ct, mask=mask)
         except Exception as exc:
             LOG.warning("%s erase + pose: masked erase not available (%s), erasing by prompt only", TAG, exc)
             emodel = model
