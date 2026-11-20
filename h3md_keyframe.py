@@ -940,7 +940,15 @@ def erase_prompt(lang="zh", original=""):
             "其他人和整个背景完全不变。和图1一样的写实照片，不要美化，不要调色。")
 
 
-def pose_draw_prompt(description, lang="zh"):
+def pose_draw_prompt(description, lang="zh", skeleton=True):
+    if not skeleton:          # no skeleton found (tiny person): place and size come from the mask only
+        if lang == "en":
+            return (f"Image 1 is a part of a photo. Draw the person from image 2 into the empty place in the middle "
+                    f"of image 1: {description}, filling that place, and wearing the complete outfit of the person "
+                    "in image 2 from head to toe. Everybody else and the background stay unchanged; the same light "
+                    "as image 1. A realistic photo exactly like image 1, no beautifying, no colour grading.")
+        return (f"图1是一张照片的局部。把图2里的人画进图1中间空出来的位置：{description}，正好填满那个位置；"
+                "她从头到脚穿图2里那个人的全套服饰。其他人和背景不变，光线和图1一样。和图1一样的写实照片，不要美化，不要调色。")
     if lang == "en":
         return (f"Image 1 is a part of a photo. Draw the person from image 2 into the empty place in the middle of "
                 f"image 1: {description}. She stands exactly in the pose, place and size of the pose skeleton, from "

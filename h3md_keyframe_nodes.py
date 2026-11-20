@@ -715,18 +715,12 @@ class H3MDKeyframeRecast:
                                    "Protection of the OTHER recast people while pasting (share of their box; below 0 "
                                    "= only their body core). People who are not recast always keep +0.06. "
                                    "保护旁人（只管要换的人；不换的人始终保护）"}),
-            },
-            "optional": {
-                "method": (["replace", "erase + pose"], {"default": "replace", "tooltip":
-                           "replace: the edit model repaints the person over the original (0.5.7). erase + pose "
-                           "(0.5.9): the original's pose is kept as a DWPose skeleton, the original is erased, and "
-                           "the new person is drawn on the empty place with the Qwen Image 2.1 Fun ControlNet Union "
-                           "(Pose + inpaint) - nothing of the original can stay. Needs comfyui_controlnet_aux and "
-                           "the Union pack + union_patch. 换人方式：直接换 / 先删再按骨骼画"}),
-                "union_patch": ("MODEL_PATCH", {"tooltip": "erase + pose: from 'Load Qwen Image 2.1 UNION' "
-                                "(Qwen-Image-2.1-Fun-Controlnet-Union-ComfyUI.safetensors)"}),
+                "union_patch": ("MODEL_PATCH", {"tooltip": "From 'Load Qwen Image 2.1 UNION' "
+                                "(Qwen-Image-2.1-Fun-Controlnet-Union-ComfyUI.safetensors). 0.5.9: each person is "
+                                "erased first and drawn again on the empty place following her DWPose skeleton - "
+                                "nothing of the original can stay. 接 Union 模型"}),
                 "pose_strength": ("FLOAT", {"default": 0.8, "min": 0.0, "max": 2.0, "step": 0.05, "tooltip":
-                                  "erase + pose: how strictly the skeleton is followed (Union strength). 骨骼强度"}),
+                                  "How strictly the skeleton is followed (Union strength). 骨骼强度"}),
             }
         }
 
@@ -738,12 +732,13 @@ class H3MDKeyframeRecast:
                        "The job with the finished keyframes (connect to Assemble 'job').")
     FUNCTION = "recast"
     CATEGORY = CATEGORY
-    DESCRIPTION = ("Multi-person swap keyframes, step 1b (0.5.7): runs the image edit itself, one person after "
-                   "another, each crop cut from the frame where the people before her are already recast. Replaces "
-                   "the Text Encode / Sampler / VAE Decode chain between Prepare and Assemble.")
+    DESCRIPTION = ("Multi-person swap keyframes, step 1b: one person after another, each crop cut from the frame "
+                   "where the people before her are already recast. 0.5.9: every person is first erased (Union "
+                   "masked inpaint) and then drawn again on the empty place following her DWPose skeleton (Union "
+                   "Pose + inpaint) - the original is never painted over, so nothing of her can stay.")
 
     def recast(self, job, pictures, prompts, model, clip, vae, sampler, sigmas, seed, cfg, mask_grow,
-               protect_others, method=None, union_patch=None, pose_strength=None):
+               protect_others, union_patch=None, pose_strength=None):
         import numpy as np
         import comfy.utils
         import nodes
@@ -755,17 +750,16 @@ class H3MDKeyframeRecast:
                                                   one(sigmas))
         seed, cfg = int(one(seed)), float(one(cfg))
         grow, prot = float(one(mask_grow)), float(one(protect_others))
-        method = one(method) or "replace"
+        method = "erase + pose"
         union_patch = one(union_patch)
         pose_strength = float(one(pose_strength) if pose_strength is not None else 0.8)
-        erase_pose = method.startswith("erase")
-        if erase_pose:
-            dw = nodes.NODE_CLASS_MAPPINGS.get("DWPreprocessor")
-            union_apply = nodes.NODE_CLASS_MAPPINGS.get("QwenImage21UnionApply")
-            if dw is None or union_apply is None or union_patch is None:
-                raise K.KeyframeError(f"{TAG} method 'erase + pose' needs comfyui_controlnet_aux (DWPreprocessor), "
-                                      "the Qwen Image 2.1 Fun ControlNet Union pack and its loader connected to "
-                                      "union_patch. 「先删再按骨骼画」需要 DWPose 和 Union 节点，并接上 union_patch。")
+        dw = nodes.NODE_CLASS_MAPPINGS.get("DWPreprocessor")
+        union_apply = nodes.NODE_CLASS_MAPPINGS.get("QwenImage21UnionApply")
+        if dw is None or union_apply is None or union_patch is None:
+            raise K.KeyframeError(f"{TAG} Recast needs comfyui_controlnet_aux (DWPreprocessor), the Qwen Image 2.1 "
+                                  "Fun ControlNet Union pack, and 'Load Qwen Image 2.1 UNION' connected to "
+                                  "union_patch. 需要装 comfyui_controlnet_aux 和 Qwen Image 2.1 Fun ControlNet Union，"
+                                  "并把 Load Qwen Image 2.1 UNION 接到 union_patch。")
 
         def sample(mdl, prompt, images):
             enc = TextEncodeQwenImage21.execute(clip=clip, prompt=prompt, negative_prompt="", vae=vae,
@@ -797,21 +791,17 @@ class H3MDKeyframeRecast:
                 gw, gh = K.gen_size(x1 - x0, y1 - y0)
                 ct = comfy.utils.common_upscale(to_tensor(cur[y0:y1, x0:x1]).movedim(-1, 1), gw, gh, "lanczos",
                                                 "disabled").movedim(1, -1).clamp(0, 1)
-                region = None
-                if not erase_pose:
-                    img = sample(model, prompts[n], {"image_1": ct, "image_2": pics[n]})
-                else:
-                    img, region = self._erase_pose(it, src, ct, pics[n], gw, gh, sample, fit, model, vae, dw,
-                                                   union_apply, union_patch, pose_strength, grow)
+                img, region = self._erase_pose(it, src, ct, pics[n], gw, gh, sample, fit, model, vae, dw,
+                                               union_apply, union_patch, pose_strength, grow)
                 edited.append(img)
                 e = Image.fromarray(to_u8(img)).resize((x1 - x0, y1 - y0), Image.LANCZOS)
                 patch = K.colour_match(np.asarray(e), src[y0:y1, x0:x1], it["inner"])
                 ids = it.get("others_ids") or [None] * len(it["others"])
                 pads = [prot if q in swapped else K.PROTECT_PAD for q in ids]
                 alpha = K.paste_alpha(it["crop"], W, H, it["own"], it["others"], own_grow=grow, protects=pads)
-                if region is not None:
-                    # erase + pose: only her redrawn area goes back - wherever the edit model touched anything
-                    # outside it (another person, the background) the frame keeps its pixels
+                if True:
+                    # only her redrawn area goes back - wherever the edit model touched anything outside it
+                    # (another person, the background) the frame keeps its pixels
                     rm = np.asarray(Image.fromarray((region * 255).astype(np.uint8)).resize(
                         (x1 - x0, y1 - y0), Image.BILINEAR), np.float32) / 255.0
                     alpha = alpha * K.soften(rm, max(2, int(K.FEATHER * (x1 - x0))))
@@ -844,14 +834,15 @@ class H3MDKeyframeRecast:
         dicts = res[1] if len(res) > 1 else []
         people = K.pose_people(dicts[0]) if dicts else []
         k = K.pick_pose(people, box)
-        if k is None:
-            LOG.warning("%s erase + pose: no skeleton found for person %s, falling back to replace", TAG, it["id"])
-            return sample(model, K.edit_prompt(desc, lang, orig), {"image_1": ct, "image_2": pic}), None
-        person = people[k]
-        if not any(q is not None for q in (person["body"][0], person["body"][14], person["body"][15])) \
+        person = people[k] if k is not None else None
+        if person is None:
+            LOG.warning("%s person %s: no skeleton found (too small?) - erased and drawn in her area without a "
+                        "skeleton", TAG, it["id"])
+        elif not any(q is not None for q in (person["body"][0], person["body"][14], person["body"][15])) \
                 and not any(q is not None for q in (person.get("face") or [])):
-            LOG.info("%s erase + pose: person %s has no face in the skeleton (seen from behind)", TAG, it["id"])
-        pose = torch.from_numpy(K.draw_pose(person, gw, gh)).float().unsqueeze(0) / 255.0
+            LOG.info("%s person %s has no face in the skeleton (seen from behind)", TAG, it["id"])
+        pose = (torch.from_numpy(K.draw_pose(person, gw, gh)).float().unsqueeze(0) / 255.0
+                if person is not None else None)
         sx, sy = gw / sw, gh / sh
         m = K.redraw_mask([inner[0] * sx, inner[1] * sy, inner[2] * sx, inner[3] * sy], gw, gh, person, grow)
         mask = torch.from_numpy(m).unsqueeze(0)
@@ -867,13 +858,14 @@ class H3MDKeyframeRecast:
             # mask-only inpaint (no control map) - a supported Union path (union_compat: control_image may be None)
             emodel = patched(control_mode="Pose", strength=1.0, control_image=None, inpaint_image=ct, mask=mask)
         except Exception as exc:
-            LOG.warning("%s erase + pose: masked erase not available (%s), erasing by prompt only", TAG, exc)
+            LOG.warning("%s masked erase not available (%s), erasing by prompt only", TAG, exc)
             emodel = model
         erased = fit(sample(emodel, K.erase_prompt(lang, orig), {"image_1": ct}), gw, gh)
         # 3. draw the new person: Union Pose + inpaint inside her area (box + skeleton), the rest kept
-        pmodel = patched(control_mode="Pose", strength=strength, control_image=pose, inpaint_image=erased,
-                         mask=mask)
-        return sample(pmodel, K.pose_draw_prompt(desc, lang), {"image_1": erased, "image_2": pic}), m
+        pmodel = patched(control_mode="Pose", strength=strength if pose is not None else 1.0, control_image=pose,
+                         inpaint_image=erased, mask=mask)
+        return sample(pmodel, K.pose_draw_prompt(desc, lang, pose is not None), {"image_1": erased,
+                                                                                 "image_2": pic}), m
 
 
 NODE_CLASS_MAPPINGS = {"H3MDKeyframePrepare": H3MDKeyframePrepare, "H3MDKeyframeRecast": H3MDKeyframeRecast,
