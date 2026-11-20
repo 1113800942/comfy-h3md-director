@@ -439,7 +439,6 @@
      "name": "MODEL",
      "type": "MODEL",
      "links": [
-      10,
       13
      ]
     }
@@ -550,7 +549,7 @@
   },
   {
    "id": 27,
-   "type": "BasicScheduler",
+   "type": "ManualSigmas",
    "pos": [
     800,
     730
@@ -562,13 +561,7 @@
    "flags": {},
    "order": 14,
    "mode": 0,
-   "inputs": [
-    {
-     "name": "model",
-     "type": "MODEL",
-     "link": 10
-    }
-   ],
+   "inputs": [],
    "outputs": [
     {
      "name": "SIGMAS",
@@ -579,14 +572,12 @@
     }
    ],
    "properties": {
-    "Node name for S&R": "BasicScheduler"
+    "Node name for S&R": "ManualSigmas"
    },
    "widgets_values": [
-    "simple",
-    6,
-    1.0
+    "1.0, 0.9675236940383911, 0.8875485062599182, 0.75, 0.5327739119529724, 0.23200887441635132, 0.0"
    ],
-   "title": "Steps 步数：6（开加速 = 2）"
+   "title": "Exact 6-step PDD Sigmas（用户调好的 6 步）"
   },
   {
    "id": 30,
@@ -940,14 +931,6 @@
    22,
    0,
    23,
-   0,
-   "MODEL"
-  ],
-  [
-   10,
-   23,
-   0,
-   27,
    0,
    "MODEL"
   ],
