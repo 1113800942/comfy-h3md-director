@@ -748,20 +748,18 @@ def edit_prompt(description: str, lang: str = "zh", original: str = "", cut_bott
     if lang == "en":
         who = f"the person in the middle of image 1 ({original})" if original else "the person in the middle of image 1"
         return (f"Image 1 is a part of a photo. Replace {who} with the person from "
-                f"image 2: {description}. The clothes become entirely the clothes of the person in image 2; nothing "
-                "of the original person's clothes stays, and every piece of the original person sticking out around "
-                "her (hair, wig, ears, tail, ribbons, apron, skirt, socks, shoes) is removed and filled with the "
-                "background. Her arms and hands, raised ones too, are complete and look exactly like the arms and hands "
-                "of the person in image 2, with five fingers on each hand. Keep the original pose, action, body direction, position, "
+                f"image 2: {description}. She wears the complete outfit of the person in image 2 from head to toe; "
+                "nothing the original person wore stays, and anything of the original person sticking out around "
+                "her is filled with the background. Keep the original pose, action, body direction, position, "
                 "size and any covered parts exactly the same; if the original person is seen from behind or from the "
-                "side, the new person is seen from behind or from the side in the same way (from behind her face is "
-                "not visible); everybody else, their body parts and the background "
-                "in image 1 stay completely unchanged, with the same composition as image 1. No beautifying, no "
-                "colour grading, no filter: a realistic photo exactly like image 1." + (CUT_EN if cut_bottom else ""))
+                "side, the new person is seen from behind or from the side in the same way; everybody else, their "
+                "body parts and the background in image 1 stay completely unchanged, with the same composition as "
+                "image 1. No beautifying, no colour grading, no filter: a realistic photo exactly like image 1."
+                + (CUT_EN if cut_bottom else ""))
     who = f"图1正中间的那个人（{original}）" if original else "图1正中间的那个人"
-    return (f"图1是一张照片的局部，把{who}换成图2中的人：{description}。衣服完全换成图2里那个人的衣服，"
-            "原来那个人的衣服一件都不留。原来那个人伸出来的头发、假发、耳朵、尾巴、蝴蝶结、围裙、裙摆、袜子和鞋也全部去掉，补成背景。她的手臂和手（举起来的也一样）完整，和图2里那个人的手臂和手完全一样，每只手五根手指。保持原来的姿势、动作、身体朝向、在图中的位置、大小和被遮挡的部分不变；"
-            "原来的人如果是背对镜头或侧身，新的人也一样背对镜头或侧身（背对时看不到脸）；"
+    return (f"图1是一张照片的局部，把{who}换成图2中的人：{description}。她从头到脚穿图2里那个人的全套服饰，"
+            "原来那个人的服饰一样都不留，原来那个人露在她身边的部分全部补成背景。"
+            "保持原来的姿势、动作、身体朝向、在图中的位置、大小和被遮挡的部分不变；原来的人如果背对镜头或侧身，新的人也一样；"
             "图1里其他人、其他人的身体部分和背景完全不变，画面构图和图1一样。不要美化，不要调色，不加滤镜，"
             "是和图1一样的写实照片。" + (CUT_ZH if cut_bottom else ""))
 

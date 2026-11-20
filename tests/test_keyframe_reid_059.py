@@ -232,9 +232,12 @@ def test_edit_prompt_keeps_back_view():
     assert "背对" in K.edit_prompt("一个男人", "zh")
 
 
-def test_edit_prompt_arms_positive_only():
-    # run 40: the original's gloves stayed on raised arms; run 41: naming gloves in the prompt put black gloves on
-    # a man and cut a woman's hands off -> describe the arms positively, never name what to remove there
-    for t in (K.edit_prompt("a woman", "en"), K.edit_prompt("一个女人", "zh")):
-        assert "glove" not in t and "手套" not in t
-    assert "arms and hands" in K.edit_prompt("a woman", "en") and "手臂和手" in K.edit_prompt("一个女人", "zh")
+def test_edit_prompt_general_not_itemised():
+    # runs 40/41 + the user's rule: naming items (gloves, hands) makes the model add or cut them -> one general
+    # phrase for the whole outfit, no item list
+    en, zh = K.edit_prompt("a woman", "en"), K.edit_prompt("一个女人", "zh")
+    for w in ("glove", "wig", "tail", "socks", "finger"):
+        assert w not in en
+    for w in ("手套", "假发", "尾巴", "袜子", "手指"):
+        assert w not in zh
+    assert "complete outfit" in en and "全套服饰" in zh
