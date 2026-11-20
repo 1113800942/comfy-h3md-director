@@ -391,15 +391,21 @@ def _motion(frames, i, pid):
     return max(d) if d else 0.0
 
 
-CLOSE_BOTTOM, CLOSE_H = 0.97, 0.5   # 0.5.9: a chosen person cut off by the bottom edge and this tall = a close-up
+CLOSE_BOTTOM, CLOSE_H = 0.97, 0.5   # 0.5.9: a chosen person cut off by the bottom edge and this tall ...
+CLOSE_ASPECT = 1.9                  # ... and a box no taller than this (height / width in pixels) = upper body only;
+                                    # a standing full-body dancer whose feet touch the edge is about 2.5-5 (11-19:
+                                    # without this test the wide shots were taken for close-ups and 1 keyframe was left)
+FRAME_ASPECT = 16 / 9               # frame width / height; Prepare sets it
 
 
 def closeup(frame, chosen_ids):
     """skill 12d 'no keyframe on a close-up': a chosen person fills the frame and is cut off at the bottom - the edit
     model then redraws a small full-body person (11-19: waist-up dancers came back knee-high, a pointing hand of the
     original was left floating)"""
-    return any(b[3] >= CLOSE_BOTTOM and (b[3] - b[1]) >= CLOSE_H
-               for pid, b in visible(frame) if pid in chosen_ids)
+    def upper_body(b):
+        h, w = b[3] - b[1], max(b[2] - b[0], 1e-6)
+        return b[3] >= CLOSE_BOTTOM and h >= CLOSE_H and h / (w * FRAME_ASPECT) <= CLOSE_ASPECT
+    return any(upper_body(b) for pid, b in visible(frame) if pid in chosen_ids)
 
 
 def score(frames, i, chosen_ids):

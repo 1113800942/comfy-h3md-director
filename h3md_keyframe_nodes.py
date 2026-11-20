@@ -453,6 +453,7 @@ class H3MDKeyframePrepare:
         LOG.info("%s %s: %dx%d %.2f s -> %dx%d, %d frames", TAG, os.path.basename(path), info["width"],
                  info["height"], info["duration"], size[0], size[1], length)
         times, small = sample_frames(path, dur, size)
+        K.FRAME_ASPECT = size[0] / float(size[1])
         windows = track_people(small, threshold=threshold, max_people=max_people)
         per_frame = K.link_windows(windows)[:len(times)]
         # 0.5.9: join people the tracker split (blackout, cut, spin, out and back in) - elimination, then hair /

@@ -138,3 +138,14 @@ def test_no_keyframe_on_closeups():
     ats = [frames[i]["at"] for i, _ in m]
     assert ats and min(ats) >= 3.0, ats
     assert all(k == "swap" for _, k in m)
+
+
+
+def test_fullbody_touching_bottom_is_not_closeup():
+    """11-19: wide shots where the dancers' feet touch the bottom edge were taken for close-ups"""
+    K.FRAME_ASPECT = 1664 / 960
+    full = {0: (0.1, 0.3, 0.17, 0.99), 1: (0.45, 0.28, 0.53, 0.99), 2: (0.78, 0.3, 0.86, 0.99)}
+    mid = {0: (0.05, 0.2, 0.2, 1.0), 1: (0.4, 0.15, 0.58, 1.0), 2: (0.75, 0.2, 0.92, 1.0)}   # cut at the thighs
+    assert not K.closeup(_f(0, full), {0, 1, 2})
+    assert not K.closeup(_f(0, mid), {0, 1, 2})
+    assert K.closeup(_f(0, {0: (0.05, 0.15, 0.35, 1.0)}), {0})
