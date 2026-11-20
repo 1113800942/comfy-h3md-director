@@ -920,3 +920,147 @@ def build_plan(video_file, duration_s, has_audio, size, length, keyframes, promp
                           **({"locked": {"source": "video:src", "offset": 0}} if has_audio else {}),
                           "keyframes": [{"image": i, "at": round(float(t), 4)} for i, _, t in keyframes],
                           "prompt": prompt}]}
+
+
+# ------------------------------------------------------------------------------- 0.5.9: erase + pose redraw
+# The user's rule (11-20): do not paint the new person OVER the original - every leftover (gloves, a cut-off half,
+# a skirt bigger than the mask) comes from the original still being there.  Instead: (1) keep the original's pose as
+# a DWPose skeleton, (2) erase the original from the crop, (3) draw the new person on the empty crop with Qwen Image
+# 2.1 + the Fun ControlNet Union in Pose + inpaint mode (the Union pack's own 'pose_reference_inpaint' wiring).  The
+# skeleton fixes pose, place and size, so the person cannot shrink either.  Prompts stay general (no item names).
+
+def erase_prompt(lang="zh", original=""):
+    if lang == "en":
+        who = f"the person in the middle of image 1 ({original})" if original else "the person in the middle of image 1"
+        return (f"Remove {who} completely, with everything she wears and holds, and fill her place with the "
+                "background that continues around her. Everybody else and the whole background stay exactly the same. A realistic photo exactly like "
+                "image 1, no beautifying, no colour grading.")
+    who = f"图1正中间的那个人（{original}）" if original else "图1正中间的那个人"
+    return (f"把{who}整个去掉，连同她身上穿的戴的和手里拿的，原来的位置补成她周围延续过来的背景。"
+            "其他人和整个背景完全不变。和图1一样的写实照片，不要美化，不要调色。")
+
+
+def pose_draw_prompt(description, lang="zh"):
+    if lang == "en":
+        return (f"Image 1 is a part of a photo. Draw the person from image 2 into the empty place in the middle of "
+                f"image 1: {description}. She stands exactly in the pose, place and size of the pose skeleton, from "
+                "head to feet as far as the skeleton reaches, and wears the complete outfit of the person in image 2 "
+                "from head to toe. If the skeleton has no face, she is seen from behind. Everybody else and the "
+                "background stay unchanged; the same light as image 1. A realistic photo exactly like image 1, no "
+                "beautifying, no colour grading.")
+    return (f"图1是一张照片的局部。把图2里的人画进图1中间空出来的位置：{description}。她的姿势、位置和大小完全照骨骼图，"
+            "骨骼画到哪里人就到哪里；她从头到脚穿图2里那个人的全套服饰。骨骼图上没有脸时，她是背对镜头的。"
+            "其他人和背景不变，光线和图1一样。和图1一样的写实照片，不要美化，不要调色。")
+
+
+POSE_BODY_LIMBS = [[2, 3], [2, 6], [3, 4], [4, 5], [6, 7], [7, 8], [2, 9], [9, 10], [10, 11], [2, 12], [12, 13],
+                   [13, 14], [2, 1], [1, 15], [15, 17], [1, 16], [16, 18]]
+POSE_COLORS = [[255, 0, 0], [255, 85, 0], [255, 170, 0], [255, 255, 0], [170, 255, 0], [85, 255, 0], [0, 255, 0],
+               [0, 255, 85], [0, 255, 170], [0, 255, 255], [0, 170, 255], [0, 85, 255], [0, 0, 255], [85, 0, 255],
+               [170, 0, 255], [255, 0, 255], [255, 0, 170], [255, 0, 85]]
+POSE_HAND_EDGES = [[0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8], [0, 9], [9, 10], [10, 11],
+                   [11, 12], [0, 13], [13, 14], [14, 15], [15, 16], [0, 17], [17, 18], [18, 19], [19, 20]]
+
+
+def pose_people(pose_dict):
+    """one DWPose / OpenPose JSON frame -> [{'body': [(x, y) | None] * 18, 'left': [...] | None, 'right', 'face'}]
+    in 0-1 coordinates of the image (either convention: pixels of canvas_width x canvas_height, or 0-1)"""
+    cw = float(pose_dict.get("canvas_width") or 1.0)
+    ch = float(pose_dict.get("canvas_height") or 1.0)
+
+    def pts(nums):
+        if not nums:
+            return None
+        vals = [nums[i:i + 3] for i in range(0, len(nums) - len(nums) % 3, 3)]
+        mx = max([max(abs(x), abs(y)) for x, y, c in vals if c > 0] or [0.0])
+        sx, sy = (1.0, 1.0) if mx <= 1.5 else (cw, ch)
+        return [(x / sx, y / sy) if c > 0 else None for x, y, c in vals]
+
+    out = []
+    for p in pose_dict.get("people") or []:
+        body = pts(p.get("pose_keypoints_2d"))
+        if not body:
+            continue
+        out.append({"body": (body + [None] * 18)[:18], "left": pts(p.get("hand_left_keypoints_2d")),
+                    "right": pts(p.get("hand_right_keypoints_2d")), "face": pts(p.get("face_keypoints_2d"))})
+    return out
+
+
+def pick_pose(people, box):
+    """the skeleton of the person in box (0-1 coordinates of the same image): most body points inside the box,
+    then nearest centre; None when no skeleton has 4+ points in the box"""
+    x0, y0, x1, y1 = box
+    best, bk = None, None
+    for i, p in enumerate(people):
+        pts = [q for q in p["body"] if q is not None]
+        inside = sum(1 for x, y in pts if x0 <= x <= x1 and y0 <= y <= y1)
+        if inside < 4:
+            continue
+        cx = sum(x for x, _ in pts) / len(pts)
+        cy = sum(y for _, y in pts) / len(pts)
+        d = abs(cx - (x0 + x1) / 2) + abs(cy - (y0 + y1) / 2)
+        k = (inside / max(1, len(pts)), inside, -d)
+        if bk is None or k > bk:
+            best, bk = i, k
+    return best
+
+
+def draw_pose(person, w, h):
+    """one person's skeleton as the OpenPose picture ControlNets read (port of comfyui_controlnet_aux dwpose util:
+    body sticks + joints, hands, face dots) -> uint8 [h, w, 3]"""
+    import colorsys
+    import cv2
+    import numpy as np
+    canvas = np.zeros((h, w, 3), np.uint8)
+    body = person["body"]
+    P = lambda q: (int(q[0] * w), int(q[1] * h))
+    for (a, b), col in zip(POSE_BODY_LIMBS, POSE_COLORS):
+        k1, k2 = body[a - 1], body[b - 1]
+        if k1 is None or k2 is None:
+            continue
+        (xa, ya), (xb, yb) = P(k1), P(k2)
+        length = ((xa - xb) ** 2 + (ya - yb) ** 2) ** 0.5
+        angle = math.degrees(math.atan2(ya - yb, xa - xb))
+        poly = cv2.ellipse2Poly((int((xa + xb) / 2), int((ya + yb) / 2)), (int(length / 2), 4), int(angle), 0, 360, 1)
+        cv2.fillConvexPoly(canvas, poly, [int(c * 0.6) for c in col])
+    for q, col in zip(body, POSE_COLORS):
+        if q is not None:
+            cv2.circle(canvas, P(q), 4, col, thickness=-1)
+    for hand in (person.get("left"), person.get("right")):
+        if not hand:
+            continue
+        for ie, (e1, e2) in enumerate(POSE_HAND_EDGES):
+            k1, k2 = hand[e1] if e1 < len(hand) else None, hand[e2] if e2 < len(hand) else None
+            if k1 is None or k2 is None:
+                continue
+            col = [int(c * 255) for c in colorsys.hsv_to_rgb(ie / float(len(POSE_HAND_EDGES)), 1.0, 1.0)]
+            cv2.line(canvas, P(k1), P(k2), col, thickness=2)
+        for q in hand:
+            if q is not None:
+                cv2.circle(canvas, P(q), 4, (0, 0, 255), thickness=-1)
+    for q in person.get("face") or ():
+        if q is not None:
+            cv2.circle(canvas, P(q), 3, (255, 255, 255), thickness=-1)
+    return canvas
+
+
+def redraw_mask(inner, cw, ch, person=None, grow=0.25):
+    """white = redraw: the person's box grown by `grow` (share of its width; half of it up/down), joined with the
+    skeleton's extent (raised arms can stick out of a tracker box), in crop pixels -> float32 [ch, cw]"""
+    import numpy as np
+    x0, y0, x1, y1 = inner
+    bw, bh = x1 - x0, y1 - y0
+    gx, gy = grow * bw, grow * bw / 2
+    x0, x1, y0, y1 = x0 - gx, x1 + gx, y0 - gy, y1 + gy
+    if person:
+        pts = [q for part in (person["body"], person.get("left") or [], person.get("right") or []) for q in part
+               if q is not None]
+        if pts:
+            m = 0.06 * max(bw, bh)
+            x0 = min(x0, min(p[0] for p in pts) * cw - m)
+            x1 = max(x1, max(p[0] for p in pts) * cw + m)
+            y0 = min(y0, min(p[1] for p in pts) * ch - m)
+            y1 = max(y1, max(p[1] for p in pts) * ch + m)
+    mask = np.zeros((ch, cw), np.float32)
+    mask[max(0, int(y0)):min(ch, int(math.ceil(y1))), max(0, int(x0)):min(cw, int(math.ceil(x1)))] = 1.0
+    return mask

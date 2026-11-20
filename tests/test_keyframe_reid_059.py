@@ -241,3 +241,21 @@ def test_edit_prompt_general_not_itemised():
     for w in ("手套", "假发", "尾巴", "袜子", "手指"):
         assert w not in zh
     assert "complete outfit" in en and "全套服饰" in zh
+
+
+def test_erase_pose_helpers():
+    d = {"canvas_width": 200, "canvas_height": 400, "people": [
+        {"pose_keypoints_2d": sum([[100, 50 + i * 15, 1] for i in range(18)], []),
+         "hand_left_keypoints_2d": sum([[60 + i, 200 + i, 1] for i in range(21)], [])},
+        {"pose_keypoints_2d": sum([[20, 50 + i * 15, 1] for i in range(18)], [])}]}
+    pp = K.pose_people(d)
+    assert len(pp) == 2 and abs(pp[0]["body"][0][0] - 0.5) < 1e-6        # pixels -> 0-1
+    assert K.pick_pose(pp, (0.3, 0.0, 0.7, 1.0)) == 0                       # the one in the box, not the neighbour
+    assert K.pick_pose(pp, (0.8, 0.0, 1.0, 1.0)) is None
+    img = K.draw_pose(pp[0], 200, 400)
+    assert img.shape == (400, 200, 3) and img.max() > 0
+    m = K.redraw_mask((60, 20, 140, 380), 200, 400, pp[0])
+    assert m.shape == (400, 200) and 0 < m.mean() < 1
+    for t in (K.erase_prompt("en"), K.erase_prompt("zh"), K.pose_draw_prompt("a man", "en"),
+              K.pose_draw_prompt("男人", "zh")):
+        assert "glove" not in t and "手套" not in t
