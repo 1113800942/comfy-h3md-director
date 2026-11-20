@@ -230,3 +230,8 @@ def test_prefer_full_does_not_cross_a_place_change():
 def test_edit_prompt_keeps_back_view():
     assert "from behind" in K.edit_prompt("a man", "en")
     assert "背对" in K.edit_prompt("一个男人", "zh")
+
+
+def test_edit_prompt_removes_gloves():
+    # run 39, 3.33 s: the original's long light-blue gloves stayed on the raised arms
+    assert "gloves" in K.edit_prompt("a woman", "en") and "手套" in K.edit_prompt("一个女人", "zh")

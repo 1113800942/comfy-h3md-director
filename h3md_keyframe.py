@@ -751,7 +751,9 @@ def edit_prompt(description: str, lang: str = "zh", original: str = "", cut_bott
                 f"image 2: {description}. The clothes become entirely the clothes of the person in image 2; nothing "
                 "of the original person's clothes stays, and every piece of the original person sticking out around "
                 "her (hair, wig, ears, tail, ribbons, apron, skirt, socks, shoes) is removed and filled with the "
-                "background. Keep the original pose, action, body direction, position, "
+                "background. Gloves, long gloves, arm warmers, sleeves, bracelets and stockings of the original person go "
+                "too, also on raised arms and hands: her arms, hands and legs show exactly what the person in image 2 "
+                "wears there (bare skin where image 2 shows bare skin). Keep the original pose, action, body direction, position, "
                 "size and any covered parts exactly the same; if the original person is seen from behind or from the "
                 "side, the new person is seen from behind or from the side in the same way (from behind her face is "
                 "not visible); everybody else, their body parts and the background "
@@ -759,7 +761,7 @@ def edit_prompt(description: str, lang: str = "zh", original: str = "", cut_bott
                 "colour grading, no filter: a realistic photo exactly like image 1." + (CUT_EN if cut_bottom else ""))
     who = f"图1正中间的那个人（{original}）" if original else "图1正中间的那个人"
     return (f"图1是一张照片的局部，把{who}换成图2中的人：{description}。衣服完全换成图2里那个人的衣服，"
-            "原来那个人的衣服一件都不留。原来那个人伸出来的头发、假发、耳朵、尾巴、蝴蝶结、围裙、裙摆、袜子和鞋也全部去掉，补成背景。保持原来的姿势、动作、身体朝向、在图中的位置、大小和被遮挡的部分不变；"
+            "原来那个人的衣服一件都不留。原来那个人伸出来的头发、假发、耳朵、尾巴、蝴蝶结、围裙、裙摆、袜子和鞋也全部去掉，补成背景。原来那个人的手套、长手套、袖套、袖子、手镯和丝袜也要去掉，举起来的手臂和手上也一样：手臂、手和腿上的穿着完全照图2（图2里露着皮肤的地方就露皮肤）。保持原来的姿势、动作、身体朝向、在图中的位置、大小和被遮挡的部分不变；"
             "原来的人如果是背对镜头或侧身，新的人也一样背对镜头或侧身（背对时看不到脸）；"
             "图1里其他人、其他人的身体部分和背景完全不变，画面构图和图1一样。不要美化，不要调色，不加滤镜，"
             "是和图1一样的写实照片。" + (CUT_ZH if cut_bottom else ""))
