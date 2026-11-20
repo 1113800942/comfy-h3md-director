@@ -9,6 +9,12 @@ import logging
 NODE_CLASS_MAPPINGS = {}
 NODE_DISPLAY_NAME_MAPPINGS = {}
 
+try:  # 0.5.9: face-detector folders (models/ultralytics/bbox) without ComfyUI-Impact-Subpack; never blocks loading
+    from . import h3md_model_paths as _model_paths
+    _model_paths.register_ultralytics()
+except Exception as _exc:
+    logging.warning("[H3MD] face-detector folders not registered: %s", _exc)
+
 
 def _m_h3md_director():
     from . import h3md_director as m
