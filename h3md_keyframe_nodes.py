@@ -719,7 +719,7 @@ class H3MDKeyframeRecast:
                                 "(Qwen-Image-2.1-Fun-Controlnet-Union-ComfyUI.safetensors). 0.5.9: each person is "
                                 "erased first and drawn again on the empty place following her DWPose skeleton - "
                                 "nothing of the original can stay. 接 Union 模型"}),
-                "pose_strength": ("FLOAT", {"default": 0.8, "min": 0.0, "max": 2.0, "step": 0.05, "tooltip":
+                "pose_strength": ("FLOAT", {"default": 0.5, "min": 0.0, "max": 2.0, "step": 0.05, "tooltip":
                                   "How strictly the skeleton is followed (Union strength). 骨骼强度"}),
             }
         }
@@ -752,7 +752,7 @@ class H3MDKeyframeRecast:
         grow, prot = float(one(mask_grow)), float(one(protect_others))
         method = "erase + pose"
         union_patch = one(union_patch)
-        pose_strength = float(one(pose_strength) if pose_strength is not None else 0.8)
+        pose_strength = float(one(pose_strength) if pose_strength is not None else 0.5)
         dw = nodes.NODE_CLASS_MAPPINGS.get("DWPreprocessor")
         union_apply = nodes.NODE_CLASS_MAPPINGS.get("QwenImage21UnionApply")
         if dw is None or union_apply is None or union_patch is None:
@@ -781,6 +781,14 @@ class H3MDKeyframeRecast:
                                   "connect Prepare's pictures and prompts. 请接上 Prepare 的 pictures 和 prompts。")
         W, H = job["size"]
         pbar = comfy.utils.ProgressBar(max(1, need))
+        import time as _time
+        import folder_paths
+        debug_dir = os.path.join(folder_paths.get_input_directory(), KF_SUBDIR, "_steps",
+                                 _time.strftime("recast_%Y%m%d_%H%M%S"))
+        try:
+            os.makedirs(debug_dir, exist_ok=True)
+        except Exception:
+            debug_dir = None
         edited, done, n = [], {}, 0
         for m in job["moments"]:
             src = job["frames"][m["at"]]
@@ -791,8 +799,9 @@ class H3MDKeyframeRecast:
                 gw, gh = K.gen_size(x1 - x0, y1 - y0)
                 ct = comfy.utils.common_upscale(to_tensor(cur[y0:y1, x0:x1]).movedim(-1, 1), gw, gh, "lanczos",
                                                 "disabled").movedim(1, -1).clamp(0, 1)
-                img, region = self._erase_pose(it, src, ct, pics[n], gw, gh, sample, fit, model, vae, dw,
-                                               union_apply, union_patch, pose_strength, grow)
+                img, region = self._erase_pose(dict(it, at_frame=int(round(m["at"] * K.FPS))), src, ct, pics[n],
+                                               gw, gh, sample, fit, model, vae, dw, union_apply, union_patch,
+                                               pose_strength, grow, debug_dir)
                 edited.append(img)
                 e = Image.fromarray(to_u8(img)).resize((x1 - x0, y1 - y0), Image.LANCZOS)
                 patch = K.colour_match(np.asarray(e), src[y0:y1, x0:x1], it["inner"])
@@ -811,14 +820,15 @@ class H3MDKeyframeRecast:
             done[m["at"]] = cur
         job = dict(job, recast_frames=done, recast={"mask_grow": grow, "protect_others": prot, "seed": seed,
                                                     "method": method, "pose_strength": pose_strength})
-        LOG.info("%s recast one by one (%s): %d edit(s), mask_grow %.2f, protect_others %.2f", TAG, method, n, grow,
-                 prot)
+        LOG.info("%s recast one by one (%s): %d edit(s), mask_grow %.2f, protect_others %.2f; step images in %s", TAG,
+                 method, n, grow, prot, debug_dir)
         return (edited, job)
 
     @staticmethod
-    def _erase_pose(it, src, ct, pic, gw, gh, sample, fit, model, vae, dw, union_apply, union_patch, strength, grow):
-        """0.5.9 'erase + pose': skeleton from the SOURCE crop -> erase the person from the current crop -> draw the
-        new person on the empty crop with the Union (Pose + inpaint, the pack's pose_reference_inpaint wiring)."""
+    def _erase_pose(it, src, ct, pic, gw, gh, sample, fit, model, vae, dw, union_apply, union_patch, strength, grow,
+                    debug_dir=None):
+        """0.5.9 'erase + pose': skeleton from the SOURCE crop -> erase the person from the current crop (plain edit)
+        -> draw the new person on the empty crop (edit + Union Pose control).  The step images go to debug_dir."""
         import torch
         x0, y0, x1, y1 = it["crop"]
         lang, desc, orig = it.get("lang", "zh"), it.get("desc", ""), it.get("orig", "")
@@ -845,27 +855,33 @@ class H3MDKeyframeRecast:
                 if person is not None else None)
         sx, sy = gw / sw, gh / sh
         m = K.redraw_mask([inner[0] * sx, inner[1] * sy, inner[2] * sx, inner[3] * sy], gw, gh, person, grow)
-        mask = torch.from_numpy(m).unsqueeze(0)
 
-        def patched(**kw):
-            r = union_apply().apply(model=model, union_patch=union_patch, vae=vae, start_percent=0.0,
-                                    end_percent=1.0, **kw)
-            return r[0] if isinstance(r, (tuple, list)) else r
-        # 2. erase the original from the current crop (people recast before her stay).  The Union inpaint mask
-        #    says WHERE (her area), so the right person goes even when she is not in the middle of the crop
-        #    (frame edge) or stands close to others; plain edit if the Union refuses a mask without a control map.
-        try:
-            # mask-only inpaint (no control map) - a supported Union path (union_compat: control_image may be None)
-            emodel = patched(control_mode="Pose", strength=1.0, control_image=None, inpaint_image=ct, mask=mask)
-        except Exception as exc:
-            LOG.warning("%s masked erase not available (%s), erasing by prompt only", TAG, exc)
-            emodel = model
-        erased = fit(sample(emodel, K.erase_prompt(lang, orig), {"image_1": ct}), gw, gh)
-        # 3. draw the new person: Union Pose + inpaint inside her area (box + skeleton), the rest kept
-        pmodel = patched(control_mode="Pose", strength=strength if pose is not None else 1.0, control_image=pose,
-                         inpaint_image=erased, mask=mask)
-        return sample(pmodel, K.pose_draw_prompt(desc, lang, pose is not None), {"image_1": erased,
-                                                                                 "image_2": pic}), m
+        # Two complete stages, each one an ordinary, proven setup (the user's own Union workflow, 11-20):
+        # 1. erase: a plain image edit with the same model and sampler as every other edit here - no Union
+        erased = fit(sample(model, K.erase_prompt(lang, orig), {"image_1": ct}), gw, gh)
+        # 2. draw: the same edit, image 1 = the empty crop, image 2 = the character, the model patched by the Union
+        #    in Pose mode with the skeleton as control image - exactly how the user's workflow wires it (control
+        #    image only, no inpaint image / mask).  Only her area (box + skeleton) is pasted back afterwards.
+        if pose is not None:
+            r = union_apply().apply(model=model, union_patch=union_patch, vae=vae, control_mode="Pose",
+                                    strength=strength, start_percent=0.0, end_percent=1.0, control_image=pose)
+            pmodel = r[0] if isinstance(r, (tuple, list)) else r
+        else:
+            pmodel = model
+        drawn = sample(pmodel, K.pose_draw_prompt(desc, lang, pose is not None), {"image_1": erased,
+                                                                               "image_2": pic})
+        if debug_dir:
+            try:
+                from PIL import Image as _I
+                tag = f"{it.get('at_frame', 0):04d}_p{it['picture']}"
+                _I.fromarray(to_u8(ct)).save(os.path.join(debug_dir, f"{tag}_1_crop.png"))
+                if pose is not None:
+                    _I.fromarray(to_u8(pose)).save(os.path.join(debug_dir, f"{tag}_2_pose.png"))
+                _I.fromarray(to_u8(erased)).save(os.path.join(debug_dir, f"{tag}_3_erased.png"))
+                _I.fromarray(to_u8(drawn)).save(os.path.join(debug_dir, f"{tag}_4_drawn.png"))
+            except Exception as exc:
+                LOG.warning("%s could not save the step images (%s)", TAG, exc)
+        return drawn, m
 
 
 NODE_CLASS_MAPPINGS = {"H3MDKeyframePrepare": H3MDKeyframePrepare, "H3MDKeyframeRecast": H3MDKeyframeRecast,
