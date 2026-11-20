@@ -177,10 +177,14 @@ pass and its own high-res pass on top.
    video into its Load Video node (optional `start_s` / `end_s` on Prepare: recast only that part, cut with its
    sound), connect the character pictures, write the mapping ("图1换左二" / "picture 1 ->
    left 2"; people are numbered left to right in the first clear frame - check the people sheet) and one description
-   line per picture. **H3MD Keyframe 1: Prepare** tracks the people (core SAM3.1), picks keyframe moments at most
-   about 5 s apart where the people stand apart, and crops every recast person; any image-edit model redraws the crops
-   (the example uses Qwen Image 2.1 Edit with a 2-step LoRA, prompts straight from Prepare - swap in Flux or another
-   editor if you like); **H3MD Keyframe 2: Assemble** colour-matches and pastes them back, writes the Remake plan and
+   line per picture: race, age, face, hair, every garment, **shoes and legwear, and what she does not wear** ("bare
+   legs and black stiletto heels; no socks, no boots, no apron") - otherwise the editor copies the original's.
+   **H3MD Keyframe 1: Prepare** tracks the people (core SAM3.1), finds the source's cuts and picks keyframe moments:
+   **at least one in every shot** (0.5.8), at most about 5 s apart, where the people stand apart.
+   **H3MD Keyframe 1b: Recast** (0.5.7) redraws them with Qwen Image 2.1 Edit (2-step LoRA), **one person after
+   another**: each crop is cut from the keyframe where the people before her are already recast, so nothing of the
+   originals is pasted back. Raise its `mask_grow` (default 0.25) to 0.3-0.35 when bits of a big original (wig, ears,
+   tail, wide skirt) are still left around the new person. **H3MD Keyframe 2: Assemble** writes the Remake plan and
    saves a plan .zip to `output/H3MD_plans/`. Check the keyframe sheet; redo with another seed if a pose or hand is off.
    Instead of this workflow, an agent can paint the keyframes and write the plan (`skills/h3md-prompt`, section 12d).
    Remake follows the keyframes closely, so their quality decides the result.

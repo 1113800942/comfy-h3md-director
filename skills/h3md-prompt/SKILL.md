@@ -411,10 +411,14 @@ picture list)**. Remake follows the keyframes: a person moved, resized or swappe
 with it. Every keyframe must pass the self-check in step 5; redraw failures, never hand them over. Do not use TARA,
 depth or H3 mask repaint for this.
 
-**Local users: no agent needed.** `example_workflows/Qwen Image 2.1 Keyframe.json` (nodes H3MD Keyframe 1: Prepare
-and 2: Assemble) does route A in one run - numbering, moments, crops, any image-edit model, colour match, paste back,
-the step-6 prompt and the plan .zip. Point the user there first; the routes below are for agents doing it by hand or
-fixing single keyframes.
+**Local users: no agent needed.** `example_workflows/Qwen Image 2.1 Keyframe.json` does route A in one run:
+H3MD Keyframe 1: Prepare (numbering, cuts, moments - at least one keyframe in every shot since 0.5.8), 1b: Recast
+(Qwen Image 2.1 Edit, one person after another, each crop cut from the frame where the people before her are already
+recast; `mask_grow` 0.25, 0.3-0.35 when bits of a bigger original such as a wig, ears, tail or wide skirt stay) and
+2: Assemble (colour match, paste back, the step-6 prompt and the plan .zip). The user writes one description line per
+character: race, age, face, hair, every garment, **shoes and legwear, and what she does not wear** ("bare legs and black
+stiletto heels; no socks, no boots, no apron"), or the editor keeps the original's. Point the user there first; the
+routes below are for agents doing it by hand or fixing single keyframes.
 
 **Two routes** - pick the one you can do; the other steps are shared.
 - **Route A: you can run code** (Claude Code, Codex, Cursor, or a local ComfyUI): crop -> edit -> paste back ->
@@ -436,7 +440,8 @@ images (source frame + character pictures) and can keep or set the output size.
   video, even after they change places.
 - Write one line on each performer's look (hat, hair, clothes) to recognise them later. If two look alike or you are not
   sure who is who, stop and ask.
-- Character pictures: one clear full or half-body picture each; write down each character's look.
+- Character pictures: one clear full or half-body picture each; write down each character's look, down to shoes and legwear,
+  plus what she does not wear ("no socks, no boots") when the original wears them.
 
 ### 2. Pick the keyframe moments
 - Watch the whole clip; list the cuts (scene detection + your own eyes), and per shot where each numbered person is,
@@ -471,7 +476,8 @@ images (source frame + character pictures) and can keep or set the output size.
 3. Scale the result back to the crop size; **colour-match** it: on the ring around the person (the crop minus the
    person's box) take each channel's mean and standard deviation before and after, and shift the whole result to the
    source's; paste it back with an ~8% feather on the sides that are inside the frame.
-4. Several people in one frame: one after the other, each crop taken from the already pasted frame.
+4. Several people in one frame: one after the other, each crop taken from the already pasted frame (never all crops from
+   the source frame: the originals next to her would be pasted back).
 5. Everything outside the crops is pixel-identical to the source, so the composition cannot change.
 
 **Route B (chat only): whole frame, one at a time.**

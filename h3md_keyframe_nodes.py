@@ -186,6 +186,34 @@ def sample_frames(path, duration, size, fps=SAMPLE_FPS):
     return times, np.stack([fr[t] for t in times])
 
 
+
+def detect_cuts(path, w=96, h=54):
+    """0.5.8: the source's shot cuts (seconds), every decoded frame compared with the one before (PyAV)."""
+    import av
+    import numpy as np
+    times, hd, pd, prev = [], [], [], None
+    with av.open(path) as c:
+        vs = c.streams.video[0]
+        vs.thread_type = "AUTO"
+        for fr in c.decode(vs):
+            if fr.pts is None:
+                continue
+            a = fr.reformat(width=w, height=h, format="rgb24").to_ndarray()
+            q = (a // 64).reshape(-1, 3).astype(np.int64)
+            hist = np.bincount(q[:, 0] * 16 + q[:, 1] * 4 + q[:, 2], minlength=64).astype(np.float32)
+            hist /= max(1.0, float(hist.sum()))
+            gray = a.mean(axis=2).astype(np.float32)
+            times.append(float(fr.pts * vs.time_base))
+            if prev is None:
+                hd.append(0.0)
+                pd.append(0.0)
+            else:
+                hd.append(1.0 - float(np.minimum(hist, prev[0]).sum()))
+                pd.append(float(np.abs(gray - prev[1]).mean()) / 255.0)
+            prev = (hist, gray)
+    return K.cuts_from(times, hd, pd)
+
+
 # ------------------------------------------------------------------------------------------------- SAM3
 def track_people(frames_u8, prompt="person", threshold=0.4, max_people=8, fps=SAMPLE_FPS, window_s=WINDOW_S):
     """Core SAM3.1 video tracking in windows (consecutive windows share one frame) -> [{local id: box}] per window
@@ -432,6 +460,15 @@ class H3MDKeyframePrepare:
         chosen = K.resolve(mp, order)
         ids = {pid for _, _, pid in chosen}
         moments = K.pick_moments(frames, ids, dur, max_gap_s)
+        try:   # 0.5.8: one keyframe in every shot
+            cuts = detect_cuts(path)
+        except Exception as exc:
+            cuts = []
+            LOG.warning("%s cut detection failed (%s): keyframes by max_gap_s only", TAG, exc)
+        n_before = len(moments)
+        moments = K.ensure_per_shot(frames, moments, ids, cuts, dur)
+        LOG.info("%s shot cuts at %s s: %d keyframe(s) added so every shot has one", TAG, cuts,
+                 len(moments) - n_before)
         changes = K.place_changes(frames, order)
         warnings = []
         seen_last = {pid: max([f["at"] for f in frames if any(w[0] == pid for w in f["who"])] or [0.0])
@@ -467,6 +504,7 @@ class H3MDKeyframePrepare:
                 pictures.append(pic_t[p])
                 prompts.append(K.edit_prompt(descs[p], prompt_language, looks.get(k, "")))
                 items.append({"picture": p, "left": k, "id": pid, "crop": cb, "own": ob, "others": others,
+                              "others_ids": [q for q, b in allb if q != pid],
                               "inner": [ob[0] - cb[0], ob[1] - cb[1], ob[2] - cb[0], ob[3] - cb[1]]})
             job_moments.append({"at": t, "kind": "swap" if items else "plain", "items": items})
             pbar.update(1)
@@ -489,6 +527,7 @@ class H3MDKeyframePrepare:
                 "mapping": [{"picture": p, "left": k} for p, k, _ in chosen],
                 "keyframes": [{"at": m["at"], "recast": [it["picture"] for it in m["items"]]} for m in job_moments],
                 "place_changes": [{"from": a, "to": b} for a, b, pr in changes if pr],
+                "cuts": cuts,
                 "edits": len(crops), "warnings": warnings}
         info_s = json.dumps(text, ensure_ascii=False, indent=1)
         for w in warnings:
@@ -514,6 +553,15 @@ class H3MDKeyframeAssemble:
                                     "H3MD_keyframes/<name>/, the zip to output/H3MD_plans/<name>.zip"}),
                 "save_zip": ("BOOLEAN", {"default": True, "tooltip": "Also write the plan zip (source video + "
                                          "keyframes + plan) for the Director's Import plan / RunningHub."}),
+                "mask_grow": ("FLOAT", {"default": K.OWN_GROW, "min": 0.0, "max": 0.5, "step": 0.05, "tooltip":
+                              "How far each recast person's own area reaches past her box (share of its width; half of "
+                              "it up and down). Raise it (0.25-0.35) when bits of the original (wig, ears, tail, wide "
+                              "skirt) are left around the new person. \u906e\u7f69\u6269\u5927\uff1a\u539f\u89d2\u8272\u8fb9\u7f18\u6e05\u4e0d\u5e72\u51c0\u5c31\u8c03\u5927\uff080.25-0.35\uff09\u3002"}),
+                "protect_others": ("FLOAT", {"default": K.PROTECT_PAD, "min": -0.3, "max": 0.3, "step": 0.05,
+                                   "tooltip": "How much of the people around is kept from the source while pasting "
+                                   "(share of their box; below 0 = only their body core). Raise it toward 0 or above "
+                                   "when a neighbour that was already recast gets damaged. \u4fdd\u62a4\u65c1\u4eba\uff1a"
+                                   "\u65c1\u8fb9\u5df2\u6362\u597d\u7684\u4eba\u88ab\u753b\u574f\u5c31\u8c03\u5927\u3002"}),
             }
         }
 
@@ -530,13 +578,15 @@ class H3MDKeyframeAssemble:
                    "back (the people around keep their source pixels), saves the keyframes and writes the Remake "
                    "plan + plan zip. Then: Director workflow 'H3MD Director Remake.json' -> Import plan.")
 
-    def assemble(self, job, edited, name, save_zip):
+    def assemble(self, job, edited, name, save_zip, mask_grow=None, protect_others=None):
         import numpy as np
         import folder_paths
         from PIL import Image
         job = job[0]
         name = _plan_io().safe_name((name or ["multiswap"])[0], "multiswap")
         save_zip = bool(save_zip[0]) if isinstance(save_zip, list) else bool(save_zip)
+        mask_grow = float((mask_grow or [K.OWN_GROW])[0] if isinstance(mask_grow, list) else (K.OWN_GROW if mask_grow is None else mask_grow))
+        protect_others = float((protect_others or [K.PROTECT_PAD])[0] if isinstance(protect_others, list) else (K.PROTECT_PAD if protect_others is None else protect_others))
         flat = [to_u8(e[b:b + 1]) for e in edited for b in range(int(e.shape[0]))]
         need = sum(len(m["items"]) for m in job["moments"])
         if len(flat) != need:
@@ -551,12 +601,15 @@ class H3MDKeyframeAssemble:
         for mi, m in enumerate(job["moments"]):
             src = job["frames"][m["at"]]
             out = src.copy()
-            for it in m["items"]:
+            if job.get("recast_frames") and m["at"] in job["recast_frames"]:   # 0.5.7: done by Recast
+                out = job["recast_frames"][m["at"]].copy()
+                n += len(m["items"])
+            for it in ([] if job.get("recast_frames") and m["at"] in job["recast_frames"] else m["items"]):
                 x0, y0, x1, y1 = it["crop"]
                 e = Image.fromarray(flat[n]).resize((x1 - x0, y1 - y0), Image.LANCZOS)
                 n += 1
                 patch = K.colour_match(np.asarray(e), src[y0:y1, x0:x1], it["inner"])
-                K.paste(out, patch, it["crop"], K.paste_alpha(it["crop"], W, H, it["own"], it["others"]))
+                K.paste(out, patch, it["crop"], K.paste_alpha(it["crop"], W, H, it["own"], it["others"], mask_grow, protect_others))
             fr = int(round(m["at"] * K.FPS))
             fn = f"kf_{fr:04d}.png"
             Image.fromarray(out).save(os.path.join(kdir, fn))
@@ -591,6 +644,103 @@ class H3MDKeyframeAssemble:
         return {"ui": {"text": [msg]}, "result": (to_tensor(sheet), plan_s, zip_path)}
 
 
-NODE_CLASS_MAPPINGS = {"H3MDKeyframePrepare": H3MDKeyframePrepare, "H3MDKeyframeAssemble": H3MDKeyframeAssemble}
+class H3MDKeyframeRecast:
+    """0.5.7: the edit, one person after another. Every crop is cut from the keyframe where the people before her are
+    already recast, so the neighbours in it are the new characters, never the originals; a bigger original (wig,
+    ears, tail, wide skirt) can then be covered without the originals being pasted back."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "job": ("H3MD_KEYFRAME_JOB", {"tooltip": "From H3MD Keyframe 1: Prepare"}),
+                "pictures": ("IMAGE", {"tooltip": "Prepare's pictures output"}),
+                "prompts": ("STRING", {"forceInput": True, "tooltip": "Prepare's prompts output"}),
+                "model": ("MODEL", {"tooltip": "The image-edit model (Qwen Image 2.1 + its LoRA / sampling patch)"}),
+                "clip": ("CLIP",),
+                "vae": ("VAE",),
+                "sampler": ("SAMPLER",),
+                "sigmas": ("SIGMAS",),
+                "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "control_after_generate": True}),
+                "cfg": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 20.0, "step": 0.1}),
+                "mask_grow": ("FLOAT", {"default": 0.25, "min": 0.0, "max": 0.6, "step": 0.05, "tooltip":
+                              "How far each recast person's own area reaches past her box (share of its width; half "
+                              "of it up and down). Cosplay-sized originals: 0.25-0.35. 遮罩扩大"}),
+                "protect_others": ("FLOAT", {"default": -0.05, "min": -0.3, "max": 0.3, "step": 0.05, "tooltip":
+                                   "Protection of the OTHER recast people while pasting (share of their box; below 0 "
+                                   "= only their body core). People who are not recast always keep +0.06. "
+                                   "保护旁人（只管要换的人；不换的人始终保护）"}),
+            }
+        }
+
+    INPUT_IS_LIST = True
+    RETURN_TYPES = ("IMAGE", "H3MD_KEYFRAME_JOB")
+    RETURN_NAMES = ("edited", "job")
+    OUTPUT_IS_LIST = (True, False)
+    OUTPUT_TOOLTIPS = ("The edited crops in Prepare's order (connect to Assemble 'edited').",
+                       "The job with the finished keyframes (connect to Assemble 'job').")
+    FUNCTION = "recast"
+    CATEGORY = CATEGORY
+    DESCRIPTION = ("Multi-person swap keyframes, step 1b (0.5.7): runs the image edit itself, one person after "
+                   "another, each crop cut from the frame where the people before her are already recast. Replaces "
+                   "the Text Encode / Sampler / VAE Decode chain between Prepare and Assemble.")
+
+    def recast(self, job, pictures, prompts, model, clip, vae, sampler, sigmas, seed, cfg, mask_grow,
+               protect_others):
+        import numpy as np
+        import comfy.utils
+        import nodes
+        from PIL import Image
+        from comfy_extras.nodes_qwen import TextEncodeQwenImage21
+        from comfy_extras.nodes_custom_sampler import SamplerCustom
+        one = lambda v: v[0] if isinstance(v, list) else v
+        job, model, clip, vae, sampler, sigmas = (one(job), one(model), one(clip), one(vae), one(sampler),
+                                                  one(sigmas))
+        seed, cfg = int(one(seed)), float(one(cfg))
+        grow, prot = float(one(mask_grow)), float(one(protect_others))
+        pics = [p[b:b + 1] for p in pictures for b in range(int(p.shape[0]))]
+        need = sum(len(m["items"]) for m in job["moments"])
+        if len(pics) != need or len(prompts) != need:
+            raise K.KeyframeError(f"{TAG} {len(pics)} picture(s) / {len(prompts)} prompt(s) for {need} crop(s): "
+                                  "connect Prepare's pictures and prompts. 请接上 Prepare 的 pictures 和 prompts。")
+        W, H = job["size"]
+        pbar = comfy.utils.ProgressBar(max(1, need))
+        edited, done, n = [], {}, 0
+        for m in job["moments"]:
+            src = job["frames"][m["at"]]
+            cur = src.copy()
+            swapped = {it["id"] for it in m["items"]}
+            for it in m["items"]:
+                x0, y0, x1, y1 = it["crop"]
+                gw, gh = K.gen_size(x1 - x0, y1 - y0)
+                ct = comfy.utils.common_upscale(to_tensor(cur[y0:y1, x0:x1]).movedim(-1, 1), gw, gh, "lanczos",
+                                                "disabled").movedim(1, -1).clamp(0, 1)
+                enc = TextEncodeQwenImage21.execute(clip=clip, prompt=prompts[n], negative_prompt="", vae=vae,
+                                                    resolution=0, images={"image_1": ct, "image_2": pics[n]})
+                pos, neg, lat = enc.result[0], enc.result[1], enc.result[2]
+                out = SamplerCustom.execute(model=model, add_noise=True, noise_seed=seed, cfg=cfg, positive=pos,
+                                            negative=neg, sampler=sampler, sigmas=sigmas, latent_image=lat)
+                img = nodes.VAEDecode().decode(vae, out.result[0])[0]
+                if img.dim() == 5:
+                    img = img.reshape(-1, img.shape[-3], img.shape[-2], img.shape[-1])
+                img = img[:1].clamp(0, 1)
+                edited.append(img)
+                e = Image.fromarray(to_u8(img)).resize((x1 - x0, y1 - y0), Image.LANCZOS)
+                patch = K.colour_match(np.asarray(e), src[y0:y1, x0:x1], it["inner"])
+                ids = it.get("others_ids") or [None] * len(it["others"])
+                pads = [prot if q in swapped else K.PROTECT_PAD for q in ids]
+                K.paste(cur, patch, it["crop"], K.paste_alpha(it["crop"], W, H, it["own"], it["others"],
+                                                              own_grow=grow, protects=pads))
+                n += 1
+                pbar.update(1)
+            done[m["at"]] = cur
+        job = dict(job, recast_frames=done, recast={"mask_grow": grow, "protect_others": prot, "seed": seed})
+        LOG.info("%s recast one by one: %d edit(s), mask_grow %.2f, protect_others %.2f", TAG, n, grow, prot)
+        return (edited, job)
+
+
+NODE_CLASS_MAPPINGS = {"H3MDKeyframePrepare": H3MDKeyframePrepare, "H3MDKeyframeRecast": H3MDKeyframeRecast,
+                       "H3MDKeyframeAssemble": H3MDKeyframeAssemble}
 NODE_DISPLAY_NAME_MAPPINGS = {"H3MDKeyframePrepare": "H3MD Keyframe 1: Prepare 准备关键帧",
+                              "H3MDKeyframeRecast": "H3MD Keyframe 1b: Recast 串行换人",
                               "H3MDKeyframeAssemble": "H3MD Keyframe 2: Assemble 打包计划"}
