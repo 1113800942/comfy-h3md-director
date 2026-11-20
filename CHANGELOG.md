@@ -2,13 +2,23 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
-## [0.5.9] - 2026-11-19
+## [0.5.91] - unreleased (keyframes; in development)
 
 ### Fixed / 修复
 - Keyframe workflow (multi-person swap): Prepare finds a person again after the tracker lost her - a blackout, a shot cut, a spin or leaving the frame and coming back. The tracker gives such a person a new id, so the picture mapped to her was "followed only up to N s" and later keyframes left her unswapped (Remake then drew the original back; 11-19: a group dance with a blackout position change, the third dancer was lost at 7.8 s). A new track is joined to a lost one by elimination (it is the only person missing) or by look (hair colour first, then clothes). Two tracks seen together are never joined; when it is not clear (two lost people who look alike) nothing is guessed and the info names the moment. The log says "person found again at ... s".
 - Keyframe workflow: keyframes avoid frames the edit model cannot redraw at the right size. Skipped: a chosen person filling the whole frame height, or cut off by the bottom AND a side edge (only part of her in the frame: the model drew a whole, smaller person and the cut-off original stayed beside her - 11-19 run 38, 2.33 s). A keyframe with people cut off by the bottom edge moves, inside the same shot, to a frame where they are whole or clearly farther away - never across a cut or a place change, never making a gap longer than max_gap_s. People still cut off by the bottom get "keep the same size" in the edit prompt, and every edit prompt says to keep a back or side view (6.83 s had been redrawn facing the camera). The 4-keyframes-per-part limit now follows the Director's real split instead of a fixed 14.4 s window (a needed keyframe at 8.33 s had been dropped).
   关键帧流程：关键帧避开修图模型画不对大小的帧。不放：要换的人从上到下占满画面，或者同时被下边和左右边截断（人只有一部分在画面里：修图会画成一个完整的小人，旁边还留着原来那个人的一截——11-19 第 38 次，2.33 秒）。人被下边截断的关键帧，在同一个镜头里挪到人完整、或明显更远的那一帧；不跨剪辑点、不跨换位、不让间隔超过 max_gap_s。仍被下边截断的人，修图提示词加「保持一样大」；所有修图提示词都加「原来背对或侧身，新的人也背对或侧身」（6.83 秒曾被画成正面）。每段最多 4 张的限制改按导演台实际的分段来算，不再用固定的 14.4 秒（之前误删了 8.33 秒那张）。
   关键帧流程（多人换人）：跟踪器在黑场、切镜头、转圈、出画再入画后把人跟丢时，Prepare 会把她认回来。以前跟丢的人会被当成新人，图片对应的那个人「只跟到第 N 秒」，后面的关键帧漏换她，Remake 又把原来的人画了回来（11-19 团舞黑场换位，第三位在 7.8 秒跟丢）。认人的办法：排除法（只少了她一个），或看长相（先比发色，再比衣服颜色）。同时出现过的两个人绝不合并；分不清（两个长得像的人同时跟丢）就不猜，在信息里写明是哪一刻。日志会写「person found again at … s」。
+
+## [0.5.9] - 2026-11-20
+
+### Fixed / 修复
+- Face refine: a face detector put in `models/ultralytics/bbox` did not show in the `detector` list unless ComfyUI-Impact-Subpack was installed (reported by several users). H3MD now registers `models/ultralytics/bbox` (and `segm`) itself, for ComfyUI's models folder and every other models folder ComfyUI knows (extra_model_paths, the Desktop app's shared folder). A registration made by the Subpack is kept as it is.
+  修脸：人脸检测模型放进 `models/ultralytics/bbox` 后，不装 ComfyUI-Impact-Subpack 就在 `detector` 下拉框里看不到（多位用户反馈）。现在 H3MD 自己登记这个文件夹（以及 `segm`），ComfyUI 自己的 models 和它认识的其它 models 文件夹（extra_model_paths、桌面版共享文件夹）都算；已装 Subpack 时不改动它的登记。
+- Face refine: when ComfyUI-H3-FaceRefine is not loaded (not installed, ComfyUI too old, requirements missing), `detector` and `cut_detection` only offered `none` and a saved workflow turned red. They now offer the detector files H3MD finds and both cut modes, and the tooltip says what is missing and where to look (`IMPORT FAILED` in the startup log).
+  修脸：ComfyUI-H3-FaceRefine 没加载时（没装、ComfyUI 太旧、依赖没装），`detector` 和 `cut_detection` 只剩 `none`，保存过的工作流会变红。现在会列出 H3MD 找到的检测模型和两种切换检测方式，提示里写明缺什么、去启动日志里搜 `IMPORT FAILED`。
+- Face refine no longer stops the run when a part is missing (the pack not loaded, `detector = none`, the detector file not found): the video is saved without face refine and the node's text says why, like "nothing to refine" already did.
+  修脸缺东西时（插件没加载、`detector = none`、找不到模型文件）不再中断：视频照常保存，只是不修脸，节点输出文字写明原因。
 
 ## [0.5.8] - 2026-11-19
 

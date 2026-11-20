@@ -123,7 +123,8 @@ def test_save_accepts_new_inputs_and_hands_them_over():
         seen["args"] = a
         return {"ui": {}, "result": ("p", 1, None, "r", None)}
 
-    with mock.patch.object(F.H3MDSaveVideoFaceRefineInterp, "_save_refined", fake):
+    with mock.patch.object(F.H3MDSaveVideoFaceRefineInterp, "_save_refined", fake), \
+            mock.patch.object(F, "refine_blocker", lambda d: None):   # 0.5.9: refine assumed runnable here
         node.save(segments={"cache_dir": "x"}, stitch_mode="plus", flow_lock=True)
         assert seen["args"][-2:] == ("plus", True)
         node.save(segments={"cache_dir": "x"})
