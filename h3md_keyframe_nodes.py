@@ -493,6 +493,19 @@ class H3MDKeyframePrepare:
         moments = K.ensure_per_shot(frames, moments, ids, cuts, dur)
         LOG.info("%s shot cuts at %s s: %d keyframe(s) added so every shot has one", TAG, cuts,
                  len(moments) - n_before)
+        moments, fin_notes = K.finish_moments(frames, moments, ids, dur, max_gap_s)
+        for n_ in fin_notes:
+            LOG.info("%s %s", TAG, n_)
+        LOG.info("%s keyframes at %s s (close-ups skipped)", TAG, [round(frames[i]["at"], 2) for i, _ in moments])
+        try:   # 0.5.9: tracking data next to the sources, so the moment rules can be checked again without a run
+            import json as _json
+            dbg = os.path.join(folder_paths.get_input_directory(), KF_SUBDIR, SOURCES_SUBDIR,
+                               os.path.splitext(os.path.basename(path))[0] + "_tracks.json")
+            with open(dbg, "w", encoding="utf-8") as fh:
+                _json.dump({"frames": frames, "cuts": cuts, "chosen": sorted(ids), "duration": dur,
+                            "aspect": K.FRAME_ASPECT, "max_gap": max_gap_s}, fh)
+        except Exception:
+            pass
         changes = K.place_changes(frames, order)
         warnings = []
         for u in reid_unsure:

@@ -518,6 +518,50 @@ def ensure_per_shot(frames, moments, chosen_ids, cuts, duration, settle=SHOT_SET
     return sorted(out, key=lambda m: frames[m[0]]["at"])
 
 
+PART_FRAMES = 345          # Remake renders at most this per autosplit part ...
+PART_MAX_KF = 4            # ... and takes only the first 4 keyframes of a part (the rest are dropped - h3md_report)
+
+
+def finish_moments(frames, moments, chosen_ids, duration, max_gap=5.0, part_frames=PART_FRAMES,
+                   part_max=PART_MAX_KF):
+    """0.5.9 cross-check of the moment rules (picks every <= max_gap s, one per shot, none on close-ups):
+    (1) no keyframe at all (only close-ups found) -> the best frame anyway, close-ups allowed - a part without any
+        keyframe is an error;
+    (2) more than part_max keyframes inside any part_frames stretch -> thin out: drop the one whose removal leaves
+        the smallest gap, never the only keyframe of a shot window - else Remake would silently drop the LAST ones
+        of that part (often the ones right after a cut, the most important).
+    -> (moments sorted by time, notes)"""
+    notes = []
+    out = sorted(moments, key=lambda m: frames[m[0]]["at"])
+    if not out:
+        cand = [i for i, f in enumerate(frames) if any(w[0] in chosen_ids for w in f.get("who") or ())]
+        if cand:
+            best = max(cand, key=lambda i: (len([w for w in frames[i]["who"] if w[0] in chosen_ids]),
+                                             -_motion(frames, i, frames[i]["who"][0][0])))
+            out = [(best, "swap")]
+            notes.append(f"only close-ups found: one keyframe at {frames[best]['at']:.2f} s anyway")
+    span = part_frames / FPS
+    changed = True
+    while changed:
+        changed = False
+        ts = [frames[i]["at"] for i, _ in out]
+        for a in range(len(ts)):
+            win = [j for j in range(a, len(ts)) if ts[j] - ts[a] < span]
+            if len(win) <= part_max:
+                continue
+            def gap_without(j):
+                rest = ts[:j] + ts[j + 1:]
+                pts = [0.0] + rest + [duration]
+                return max(b - a_ for a_, b in zip(pts, pts[1:]))
+            drop = min(win, key=lambda j: (gap_without(j), -abs(ts[j] - ts[j - 1]) if j else 0))
+            notes.append(f"{len(win)} keyframes within {span:.1f} s: dropped the one at {ts[drop]:.2f} s "
+                         f"(Remake keeps 4 per part)")
+            out.pop(drop)
+            changed = True
+            break
+    return out, notes
+
+
 def place_changes(frames, ids, min_hold=0.5):
     """[(t0, t1, [(a, b), ...])]: moments where the left-to-right order of `ids` changes, with the pairs that swapped.
     Only frames where all of them are seen count; an order has to hold min_hold seconds to count."""

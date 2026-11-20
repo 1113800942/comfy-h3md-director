@@ -149,3 +149,19 @@ def test_fullbody_touching_bottom_is_not_closeup():
     assert not K.closeup(_f(0, full), {0, 1, 2})
     assert not K.closeup(_f(0, mid), {0, 1, 2})
     assert K.closeup(_f(0, {0: (0.05, 0.15, 0.35, 1.0)}), {0})
+
+
+
+def test_finish_moments_caps_four_per_part_and_never_empty():
+    wide = {0: (0.1, 0.2, 0.25, 0.9), 1: (0.42, 0.2, 0.57, 0.9)}
+    frames = [_f(i / 6, wide) for i in range(6 * 16)]
+    ms = [(i, "swap") for i in (6, 18, 30, 42, 54, 66)]           # 6 keyframes in 10 s
+    out, notes = K.finish_moments(frames, ms, {0, 1}, 16.0)
+    ts = [frames[i]["at"] for i, _ in out]
+    for a in range(len(ts)):
+        assert len([t for t in ts if 0 <= t - ts[a] < 345 / 24]) <= 4
+    assert notes
+    close = {0: (0.05, 0.15, 0.35, 1.0)}
+    frames2 = [_f(i / 6, close) for i in range(30)]
+    out2, notes2 = K.finish_moments(frames2, [], {0}, 5.0)
+    assert len(out2) == 1 and notes2
