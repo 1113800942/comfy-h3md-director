@@ -23,7 +23,8 @@ LOOK_S = 3.0              # the numbering moment is searched in the first second
 CLEAR_IOU = 0.2
 COVERED = 0.3
 SPACING = 0.7            # keyframes are picked in (prev + 0.7 * max_gap, prev + max_gap]: as few as the gap allows
-SCAIL_MP = 0.92           # 0.5.91: SCAIL-2 keyframe canvas, about 1280x720 (Wan 2.1 14B's top size)
+SCAIL_MP = 0.46           # 0.5.91: SCAIL-2 keyframe canvas, about 896x512 = the official template's (test 15:01:
+                          # at 1280x736 wide shots got extra, giant people)
 SCAIL_LEN = 17            # ... frames of the source around a keyframe it is driven by (4n+1)
 SCAIL_COLOURS = 6         # SCAIL-2 binds people to references by 6 trained mask colours
 SCAIL_MATCH_IOU = 0.3     # a tracked person in the window = the one we recast if their boxes overlap this

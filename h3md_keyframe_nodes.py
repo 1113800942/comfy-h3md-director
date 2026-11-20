@@ -637,6 +637,8 @@ class H3MDKeyframeAssemble:
         plan_s = json.dumps(plan, ensure_ascii=False, indent=2)
         with open(os.path.join(kdir, "plan.json"), "w", encoding="utf-8") as fh:
             fh.write(plan_s)
+        for at, cm in (job.get("recast_colours") or {}).items():   # 0.5.91: who got which SCAIL-2 colour
+            Image.fromarray(cm).save(os.path.join(kdir, f"colours_{int(round(at * K.FPS)):04d}.png"))
         report = (job.get("recast") or {}).get("report")
         if report:
             with open(os.path.join(kdir, "recast_report.txt"), "w", encoding="utf-8") as fh:
@@ -733,7 +735,8 @@ class H3MDKeyframeRecast:
     DESCRIPTION = ("Multi-person swap keyframes, step 1b (0.5.91): SCAIL-2 character replacement on a short piece "
                    "of the source around every keyframe, all people at once. Then H3MD Keyframe 2: Assemble.")
 
-    THRESHOLD = 0.4
+    THRESHOLD = 0.5          # SAM3 as the user's SCAIL-2 workflow: detection threshold 0.5, detect every 2nd frame
+    DETECT_INTERVAL = 2
 
     def recast(self, job, pictures, model, clip, clip_vision, vae, sampler, sigmas, seed):
         import time
@@ -780,7 +783,7 @@ class H3MDKeyframeRecast:
                 drive = torch.from_numpy(np.stack([fr[t] for t in times]).astype(np.float32) / 255.0)
                 track = SAM3_VideoTrack.execute(images=drive, model=sam, conditioning=cond,
                                                 detection_threshold=self.THRESHOLD, max_objects=8,
-                                                detect_interval=1).result[0]
+                                                detect_interval=self.DETECT_INTERVAL).result[0]
                 objs, _ = _boxes_at(track, ki)
                 people = [[it["own"][0] / W, it["own"][1] / H, it["own"][2] / W, it["own"][3] / H]
                           for it in m["items"]]
@@ -788,7 +791,8 @@ class H3MDKeyframeRecast:
                 sheet, cols = reference_sheet(refs, gw, gh)
                 rtrack = SAM3_VideoTrack.execute(images=torch.from_numpy(sheet.astype(np.float32) / 255.0)[None],
                                                  model=sam, conditioning=cond, detection_threshold=self.THRESHOLD,
-                                                 max_objects=2 * len(refs), detect_interval=1).result[0]
+                                                 max_objects=2 * len(refs),
+                                                 detect_interval=self.DETECT_INTERVAL).result[0]
                 rboxes, _ = _boxes_at(rtrack, 0)
                 robjs = []
                 for o in range(max(rboxes) + 1 if rboxes else 0):
@@ -823,7 +827,7 @@ class H3MDKeyframeRecast:
             gc.collect()
             _vram().soft_empty_cache("(SAM3 freed)")
         # 2) SCAIL-2
-        done, out_imgs, out_masks = {}, [], []
+        done, out_imgs, out_masks, colours = {}, [], [], {}
         neg0 = nodes.CLIPTextEncode().encode(clip, "")[0]
         for p in prep:
             m = p["m"]
@@ -858,14 +862,17 @@ class H3MDKeyframeRecast:
                 pm = to_u8(p["pose_mask"][p["ki"]:p["ki"] + 1].clamp(0, 1))
                 rm = to_u8(p["ref_mask"][:1].clamp(0, 1))
                 ri = to_u8(p["ref_img"][:1])
-                out_masks.append(to_tensor(np.concatenate([pm, (ri * 0.5 + rm * 0.5).astype(np.uint8)], axis=1)))
+                cmap = np.concatenate([pm, (ri * 0.5 + rm * 0.5).astype(np.uint8)], axis=1)
+                colours[m["at"]] = cmap
+                out_masks.append(to_tensor(cmap))
             done[m["at"]] = out
             out_imgs.append(to_tensor(out))
             pbar.update(1)
         lines.append(f"total {time.time() - t_all:.1f} s for {len(prep)} keyframe(s)")
         report = "\n".join(lines)
         LOG.info("%s recast report:\n%s", TAG, report)
-        job = dict(job, recast_frames=done, recast={"method": "SCAIL-2 character replacement", "seed": seed,
+        job = dict(job, recast_frames=done, recast_colours=colours,
+                   recast={"method": "SCAIL-2 character replacement", "seed": seed,
                                                     "steps": steps, "report": report})
         return {"ui": {"text": [report]}, "result": (out_imgs, job, report, out_masks)}
 

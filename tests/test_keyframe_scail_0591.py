@@ -14,7 +14,7 @@ def test_frame_rank():
 
 def test_scail_size():
     w, h = K.scail_size(1664, 960)
-    assert w % 32 == 0 and h % 32 == 0 and 0.85e6 < w * h < 1.0e6 and abs(w / h - 1664 / 960) < 0.01
+    assert (w, h) == (896, 512)                                  # the official template's size
     w, h = K.scail_size(960, 1664)
     assert h > w
 

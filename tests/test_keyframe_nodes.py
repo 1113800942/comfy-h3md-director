@@ -76,7 +76,9 @@ def test_prepare_assemble(clip):
             x0, y0, x1, y1 = [int(v) for v in it["own"]]
             f[y0:y1, x0:x1] = 255
         done[m["at"]] = f
-    job2 = dict(job, recast_frames=done, recast={"flags": {str(job["moments"][0]["at"]): "swap"}, "report": "r"})
+    cm = np.zeros((20, 40, 3), np.uint8)
+    job2 = dict(job, recast_frames=done, recast_colours={job["moments"][0]["at"]: cm},
+                recast={"flags": {str(job["moments"][0]["at"]): "swap"}, "report": "r"})
     sheet2, plan_s, zp = N.H3MDKeyframeAssemble().assemble(job2, "t1", True)["result"]
     plan = json.loads(plan_s)
     seg = plan["segments"][0]
@@ -84,6 +86,7 @@ def test_prepare_assemble(clip):
     assert plan["media"]["videos"][0]["file"] == "clips/src.mp4"
     kf = plan["media"]["images"][0]["file"]
     assert os.path.isfile(inp / kf) and os.path.isfile(inp / os.path.dirname(kf) / "recast_report.txt")
+    assert len([f for f in os.listdir(inp / os.path.dirname(kf)) if f.startswith("colours_")]) == 1
     with zipfile.ZipFile(zp) as z:
         names = z.namelist()
     assert "plan.json" in names and any(n.endswith("src.mp4") for n in names)
