@@ -455,6 +455,17 @@ class H3MDKeyframePrepare:
         times, small = sample_frames(path, dur, size)
         windows = track_people(small, threshold=threshold, max_people=max_people)
         per_frame = K.link_windows(windows)[:len(times)]
+        # 0.5.9: join people the tracker split (blackout, cut, spin, out and back in) - elimination, then hair /
+        # clothes colour.  Before, the person a picture is mapped to was "lost" and later keyframes missed her.
+        try:
+            looks = K.appearance(small, per_frame)
+            per_frame, reid_joins, reid_unsure = K.reid_merge(per_frame, looks, times)
+        except Exception as exc:
+            reid_joins, reid_unsure = [], []
+            LOG.warning("%s re-identification failed (%s): tracks used as they are", TAG, exc)
+        for j in reid_joins:
+            LOG.info("%s person found again at %.1f s (track %s = track %s, %s, look %.2f)", TAG, j["at"], j["new"],
+                     j["into"], j["why"], j["look"])
         frames = K.report(per_frame, times)
         nf, order = K.number_people(frames)
         chosen = K.resolve(mp, order)
@@ -471,6 +482,11 @@ class H3MDKeyframePrepare:
                  len(moments) - n_before)
         changes = K.place_changes(frames, order)
         warnings = []
+        for u in reid_unsure:
+            warnings.append(f"at {u['at']:.1f} s a person came back (after a cut, a blackout or a turn) who could be "
+                            f"any of tracks {[c[0] for c in u['candidates']]} (look {[c[1] for c in u['candidates']]}): "
+                            "not joined. Move start_s / end_s past this moment if someone is then missed. "
+                            "这里有人重新出现但认不出是谁，没有接上。")
         seen_last = {pid: max([f["at"] for f in frames if any(w[0] == pid for w in f["who"])] or [0.0])
                      for pid in ids}
         for p, k, pid in chosen:
@@ -528,7 +544,7 @@ class H3MDKeyframePrepare:
                 "keyframes": [{"at": m["at"], "recast": [it["picture"] for it in m["items"]]} for m in job_moments],
                 "place_changes": [{"from": a, "to": b} for a, b, pr in changes if pr],
                 "cuts": cuts,
-                "edits": len(crops), "warnings": warnings}
+                "edits": len(crops), "warnings": warnings, "reid": reid_joins}
         info_s = json.dumps(text, ensure_ascii=False, indent=1)
         for w in warnings:
             LOG.warning("%s %s", TAG, w)

@@ -2,6 +2,12 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.5.9] - 2026-11-19
+
+### Fixed / 修复
+- Keyframe workflow (multi-person swap): Prepare finds a person again after the tracker lost her - a blackout, a shot cut, a spin or leaving the frame and coming back. The tracker gives such a person a new id, so the picture mapped to her was "followed only up to N s" and later keyframes left her unswapped (Remake then drew the original back; 11-19: a group dance with a blackout position change, the third dancer was lost at 7.8 s). A new track is joined to a lost one by elimination (it is the only person missing) or by look (hair colour first, then clothes). Two tracks seen together are never joined; when it is not clear (two lost people who look alike) nothing is guessed and the info names the moment. The log says "person found again at ... s".
+  关键帧流程（多人换人）：跟踪器在黑场、切镜头、转圈、出画再入画后把人跟丢时，Prepare 会把她认回来。以前跟丢的人会被当成新人，图片对应的那个人「只跟到第 N 秒」，后面的关键帧漏换她，Remake 又把原来的人画了回来（11-19 团舞黑场换位，第三位在 7.8 秒跟丢）。认人的办法：排除法（只少了她一个），或看长相（先比发色，再比衣服颜色）。同时出现过的两个人绝不合并；分不清（两个长得像的人同时跟丢）就不猜，在信息里写明是哪一刻。日志会写「person found again at … s」。
+
 ## [0.5.8] - 2026-11-19
 
 ### Fixed / 修复

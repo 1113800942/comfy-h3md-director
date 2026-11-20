@@ -180,7 +180,7 @@ pass and its own high-res pass on top.
    line per picture: race, age, face, hair, every garment, **shoes and legwear, and what she does not wear** ("bare
    legs and black stiletto heels; no socks, no boots, no apron") - otherwise the editor copies the original's.
    **H3MD Keyframe 1: Prepare** tracks the people (core SAM3.1), finds the source's cuts and picks keyframe moments:
-   **at least one in every shot** (0.5.8), at most about 5 s apart, where the people stand apart.
+   **at least one in every shot** (0.5.8), at most about 5 s apart, where the people stand apart; a person the tracker loses after a blackout, a cut or a spin is found again by elimination and hair / clothes colour (0.5.9).
    **H3MD Keyframe 1b: Recast** (0.5.7) redraws them with Qwen Image 2.1 Edit (2-step LoRA), **one person after
    another**: each crop is cut from the keyframe where the people before her are already recast, so nothing of the
    originals is pasted back. Raise its `mask_grow` (default 0.25) to 0.3-0.35 when bits of a big original (wig, ears,

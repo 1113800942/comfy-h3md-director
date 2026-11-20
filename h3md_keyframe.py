@@ -140,6 +140,152 @@ def link_windows(windows):
     return out
 
 
+# 0.5.9: re-identify a person the tracker lost (blackout, shot cut, spin, leaving and coming back).  SAM3 links a person
+# only while it can follow the box; after a cut or a blackout the same person comes back with a NEW id, and the old id
+# (the one a picture is mapped to) just ends - later keyframes then miss that person (11-19: a dance with a blackout
+# position change, the third woman was "lost at 7.8 s" and stayed unswapped).  A new id is joined to a lost one by
+# (1) elimination - it is the only lost person it could be - or (2) look: hair (top of the box) and clothes (middle)
+# colour histograms.  Two ids seen together for more than REID_OVERLAP frames are never the same person.  When it is
+# not clear, nothing is joined and a warning says who could not be told apart.
+REID_OVERLAP = 2          # sampled frames two ids may share and still be one person (a ghost box lingering in the dark)
+REID_MIN_FRAMES = 2       # an id seen in fewer sampled frames is noise: never joined, never a candidate
+REID_SIM_ELIM = 0.25      # only one lost person it could be: join unless the look is clearly different
+REID_SIM_MIN = 0.55       # several lost people: the best look must reach this ...
+REID_MARGIN = 0.08        # ... and beat the second best by this
+REID_HAIR_W = 0.6         # look similarity = hair * this + clothes * (1 - this): hair colour tells people apart better
+                          # than clothes (navy vs royal-blue dresses; the same uniform)
+
+
+def _hsv_hist(px):
+    """px: [n, 3] uint8 RGB -> normalised histogram: 12 hues x 3 saturations x 3 values for coloured pixels plus 6
+    grey levels for pixels with little saturation (black, white, grey hair or clothes)."""
+    import numpy as np
+    if px.size == 0:
+        return None
+    a = px.astype(np.float32) / 255.0
+    mx, mn = a.max(1), a.min(1)
+    d = mx - mn
+    sat = np.where(mx > 1e-6, d / np.maximum(mx, 1e-6), 0.0)
+    r, g, b = a[:, 0], a[:, 1], a[:, 2]
+    dd = np.maximum(d, 1e-6)
+    h = np.where(mx == r, ((g - b) / dd) % 6, np.where(mx == g, (b - r) / dd + 2, (r - g) / dd + 4)) / 6.0
+    grey = (sat < 0.18) | (mx < 0.12)
+    hist = np.zeros(12 * 3 * 3 + 6, np.float64)
+    c = ~grey
+    if c.any():
+        hb = np.minimum((h[c] * 12).astype(int), 11)
+        sb = np.minimum(((sat[c] - 0.18) / 0.82 * 3).astype(int), 2)
+        vb = np.minimum((mx[c] * 3).astype(int), 2)
+        np.add.at(hist, hb * 9 + sb * 3 + vb, 1)
+    if grey.any():
+        np.add.at(hist, 108 + np.minimum((mx[grey] * 6).astype(int), 5), 1)
+    return hist / hist.sum()
+
+
+def appearance(frames_u8, per_frame):
+    """mean hair / clothes histograms of every id over the sampled frames where it stands clear (not overlapping
+    another box much).  frames_u8: [N, h, w, 3]; per_frame: [{id: box (0-1)}].  -> {id: (hair, clothes)}"""
+    import numpy as np
+    acc = {}
+    for img, fr in zip(frames_u8, per_frame):
+        hh, ww = img.shape[:2]
+        items = list(fr.items())
+        for pid, b in items:
+            if (b[3] - b[1]) < MIN_H:
+                continue
+            if any(iou(b, c) > CLEAR_IOU or covered(b, c) > COVERED for q, c in items if q != pid):
+                continue
+            x0, x1 = int(b[0] * ww), int(b[2] * ww)
+            y0, y1 = int(b[1] * hh), int(b[3] * hh)
+            bw, bh = x1 - x0, y1 - y0
+            if bw < 4 or bh < 8:
+                continue
+            hair = img[y0:y0 + max(2, int(bh * 0.15)), x0 + int(bw * 0.2):x1 - int(bw * 0.2)].reshape(-1, 3)
+            body = img[y0 + int(bh * 0.25):y0 + int(bh * 0.70), x0 + int(bw * 0.25):x1 - int(bw * 0.25)].reshape(-1, 3)
+            hh_, bb_ = _hsv_hist(hair), _hsv_hist(body)
+            if hh_ is None or bb_ is None:
+                continue
+            a = acc.setdefault(pid, [np.zeros_like(hh_), np.zeros_like(bb_), 0])
+            a[0] += hh_
+            a[1] += bb_
+            a[2] += 1
+    return {pid: (a[0] / a[2], a[1] / a[2]) for pid, a in acc.items() if a[2]}
+
+
+def look_similarity(a, b, hair_w=REID_HAIR_W):
+    """histogram intersection of two appearance() entries, 0-1"""
+    import numpy as np
+    if a is None or b is None:
+        return 0.0
+    return float(hair_w * np.minimum(a[0], b[0]).sum() + (1 - hair_w) * np.minimum(a[1], b[1]).sum())
+
+
+def reid_merge(per_frame, looks=None, times=None, keep=None):
+    """join ids the tracker split.  per_frame: [{id: box}]; looks: appearance() or None (elimination only).
+    keep: ids that must stay roots (the people numbered at the start).  -> (new per_frame, joins, unsure) where
+    joins = [{"new": id, "into": id, "at": s, "why": "elimination"|"look", "look": sim}] and
+    unsure = [{"new": id, "at": s, "candidates": [[id, sim], ...]}]."""
+    times = times or list(range(len(per_frame)))
+    looks = looks or {}
+    seen = {}
+    for i, fr in enumerate(per_frame):
+        for pid in fr:
+            seen.setdefault(pid, []).append(i)
+    real = {pid for pid, fs in seen.items() if len(fs) >= REID_MIN_FRAMES}
+    root = {pid: pid for pid in seen}
+
+    def find(x):
+        while root[x] != x:
+            x = root[x]
+        return x
+
+    frames_of = {pid: set(fs) for pid, fs in seen.items()}
+    first = {pid: fs[0] for pid, fs in seen.items()}
+    keep = set(keep or ())
+    start_ids = set(per_frame[0]) if per_frame else set()
+    joins, unsure = [], []
+    for new in sorted(real - start_ids, key=lambda q: first[q]):
+        if new in keep:
+            continue
+        f0 = first[new]
+        cands = []
+        for old in {find(q) for q in real if first[q] < f0}:
+            if old == find(new):
+                continue
+            span = frames_of[old]
+            if max(span) >= max(frames_of[new]):        # the old one is still there after the new one ends
+                continue
+            if len(span & frames_of[new]) > REID_OVERLAP:
+                continue
+            if max(span) > f0 + REID_OVERLAP:            # both carry on side by side: two people
+                continue
+            cands.append(old)
+        if not cands:
+            continue
+        sims = sorted(((look_similarity(looks.get(o), looks.get(new)) if looks else 0.0, o) for o in cands),
+                      reverse=True)
+        best_s, best = sims[0]
+        why = None
+        if len(sims) == 1 and (not looks or best_s >= REID_SIM_ELIM or looks.get(new) is None
+                               or looks.get(best) is None):
+            why = "elimination"
+        elif len(sims) > 1 and best_s >= REID_SIM_MIN and best_s - sims[1][0] >= REID_MARGIN:
+            why = "look"
+        if not why:
+            unsure.append({"new": new, "at": times[f0], "candidates": [[o, round(s, 3)] for s, o in sims]})
+            continue
+        root[new] = best
+        frames_of[best] = frames_of[best] | frames_of[new]
+        joins.append({"new": new, "into": best, "at": times[f0], "why": why, "look": round(best_s, 3)})
+    out = []
+    for i, fr in enumerate(per_frame):
+        row = {}
+        for pid, b in sorted(fr.items(), key=lambda kv: first[kv[0]]):
+            row[find(pid)] = b                           # where both were seen, the newer track's box wins
+        out.append(row)
+    return out, joins, unsure
+
+
 def report(per_frame, times):
     """{id: box} per sampled frame + times -> [{"at": t, "who": [[id, box], ...] left to right}]"""
     return [{"at": round(t, 4), "who": sorted([[i, list(map(float, b))] for i, b in fr.items()],

@@ -127,7 +127,7 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
    每张图写一行外貌描述:人种、年龄、长相、发型、每件衣服,**还要写鞋和腿(光腿 / 袜子),以及没有什么**
    (如 "bare legs and black stiletto heels; no socks, no boots, no apron"),否则修图会照抄原角色的鞋袜。
    **H3MD Keyframe 1: Prepare 准备关键帧** 用 ComfyUI 自带的 SAM3.1 跟踪每个人,找出原片的剪辑点,挑关键帧时刻:
-   **每个镜头至少一张**(0.5.8),相邻不超过约 5 秒,避开人贴在一起。
+   **每个镜头至少一张**(0.5.8),相邻不超过约 5 秒,避开人贴在一起;黑场、切镜头、转圈后跟丢的人会用排除法和发色、衣服颜色认回来(0.5.9)。
    **H3MD Keyframe 1b: Recast 串行换人**(0.5.7)用 Qwen Image 2.1 编辑 + 2 步 LoRA 重画,**一个人一个人换**:后一个人
    从已经换好前面人的帧上裁,原角色不会被贴回去。新人物周围还残留原角色的假发、耳朵、尾巴、蓬裙时,把 `mask_grow`
    (默认 0.25)调到 0.3-0.35。**H3MD Keyframe 2: Assemble 打包计划** 写 Remake 计划,计划包存到 `output/H3MD_plans/`。
