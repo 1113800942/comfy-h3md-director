@@ -797,18 +797,25 @@ class H3MDKeyframeRecast:
                 gw, gh = K.gen_size(x1 - x0, y1 - y0)
                 ct = comfy.utils.common_upscale(to_tensor(cur[y0:y1, x0:x1]).movedim(-1, 1), gw, gh, "lanczos",
                                                 "disabled").movedim(1, -1).clamp(0, 1)
+                region = None
                 if not erase_pose:
                     img = sample(model, prompts[n], {"image_1": ct, "image_2": pics[n]})
                 else:
-                    img = self._erase_pose(it, src, ct, pics[n], gw, gh, sample, fit, model, vae, dw, union_apply,
-                                           union_patch, pose_strength, grow)
+                    img, region = self._erase_pose(it, src, ct, pics[n], gw, gh, sample, fit, model, vae, dw,
+                                                   union_apply, union_patch, pose_strength, grow)
                 edited.append(img)
                 e = Image.fromarray(to_u8(img)).resize((x1 - x0, y1 - y0), Image.LANCZOS)
                 patch = K.colour_match(np.asarray(e), src[y0:y1, x0:x1], it["inner"])
                 ids = it.get("others_ids") or [None] * len(it["others"])
                 pads = [prot if q in swapped else K.PROTECT_PAD for q in ids]
-                K.paste(cur, patch, it["crop"], K.paste_alpha(it["crop"], W, H, it["own"], it["others"],
-                                                              own_grow=grow, protects=pads))
+                alpha = K.paste_alpha(it["crop"], W, H, it["own"], it["others"], own_grow=grow, protects=pads)
+                if region is not None:
+                    # erase + pose: only her redrawn area goes back - wherever the edit model touched anything
+                    # outside it (another person, the background) the frame keeps its pixels
+                    rm = np.asarray(Image.fromarray((region * 255).astype(np.uint8)).resize(
+                        (x1 - x0, y1 - y0), Image.BILINEAR), np.float32) / 255.0
+                    alpha = alpha * K.soften(rm, max(2, int(K.FEATHER * (x1 - x0))))
+                K.paste(cur, patch, it["crop"], alpha)
                 n += 1
                 pbar.update(1)
             done[m["at"]] = cur
@@ -839,24 +846,35 @@ class H3MDKeyframeRecast:
         k = K.pick_pose(people, box)
         if k is None:
             LOG.warning("%s erase + pose: no skeleton found for person %s, falling back to replace", TAG, it["id"])
-            return sample(model, K.edit_prompt(desc, lang, orig), {"image_1": ct, "image_2": pic})
+            return sample(model, K.edit_prompt(desc, lang, orig), {"image_1": ct, "image_2": pic}), None
         person = people[k]
         if not any(q is not None for q in (person["body"][0], person["body"][14], person["body"][15])) \
                 and not any(q is not None for q in (person.get("face") or [])):
             LOG.info("%s erase + pose: person %s has no face in the skeleton (seen from behind)", TAG, it["id"])
         pose = torch.from_numpy(K.draw_pose(person, gw, gh)).float().unsqueeze(0) / 255.0
-        # 2. erase the original from the current crop (people recast before her stay)
-        erased = sample(model, K.erase_prompt(lang, orig), {"image_1": ct})
-        erased = fit(erased, gw, gh)
-        # 3. draw the new person: Union Pose + inpaint inside her area (box + skeleton), the rest kept
         sx, sy = gw / sw, gh / sh
         m = K.redraw_mask([inner[0] * sx, inner[1] * sy, inner[2] * sx, inner[3] * sy], gw, gh, person, grow)
         mask = torch.from_numpy(m).unsqueeze(0)
-        res = union_apply().apply(model=model, union_patch=union_patch, vae=vae, control_mode="Pose",
-                                  strength=strength, start_percent=0.0, end_percent=1.0, control_image=pose,
-                                  inpaint_image=erased, mask=mask)
-        pmodel = res[0] if isinstance(res, (tuple, list)) else res
-        return sample(pmodel, K.pose_draw_prompt(desc, lang), {"image_1": erased, "image_2": pic})
+
+        def patched(**kw):
+            r = union_apply().apply(model=model, union_patch=union_patch, vae=vae, start_percent=0.0,
+                                    end_percent=1.0, **kw)
+            return r[0] if isinstance(r, (tuple, list)) else r
+        # 2. erase the original from the current crop (people recast before her stay).  The Union inpaint mask
+        #    says WHERE (her area), so the right person goes even when she is not in the middle of the crop
+        #    (frame edge) or stands close to others; plain edit if the Union refuses a mask without a control map.
+        try:
+            # an empty (black) pose map = nobody there; strength 1 so the inpaint guidance is on
+            emodel = patched(control_mode="Pose", strength=1.0, control_image=torch.zeros_like(pose),
+                             inpaint_image=ct, mask=mask)
+        except Exception as exc:
+            LOG.warning("%s erase + pose: masked erase not available (%s), erasing by prompt only", TAG, exc)
+            emodel = model
+        erased = fit(sample(emodel, K.erase_prompt(lang, orig), {"image_1": ct}), gw, gh)
+        # 3. draw the new person: Union Pose + inpaint inside her area (box + skeleton), the rest kept
+        pmodel = patched(control_mode="Pose", strength=strength, control_image=pose, inpaint_image=erased,
+                         mask=mask)
+        return sample(pmodel, K.pose_draw_prompt(desc, lang), {"image_1": erased, "image_2": pic}), m
 
 
 NODE_CLASS_MAPPINGS = {"H3MDKeyframePrepare": H3MDKeyframePrepare, "H3MDKeyframeRecast": H3MDKeyframeRecast,

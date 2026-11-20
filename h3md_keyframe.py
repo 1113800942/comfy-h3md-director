@@ -999,7 +999,7 @@ def pick_pose(people, box):
         cx = sum(x for x, _ in pts) / len(pts)
         cy = sum(y for _, y in pts) / len(pts)
         d = abs(cx - (x0 + x1) / 2) + abs(cy - (y0 + y1) / 2)
-        k = (inside / max(1, len(pts)), inside, -d)
+        k = (round(inside / max(1, len(pts)), 1), -d, inside)   # mostly inside, then nearest the box centre
         if bk is None or k > bk:
             best, bk = i, k
     return best
@@ -1042,6 +1042,16 @@ def draw_pose(person, w, h):
         if q is not None:
             cv2.circle(canvas, P(q), 3, (255, 255, 255), thickness=-1)
     return canvas
+
+
+def soften(mask, k):
+    """box blur of a 0-1 mask with radius k (feathered paste edges)"""
+    import numpy as np
+    if k < 1:
+        return mask
+    from numpy.lib.stride_tricks import sliding_window_view as swv
+    pad = np.pad(mask, k, mode="edge")
+    return swv(pad, (2 * k + 1, 2 * k + 1)).mean(axis=(-1, -2)).astype(np.float32)
 
 
 def redraw_mask(inner, cw, ch, person=None, grow=0.25):
