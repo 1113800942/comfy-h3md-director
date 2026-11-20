@@ -23,7 +23,8 @@ LOOK_S = 3.0              # the numbering moment is searched in the first second
 CLEAR_IOU = 0.2
 COVERED = 0.3
 SPACING = 0.7            # keyframes are picked in (prev + 0.7 * max_gap, prev + max_gap]: as few as the gap allows
-SWAP_MP = 4.0             # 0.5.91: H3 Image character-swap canvas (megapixels)
+MASK_GROW = 0.08          # 0.5.91: a person's mask grows by this share of her box height (room for another build)
+MASK_FEATHER = 0.01       # ... and its edge is softened over this share of the frame height
 
 CN = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
 ORDINAL = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"]
@@ -703,11 +704,70 @@ def cover_crop(src_w, src_h, tw, th):
     return int(round((src_w - w) / 2)), int(round((src_h - h) / 2)), int(round(w)), int(round(h))
 
 
-def swap_size(w, h, mp=SWAP_MP, grid=32):
-    """0.5.91: the H3 Image edit canvas for a keyframe - about mp megapixels (character-swap model card: about 4 MP;
-    H3 Image does not work well at low resolution), the keyframe's aspect, multiples of 32"""
-    s = math.sqrt(mp * 1e6 / max(1, w * h))
-    return max(grid, round(w * s / grid) * grid), max(grid, round(h * s / grid) * grid)
+def canvas_size(w, h, grid=32):
+    """0.5.91: the H3 Image canvas = the keyframe's own size on the 32 grid (test 14:2x: a 4 MP canvas then scaled
+    down to the keyframe took 2.5x the time for no use)"""
+    return max(grid, round(w / grid) * grid), max(grid, round(h / grid) * grid)
+
+
+def _grow1(m, r, ax):
+    """binary dilation along one axis by r pixels (window sum > 0)"""
+    import numpy as np
+    pad = [(0, 0), (0, 0)]
+    pad[ax] = (r + 1, r)
+    c = np.cumsum(np.pad(m.astype(np.int32), pad), axis=ax)
+    n = m.shape[ax]
+    hi = np.take(c, np.arange(2 * r + 1, 2 * r + 1 + n), axis=ax)
+    lo = np.take(c, np.arange(0, n), axis=ax)
+    return (hi - lo) > 0
+
+
+def grow_mask(m, r):
+    """square dilation of a bool mask by r pixels"""
+    r = int(max(0, r))
+    return _grow1(_grow1(m, r, 0), r, 1) if r else m.copy()
+
+
+def pack_mask(m):
+    import numpy as np
+    return {"bits": np.packbits(m.astype(bool), axis=None), "shape": list(m.shape)}
+
+
+def unpack_mask(p):
+    import numpy as np
+    h, w = p["shape"]
+    return np.unpackbits(p["bits"], count=h * w).reshape(h, w).astype(bool)
+
+
+def mask_for(box, masks, min_iou=0.5):
+    """the tracker mask whose box is this person's box (normalised).  masks = [(box, packed)] of that frame."""
+    best = max(masks or [], key=lambda bm: iou(box, bm[0]), default=None)
+    return best[1] if best is not None and iou(box, best[0]) >= min_iou else None
+
+
+def swap_mask(items, out_w, out_h, grow=MASK_GROW, feather=MASK_FEATHER):
+    """0.5.91: where H3 Image may draw at a keyframe = every recast person's tracker mask (a filled box where the
+    tracker gave none), grown by grow x her box height, softened at the edge -> float32 [out_h, out_w] 0..1"""
+    import numpy as np
+    from PIL import Image, ImageFilter
+    acc = None
+    for it in items:
+        if it.get("mask") is not None:
+            m = unpack_mask(it["mask"])
+        else:                                                   # box in output pixels, drawn on a small grid
+            m = np.zeros((out_h // 4, out_w // 4), bool)
+            x0, y0, x1, y1 = [int(round(v / 4)) for v in it["own"]]
+            m[max(0, y0):y1, max(0, x0):x1] = True
+        h, w = m.shape
+        box_h = (it["own"][3] - it["own"][1]) * h / float(out_h)
+        m = grow_mask(m, round(grow * box_h))
+        m = np.asarray(Image.fromarray(m.astype(np.uint8) * 255).resize((out_w, out_h), Image.BILINEAR)) > 127
+        acc = m if acc is None else (acc | m)
+    if acc is None:
+        return np.zeros((out_h, out_w), np.float32)
+    rad = max(1.0, feather * out_h)
+    soft = Image.fromarray(acc.astype(np.uint8) * 255).filter(ImageFilter.GaussianBlur(rad))
+    return np.maximum(np.asarray(soft, np.float32) / 255.0, acc.astype(np.float32))
 
 
 def frame_rank(own, others):
@@ -729,8 +789,8 @@ def _who(rank, look=""):
 
 def swap_instruction(people):
     """0.5.91: everybody recast at a keyframe in ONE edit (test 13:58: the only variant that named the right people,
-    5 of 5).  people = [{rank, ref, desc, look, cut_bottom}], ref = the <Picture n> of her character.  This is the
-    user instruction given to the official MiniMax H3 Image prompt enhancer, which writes the final prompt."""
+    5 of 5).  people = [{rank, ref, desc, look, cut_bottom}], ref = the <Picture n> of her character.  The prompt
+    goes to H3 Image as it is (test 14:2x: the official prompt enhancer changed the framing and took 45 s)."""
     lines = []
     for p in sorted(people, key=lambda q: q["rank"]):
         line = f"- {_who(p['rank'], p.get('look', ''))} with the character in <Picture {p['ref']}>"
@@ -743,21 +803,6 @@ def swap_instruction(people):
             "its art style. Each replacement must hold the same pose, position, scale and gaze as the person it "
             "replaces. Keep the camera framing, the crop and the composition of <Picture 1> exactly. Preserve "
             "everything else in <Picture 1> unchanged, including everybody not listed.")
-
-
-def pe_caption(text):
-    """the official prompt enhancer answers one JSON object; its expanded_caption is the prompt.  -> str or None"""
-    import json as _json
-    if not text:
-        return None
-    a, b = text.find("{"), text.rfind("}")
-    if a < 0 or b <= a:
-        return None
-    try:
-        cap = _json.loads(text[a:b + 1]).get("expanded_caption")
-    except Exception:
-        return None
-    return cap.strip() if isinstance(cap, str) and cap.strip() else None
 
 
 # ---------------------------------------------------------------------------------------------------- plan

@@ -216,9 +216,11 @@ def detect_cuts(path, w=96, h=54):
 
 
 # ------------------------------------------------------------------------------------------------- SAM3
-def track_people(frames_u8, prompt="person", threshold=0.4, max_people=8, fps=SAMPLE_FPS, window_s=WINDOW_S):
+def track_people(frames_u8, prompt="person", threshold=0.4, max_people=8, fps=SAMPLE_FPS, window_s=WINDOW_S,
+                 masks_out=None):
     """Core SAM3.1 video tracking in windows (consecutive windows share one frame) -> [{local id: box}] per window
-    per frame (boxes normalised).  Model + text encoder are unloaded afterwards."""
+    per frame (boxes normalised).  masks_out (a list, one slot per frame): [(box, packed mask)] of every person in
+    that frame (0.5.91: the keyframe swap redraws only inside them).  Model + text encoder are unloaded after."""
     import numpy as np
     import torch
     import folder_paths
@@ -258,11 +260,15 @@ def track_people(frames_u8, prompt="person", threshold=0.4, max_people=8, fps=SA
                     for t in range(min(b - a, packed.shape[0])):
                         m = unpack_masks(packed[t:t + 1])[0].cpu().numpy().astype(bool)
                         H, W = m.shape[-2:]
+                        fm = []
                         for o in range(m.shape[0]):
                             if m[o].mean() < 0.0008:
                                 continue
                             ys, xs = np.nonzero(m[o])
                             rows[t][o] = [xs.min() / W, ys.min() / H, (xs.max() + 1) / W, (ys.max() + 1) / H]
+                            fm.append((rows[t][o], K.pack_mask(m[o])))
+                        if masks_out is not None:
+                            masks_out[a + t] = fm
                 windows.append(rows)
                 LOG.info("%s SAM3 window %.1f-%.1f s: %d people", TAG, a / fps, (b - 1) / fps,
                          len({o for r in rows for o in r}))
@@ -451,7 +457,8 @@ class H3MDKeyframePrepare:
                  info["height"], info["duration"], size[0], size[1], length)
         times, small = sample_frames(path, dur, size)
         K.FRAME_ASPECT = size[0] / float(size[1])
-        windows = track_people(small, threshold=threshold, max_people=max_people)
+        masks = [None] * len(small)
+        windows = track_people(small, threshold=threshold, max_people=max_people, masks_out=masks)
         per_frame = K.link_windows(windows)[:len(times)]
         # 0.5.9: join people the tracker split (blackout, cut, spin, out and back in) - elimination, then hair /
         # clothes colour.  Before, the person a picture is mapped to was "lost" and later keyframes missed her.
@@ -539,10 +546,11 @@ class H3MDKeyframePrepare:
                 rank, n_here = K.frame_rank(ob, others)
                 pictures.append(pic_t[p])
                 # 0.5.91: where she stands in THIS keyframe + what she looked like at the start (the prompt names
-                # her by both), and her own / the others' boxes for the automatic checks
+                # her by both), her box, and her tracker mask (0.5.91: Recast redraws only inside the masks)
                 items.append({"picture": p, "left": k, "id": pid, "own": ob, "others": others,
                               "others_ids": [q for q, b in allb if q != pid], "rank": rank, "n": n_here,
-                              "desc": descs[p], "look": looks.get(k, ""), "cut_bottom": bool(K.cut_at_bottom(own))})
+                              "desc": descs[p], "look": looks.get(k, ""), "cut_bottom": bool(K.cut_at_bottom(own)),
+                              "mask": K.mask_for(own, masks[i] if i < len(masks) else None)})
             job_moments.append({"at": t, "kind": "swap" if items else "plain", "items": items,
                                 "boxes": [list(b) for q, b in allb]})
             pbar.update(1)
@@ -659,11 +667,13 @@ class H3MDKeyframeAssemble:
 
 class H3MDKeyframeRecast:
     """0.5.91: MiniMax H3 Image + the character-swap LoRA (akatz-ai, as published with
-    akhaliq/MiniMax-H3-Image-Character-Swap) redraw the WHOLE keyframe, everybody to recast in ONE edit: <Picture 1> =
-    the keyframe, <Picture 2>... = the characters.  The prompt is written by the official MiniMax H3 Image prompt
-    enhancer exactly as the official character-swap workflow wires it (it sees every picture; our instruction names the
-    people by where they stand now).  No crop, no paste-back.  Test 2026-11-20 13:58: one-by-one edits and the pDMD
-    2-step LoRA lost (wrong people, worse picture) and are gone."""
+    akhaliq/MiniMax-H3-Image-Character-Swap) recast everybody at a keyframe in ONE edit: <Picture 1> = the keyframe,
+    <Picture 2>... = the characters.  The sampler may only change the pixels inside the recast people's SAM3 masks
+    (grown a little, soft edge); everywhere else the keyframe's own latent is put back at every step (ComfyUI's
+    latent noise mask, as the MiniMax H3 inpaint nodes do), so the framing, the background, everybody not recast and
+    where / how big each person is stay those of the keyframe.  No crop, no paste-back, no prompt enhancer.
+    Tests 2026-11-20: one-by-one edits and the pDMD LoRA (13:58) and the official prompt enhancer (14:2x: changed
+    the framing, extra arms, +45 s a keyframe) lost and are gone."""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -677,61 +687,46 @@ class H3MDKeyframeRecast:
                 "vae": ("VAE", {"tooltip": "minimax_h3_image_vae"}),
                 "sampler": ("SAMPLER", {"tooltip": "euler"}),
                 "sigmas": ("SIGMAS", {"tooltip": "6 steps (the workflow uses the tuned 6-step PDD sigmas)"}),
-                "pe_clip": ("CLIP", {"tooltip": "The prompt enhancer's text model: qwen3.5_9b (type minimax), as in "
-                                     "the official character-swap workflow"}),
-                "pe_system_prompt": ("STRING", {"forceInput": True, "tooltip": "The official enhancer system prompt"}),
-                "pe_task_prompt": ("STRING", {"forceInput": True, "tooltip": "The official enhancer task prompt (with "
-                                              "{input text})"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "control_after_generate": True}),
             }
         }
 
     INPUT_IS_LIST = True
-    RETURN_TYPES = ("IMAGE", "H3MD_KEYFRAME_JOB", "STRING")
-    RETURN_NAMES = ("keyframes", "job", "report")
-    OUTPUT_IS_LIST = (True, False, False)
+    RETURN_TYPES = ("IMAGE", "H3MD_KEYFRAME_JOB", "STRING", "MASK")
+    RETURN_NAMES = ("keyframes", "job", "report", "masks")
+    OUTPUT_IS_LIST = (True, False, False, True)
     OUTPUT_TOOLTIPS = ("The finished keyframes, one per swap moment (whole frames).",
                        "The job with the keyframes (connect to Assemble).",
-                       "Instruction, enhanced prompt and time of every keyframe.")
+                       "Prompt, redrawn area and time of every keyframe.",
+                       "Where each keyframe was allowed to change (white).")
     FUNCTION = "recast"
     CATEGORY = CATEGORY
-    DESCRIPTION = ("Multi-person swap keyframes, step 1b (0.5.91): MiniMax H3 Image character swap on the whole "
-                   "keyframe, everybody in one edit, the prompt written by the official H3 Image prompt enhancer. "
-                   "Then H3MD Keyframe 2: Assemble.")
+    DESCRIPTION = ("Multi-person swap keyframes, step 1b (0.5.91): MiniMax H3 Image character swap, everybody in one "
+                   "edit, redrawn only inside the people's masks. Then H3MD Keyframe 2: Assemble.")
 
-    # the official character-swap workflow's prompt-enhancer settings (TextGenerateV2)
-    PE_MAX = 8196
-    PE_SAMPLING = {"sampling_mode": "on", "temperature": 1.0, "top_k": 20, "top_p": 0.95, "min_p": 0.0,
-                   "repetition_penalty": 1.0, "presence_penalty": 0.0}
-
-    def recast(self, job, pictures, model, clip, vae, sampler, sigmas, pe_clip, pe_system_prompt, pe_task_prompt,
-               seed):
+    def recast(self, job, pictures, model, clip, vae, sampler, sigmas, seed):
         import time
         import numpy as np
+        import torch
         import comfy.utils
         import nodes
         from PIL import Image
         from comfy_extras.nodes_minimax_h3 import MiniMaxH3ImageConditioning
         from comfy_extras.nodes_custom_sampler import SamplerCustom
-        from comfy_extras.nodes_textgen import TextGenerateV2
         one = lambda v: v[0] if isinstance(v, list) else v
-        job, model, clip, vae, sampler, sigmas, pe_clip = (one(job), one(model), one(clip), one(vae), one(sampler),
-                                                           one(sigmas), one(pe_clip))
-        system, task, seed = str(one(pe_system_prompt)), str(one(pe_task_prompt)), int(one(seed))
-        if "{input text}" not in task:
-            raise K.KeyframeError(f"{TAG} pe_task_prompt has no '{{input text}}': connect the official enhancer task "
-                                  "prompt. 增强器任务提示词里没有 {input text}。")
+        job, model, clip, vae, sampler, sigmas = one(job), one(model), one(clip), one(vae), one(sampler), one(sigmas)
+        seed = int(one(seed))
         pics = [p[b:b + 1] for p in pictures for b in range(int(p.shape[0]))]
         need = sum(len(m["items"]) for m in job["moments"])
         if len(pics) != need:
             raise K.KeyframeError(f"{TAG} {len(pics)} picture(s) for {need} recast person(s): connect Prepare's "
                                   "pictures. 请接上 Prepare 的 pictures。")
         W, H = job["size"]
-        gw, gh = K.swap_size(W, H)
+        gw, gh = K.canvas_size(W, H)
         steps = max(1, int(len(sigmas)) - 1)
         todo = sum(1 for m in job["moments"] if m["items"])
         pbar = comfy.utils.ProgressBar(max(1, todo))
-        done, out_imgs, lines, n = {}, [], [], 0
+        done, out_imgs, out_masks, lines, n = {}, [], [], [], 0
         t_all = time.time()
         for m in job["moments"]:
             if not m["items"]:
@@ -742,23 +737,12 @@ class H3MDKeyframeRecast:
                                                "disabled").movedim(1, -1).clamp(0, 1)
             people = [{"rank": it["rank"], "ref": j + 2, "desc": it.get("desc", ""), "look": it.get("look", ""),
                        "cut_bottom": it.get("cut_bottom", False)} for j, it in enumerate(m["items"])]
-            instruction = K.swap_instruction(people)
-            t0 = time.time()
-            pe = TextGenerateV2.execute(clip=pe_clip, prompt=task.replace("{input text}", instruction),
-                                        max_length=self.PE_MAX, sampling_mode=dict(self.PE_SAMPLING, seed=seed),
-                                        thinking=True, use_default_template=True, mtp="auto", system_prompt=system,
-                                        images={f"image{j + 1}": im for j, im in enumerate([frame] + refs)})
-            caption = K.pe_caption(pe.result[0])
-            t_pe = time.time() - t0
-            lines.append(f"{m['at']:.2f} s ({gw}x{gh}, {steps} steps, {len(people)} people):")
-            lines.append("  instruction: " + instruction.replace("\n", " | "))
-            if caption is None:
-                lines.append(f"  ENHANCER GAVE NO expanded_caption ({t_pe:.1f} s) - the instruction itself was used; "
-                             f"enhancer output: {pe.result[0][:300]!r}")
-                prompt = instruction
-            else:
-                lines.append(f"  enhanced ({t_pe:.1f} s): {caption}")
-                prompt = caption
+            prompt = K.swap_instruction(people)
+            sx, sy = gw / float(W), gh / float(H)
+            items = [dict(it, own=[it["own"][0] * sx, it["own"][1] * sy, it["own"][2] * sx, it["own"][3] * sy])
+                     for it in m["items"]]
+            mask = K.swap_mask(items, gw, gh)
+            no_mask = sum(1 for it in m["items"] if it.get("mask") is None)
             t1 = time.time()
             images = {"image_1": frame}
             for j, r in enumerate(refs):
@@ -766,6 +750,13 @@ class H3MDKeyframeRecast:
             enc = MiniMaxH3ImageConditioning.execute(clip=clip, prompt=prompt, width=gw, height=gh, vae=vae,
                                                      images=images)
             pos, lat = enc.result[0], enc.result[1]
+            shape = lat["samples"].shape
+            src = vae.encode(frame[..., :3])
+            if src.numel() != lat["samples"].numel():
+                raise K.KeyframeError(f"{TAG} the keyframe's latent {tuple(src.shape)} does not fit the canvas "
+                                      f"{tuple(shape)}. 关键帧编码尺寸不符。")
+            lat = {"samples": src.reshape(shape).to(lat["samples"]),
+                   "noise_mask": torch.from_numpy(mask).reshape(1, 1, 1, gh, gw)}
             neg = nodes.ConditioningZeroOut().zero_out(pos)[0]     # CFG 1 (the model is distilled)
             res = SamplerCustom.execute(model=model, add_noise=True, noise_seed=seed, cfg=1.0, positive=pos,
                                         negative=neg, sampler=sampler, sigmas=sigmas, latent_image=lat)
@@ -774,17 +765,24 @@ class H3MDKeyframeRecast:
             out = to_u8(img)
             if out.shape[1] != W or out.shape[0] != H:
                 out = np.asarray(Image.fromarray(out).resize((W, H), Image.LANCZOS))
+            lines.append(f"{m['at']:.2f} s ({gw}x{gh}, {steps} steps, {len(people)} people, redrawn "
+                         f"{100.0 * float((mask > 0.5).mean()):.0f}% of the frame"
+                         + (f", {no_mask} person(s) without a tracker mask: their box was used" if no_mask else "")
+                         + "):")
+            lines.append("  prompt: " + prompt.replace("\n", " | "))
             lines.append(f"  edit {time.time() - t1:.1f} s, seed {seed}")
             done[m["at"]] = out
             out_imgs.append(to_tensor(out))
+            mk = np.asarray(Image.fromarray((mask * 255).astype(np.uint8)).resize((W, H), Image.BILINEAR))
+            out_masks.append(torch.from_numpy(mk.astype(np.float32) / 255.0)[None])
             pbar.update(1)
         lines.append(f"total {time.time() - t_all:.1f} s for {todo} keyframe(s)")
         report = "\n".join(lines)
         LOG.info("%s recast report:\n%s", TAG, report)
-        job = dict(job, recast_frames=done, recast={"method": "H3 Image character swap, all at once, official prompt "
-                                                              "enhancer", "seed": seed, "steps": steps,
+        job = dict(job, recast_frames=done, recast={"method": "H3 Image character swap, all at once, inside the "
+                                                              "people's masks", "seed": seed, "steps": steps,
                                                     "report": report})
-        return {"ui": {"text": [report]}, "result": (out_imgs, job, report)}
+        return {"ui": {"text": [report]}, "result": (out_imgs, job, report, out_masks)}
 
 
 NODE_CLASS_MAPPINGS = {"H3MDKeyframePrepare": H3MDKeyframePrepare, "H3MDKeyframeRecast": H3MDKeyframeRecast,

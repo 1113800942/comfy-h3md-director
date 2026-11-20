@@ -71,9 +71,8 @@ def test_place_changes():
     assert 4.0 <= ch[0][0] <= ch[0][1] <= 5.2
 
 
-def test_swap_size():
-    w, h = K.swap_size(1664, 960)
-    assert w % 32 == 0 and h % 32 == 0 and 3.6e6 < w * h < 4.4e6 and abs(w / h - 1664 / 960) < 0.02
+def test_canvas_size():
+    assert K.canvas_size(1664, 960) == (1664, 960)
     assert K.cover_crop(1920, 1080, 1664, 960)[2:] == (1872, 1080)
 
 
