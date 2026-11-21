@@ -572,8 +572,10 @@ class H3MDKeyframePrepare:
         LOG.info("%s shot cuts at %s s: %d keyframe(s) added so every shot has one", TAG, cuts,
                  len(moments) - n_before)
         moments, full_notes = K.prefer_full(frames, moments, ids, cuts, dur, max_gap_s)
-        moments, fin_notes = K.finish_moments(frames, moments, ids, dur, max_gap_s, cuts=cuts)
-        fin_notes = full_notes + fin_notes
+        # 0.5.91: every replaced person gets one large, clear keyframe (else Remake has no face for the close-ups)
+        moments, id_keep, id_notes, id_warns = K.ensure_identity(frames, moments, chosen, dur)
+        moments, fin_notes = K.finish_moments(frames, moments, ids, dur, max_gap_s, cuts=cuts, keep=id_keep)
+        fin_notes = full_notes + id_notes + fin_notes
         for n_ in fin_notes:
             LOG.info("%s %s", TAG, n_)
         LOG.info("%s keyframes at %s s (close-ups skipped)", TAG, [round(frames[i]["at"], 2) for i, _ in moments])
@@ -587,7 +589,7 @@ class H3MDKeyframePrepare:
         except Exception:
             pass
         changes = K.place_changes(frames, order)
-        warnings = []
+        warnings = list(id_warns)
         for u in reid_unsure:
             warnings.append(f"at {u['at']:.1f} s a person came back (after a cut, a blackout or a turn) who could be "
                             f"any of tracks {[c[0] for c in u['candidates']]} (look {[c[1] for c in u['candidates']]}): "

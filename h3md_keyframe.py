@@ -587,6 +587,60 @@ def prefer_full(frames, moments, chosen_ids, cuts, duration, max_gap=5.0):
     return sorted(out, key=lambda m: frames[m[0]]["at"]), notes
 
 
+ID_MIN_H = 0.4           # 0.5.91: a person this tall (share of the frame height) or more is "large" - a mid shot
+                         # (hangar clip: at 0.25 the face was ~50 px and Remake drew someone else in the close-ups)
+ID_MAX_OVERLAP = 0.5     # ... and "clear" when no other box covers more than this of the smaller one
+ID_MIN_APART = 0.5       # an added keyframe keeps this many seconds from the others
+
+
+def clear_height(frame, pid):
+    """height of person pid in this frame when he is seen whole in width (not at a side edge) and not mostly
+    overlapped by someone else, else 0"""
+    vis = visible(frame)
+    b = next((bb for q, bb in vis if q == pid), None)
+    if b is None or b[0] <= CLOSE_EDGE or b[2] >= 1 - CLOSE_EDGE:
+        return 0.0
+    if any(covered(b, c) > ID_MAX_OVERLAP for q, c in vis if q != pid):
+        return 0.0
+    return b[3] - b[1]
+
+
+def ensure_identity(frames, moments, chosen, duration, min_h=ID_MIN_H, apart=ID_MIN_APART):
+    """0.5.91 (user 01:08): skill 12d 'every replaced person needs at least one large, clear keyframe'.  For every
+    chosen (picture, left, id) whose best keyframe shows him smaller than min_h (or not clear), add the frame where he
+    is largest and clear - no close-up, at least `apart` s from the other keyframes; best: tallest, then most chosen
+    people seen, then least motion.  Without it Remake had no face for him and drew someone else in the close-ups
+    (hangar clip: picture 3 only small in keyframe 1 and a sliver in keyframe 2).
+    -> (moments sorted by time, set of the added times (never thinned out), notes, warnings)"""
+    out = sorted(moments, key=lambda m: frames[m[0]]["at"])
+    ids = {pid for _, _, pid in chosen}
+    last = duration - 2.0 / FPS
+    added, notes, warns = set(), [], []
+    for p, k, pid in chosen:
+        have = max([clear_height(frames[i], pid) for i, kind in out if kind == "swap"] or [0.0])
+        if have >= min_h:
+            continue
+        ts = [frames[i]["at"] for i, _ in out]
+        cand = [i for i, f in enumerate(frames)
+                if f["at"] <= last and clear_height(f, pid) > have and score(frames, i, ids) is not None
+                and all(abs(f["at"] - t) >= apart for t in ts)]
+        if not cand:
+            warns.append(f"picture {p} (left {k}) is never seen large and clear (best {have:.2f} of the frame height): "
+                         "the video may not look like this character in close-ups. 图{0} 在原片里一直没有大而清楚的"
+                         "镜头，近景可能不像。".format(p))
+            continue
+        best = max(cand, key=lambda i: (round(clear_height(frames[i], pid), 2), score(frames, i, ids)))
+        out.append((best, "swap"))
+        added.add(frames[best]["at"])
+        h = clear_height(frames[best], pid)
+        notes.append(f"picture {p} (left {k}): keyframe added at {frames[best]['at']:.2f} s where he/she is large and "
+                     f"clear ({h:.2f} of the frame height; the others showed {have:.2f})")
+        if h < min_h:
+            warns.append(f"picture {p} (left {k}) is at most {h:.2f} of the frame height in the clip: close-ups may not "
+                         "look like this character. 图{0} 在原片里最大也只有 {1:.2f} 画面高，近景可能不像。".format(p, h))
+    return sorted(out, key=lambda m: frames[m[0]]["at"]), added, notes, warns
+
+
 def part_span(duration, part_frames=PART_FRAMES):
     """seconds of new frames the biggest autosplit part can carry: the Director splits a shot evenly (h3md_autosplit
     .plan_parts) and may move a cut point by one 17-frame unit, so this + 17 frames.  A smaller VRAM budget only makes
@@ -610,7 +664,7 @@ def part_span(duration, part_frames=PART_FRAMES):
 
 
 def finish_moments(frames, moments, chosen_ids, duration, max_gap=5.0, part_frames=PART_FRAMES,
-                   part_max=PART_MAX_KF, cuts=()):
+                   part_max=PART_MAX_KF, cuts=(), keep=()):
     """0.5.9 cross-check of the moment rules (picks every <= max_gap s, one per shot, none on close-ups):
     (1) no keyframe at all (only close-ups found) -> the best frame anyway, close-ups allowed - a part without any
         keyframe is an error;
@@ -643,7 +697,9 @@ def finish_moments(frames, moments, chosen_ids, duration, max_gap=5.0, part_fram
             bounds = [0.0] + sorted(c for c in cuts if 0 < c < duration) + [duration]
             shot = lambda t_: max(k for k, b0 in enumerate(bounds) if b0 <= t_)
             alone = {j for j in win if sum(1 for t_ in ts if shot(t_) == shot(ts[j])) == 1}
-            pool = [j for j in win if j not in alone] or win      # the only keyframe of a shot stays if possible
+            kept = {j for j in win if ts[j] in set(keep)}         # 0.5.91: a person's only large, clear keyframe
+            pool = ([j for j in win if j not in alone and j not in kept] or [j for j in win if j not in kept]
+                    or win)                                       # the only keyframe of a shot stays if possible
             drop = min(pool, key=lambda j: (gap_without(j), -abs(ts[j] - ts[j - 1]) if j else 0))
             notes.append(f"{len(win)} keyframes within {span:.1f} s: dropped the one at {ts[drop]:.2f} s "
                          f"(Remake keeps {part_max} per part)")

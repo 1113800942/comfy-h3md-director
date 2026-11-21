@@ -31,9 +31,9 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   导演台:横屏的总控台导入竖屏计划(或反过来)会按错的尺寸跑。现在导入计划时总控台宽高自动改成计划的;多人换人计划遇到另一方向的 Remake 尺寸也跟计划走。
 - Keyframe package: request.json lists per keyframe who stays (`keeps_people_from_left`, any positions, different per keyframe), and the keyframe skill says to describe every kept person too - with only "stays as in Picture 1", H3 Image redrew two kept men as copies of the new characters.
   关键帧包:request.json 每张写明哪些人保留(`keeps_people_from_left`,任意位置、每张不同),skill 要求保留的人也要描述——只写“保持原样”时 H3 Image 把两个保留的人画成了新角色的复制品。
+- Keyframe Prepare: every replaced person gets at least one large, clear keyframe (at least 0.4 of the frame height, not at a side edge, not mostly overlapped). Without one Remake had no face for that person and drew someone else in the close-ups (a hangar clip: picture 3 was small in one keyframe and only a sliver in the other). The frame where they are largest is added, never dropped by the 4-per-part limit; a person never seen large is named in the warnings.
+  关键帧 Prepare:每个要换的人至少有一张大而清楚的关键帧(至少 0.4 画面高、不在左右边、没被挡住大半)。没有的话 Remake 没有他的脸,近景会画成别人(机库片段:图3 一张很小、一张只露一条)。补上他最大最清楚的那一帧,“每段 4 张”不会删它;整段都没有就在警告里写明。
 - Registry scan test reads file names as UTF-8 (Chinese workflow names).
-
-### Fixed / 修复
 - Director (RefMod): in the new ComfyUI frontend (Nodes 2.0) the plan editor inside the node shrank to a narrow strip after clicking the node. The editor now always keeps the node's width. Fix by Civitai user zhendao - thank you!
   导演台（RefMod）：新版界面（Nodes 2.0）点一下导演台节点，里面的计划编辑器会缩成很窄的一条。现在编辑器始终跟节点同宽。修复来自 Civitai 用户 zhendao，感谢！
 - Keyframe workflow (multi-person swap): Prepare finds a person again after the tracker lost her - a blackout, a shot cut, a spin or leaving the frame and coming back. The tracker gives such a person a new id, so the picture mapped to her was "followed only up to N s" and later keyframes left her unswapped (Remake then drew the original back; 11-19: a group dance with a blackout position change, the third dancer was lost at 7.8 s). A new track is joined to a lost one by elimination (it is the only person missing) or by look (hair colour first, then clothes). Two tracks seen together are never joined; when it is not clear (two lost people who look alike) nothing is guessed and the info names the moment. The log says "person found again at ... s".
