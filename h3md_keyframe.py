@@ -218,12 +218,50 @@ def appearance(frames_u8, per_frame):
     return {pid: (a[0] / a[2], a[1] / a[2]) for pid, a in acc.items() if a[2]}
 
 
+FACE_LO, FACE_HI = 0.15, 0.45   # 0.5.91: ArcFace cosine -> look 0-1 (different people ~0.0-0.15, one person 0.45+)
+
+
+def face_similarity(fa, fb):
+    """cosine of two L2-normalised face embeddings mapped to 0-1 (FACE_LO -> 0, FACE_HI -> 1)"""
+    import numpy as np
+    c = float(np.dot(fa, fb))
+    return max(0.0, min(1.0, (c - FACE_LO) / (FACE_HI - FACE_LO)))
+
+
 def look_similarity(a, b, hair_w=REID_HAIR_W):
-    """histogram intersection of two appearance() entries, 0-1"""
+    """0-1.  a, b: (hair hist, clothes hist[, face embedding]) - 0.5.91: when both have a face, the face decides (five
+    men in the same white clothes: colour cannot tell them apart); else histogram intersection of hair and clothes."""
     import numpy as np
     if a is None or b is None:
         return 0.0
+    fa = a[2] if len(a) > 2 else None
+    fb = b[2] if len(b) > 2 else None
+    if fa is not None and fb is not None:
+        return face_similarity(fa, fb)
+    if a[0] is None or b[0] is None or a[1] is None or b[1] is None:
+        return 0.0
     return float(hair_w * np.minimum(a[0], b[0]).sum() + (1 - hair_w) * np.minimum(a[1], b[1]).sum())
+
+
+def add_faces(looks, faces):
+    """appearance() + {id: face embedding} -> {id: (hair, clothes, face)} (ids with only a face get None histograms)"""
+    out = {pid: (lk[0], lk[1], None) for pid, lk in (looks or {}).items()}
+    for pid, f in (faces or {}).items():
+        h = out.get(pid, (None, None, None))
+        out[pid] = (h[0], h[1], f)
+    return out
+
+
+def assign_face(face_box, boxes):
+    """face box (x0, y0, x1, y1, 0-1) -> the person id whose box holds it in its upper part, or None.
+    boxes: {id: box}.  Several: the one whose head height fits best."""
+    cx, cy = (face_box[0] + face_box[2]) / 2, (face_box[1] + face_box[3]) / 2
+    cand = []
+    for pid, b in boxes.items():
+        h = b[3] - b[1]
+        if b[0] <= cx <= b[2] and b[1] - 0.02 <= cy <= b[1] + 0.4 * h:
+            cand.append((abs(cy - (b[1] + 0.1 * h)) / max(h, 1e-6), pid))
+    return min(cand)[1] if cand else None
 
 
 def reid_merge(per_frame, looks=None, times=None, keep=None):

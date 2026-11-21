@@ -189,6 +189,81 @@ def sample_frames(path, duration, size, fps=SAMPLE_FPS):
 
 
 
+FACE_EVERY = 3            # 0.5.91: faces are read on every 3rd tracking frame (2 per second), at the full size
+FACE_MIN_PX = 20          # ... a face narrower than this (pixels) is too small to compare
+FACE_MIN_SCORE = 0.5
+_FACE_APP = {}
+
+
+def face_app():
+    """InsightFace FaceAnalysis (antelopev2, else buffalo_l) from ComfyUI's models/insightface, or None - the common
+    ComfyUI setup (ReActor, PuLID, InstantID).  None: re-identification uses hair / clothes only."""
+    if "app" in _FACE_APP:
+        return _FACE_APP["app"]
+    app = None
+    try:
+        import folder_paths
+        from insightface.app import FaceAnalysis
+        roots = []
+        try:
+            roots += list(folder_paths.get_folder_paths("insightface"))
+        except Exception:
+            pass
+        roots.append(os.path.join(folder_paths.models_dir, "insightface"))
+        for root in roots:
+            for name in ("antelopev2", "buffalo_l"):
+                if os.path.isdir(os.path.join(root, "models", name)):
+                    try:
+                        app = FaceAnalysis(name=name, root=root, allowed_modules=["detection", "recognition"],
+                                           providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
+                        app.prepare(ctx_id=0, det_size=(640, 640))
+                        LOG.info("%s faces: InsightFace %s from %s", TAG, name, root)
+                        break
+                    except Exception as exc:
+                        LOG.warning("%s InsightFace %s in %s could not be loaded: %s", TAG, name, root, exc)
+                        app = None
+            if app is not None:
+                break
+    except Exception as exc:
+        LOG.info("%s InsightFace not available (%s): people are told apart by hair / clothes colour only", TAG, exc)
+    _FACE_APP["app"] = app
+    return app
+
+
+def face_signatures(path, times, per_frame, size, every=FACE_EVERY):
+    """{id: mean L2-normalised ArcFace embedding} of every tracked id, from full-size frames (every `every`-th tracking
+    frame); each face goes to the person whose box holds it in its upper part.  {} without InsightFace."""
+    import numpy as np
+    app = face_app()
+    if app is None:
+        return {}
+    idx = list(range(0, len(times), max(1, int(every))))
+    frames = read_frames(path, [times[i] for i in idx], size)
+    W, H = size
+    acc = {}
+    for i in idx:
+        img = frames[times[i]]
+        try:
+            faces = app.get(np.ascontiguousarray(img[..., ::-1]))
+        except Exception:
+            continue
+        for f in faces:
+            x0, y0, x1, y1 = [float(v) for v in f.bbox]
+            if (x1 - x0) < FACE_MIN_PX or float(getattr(f, "det_score", 1.0)) < FACE_MIN_SCORE:
+                continue
+            emb = getattr(f, "normed_embedding", None)
+            if emb is None:
+                continue
+            pid = K.assign_face((x0 / W, y0 / H, x1 / W, y1 / H), per_frame[i])
+            if pid is not None:
+                acc.setdefault(pid, []).append(np.asarray(emb, np.float32))
+    out = {}
+    for pid, es in acc.items():
+        m = np.mean(es, 0)
+        out[pid] = m / max(float(np.linalg.norm(m)), 1e-6)
+    return out
+
+
 def detect_cuts(path, w=96, h=54):
     """0.5.8: the source's shot cuts (seconds), every decoded frame compared with the one before (PyAV)."""
     import av
@@ -536,8 +611,14 @@ class H3MDKeyframePrepare:
         per_frame = K.link_windows(windows)[:len(times)]
         # 0.5.9: join people the tracker split (blackout, cut, spin, out and back in) - elimination, then hair /
         # clothes colour.  Before, the person a picture is mapped to was "lost" and later keyframes missed her.
+        faces = {}
+        try:   # 0.5.91: faces tell apart people in the same clothes (a cut, a close-up, five men in white)
+            faces = face_signatures(path, times, per_frame, size)
+            LOG.info("%s faces seen for %d of %d tracks", TAG, len(faces), len({q for fr in per_frame for q in fr}))
+        except Exception as exc:
+            LOG.warning("%s face reading failed (%s): hair / clothes colour only", TAG, exc)
         try:
-            track_looks = K.appearance(small, per_frame)
+            track_looks = K.add_faces(K.appearance(small, per_frame), faces)
             per_frame, reid_joins, reid_unsure = K.reid_merge(per_frame, track_looks, times)
         except Exception as exc:
             reid_joins, reid_unsure = [], []
@@ -590,6 +671,10 @@ class H3MDKeyframePrepare:
             pass
         changes = K.place_changes(frames, order)
         warnings = list(id_warns)
+        if reid_unsure and face_app() is None:
+            warnings.append("people were lost after cuts and InsightFace is not installed: with it (models/insightface/"
+                            "models/antelopev2 or buffalo_l, as for ReActor / PuLID) people are told apart by their "
+                            "faces. 装上 InsightFace 可以按人脸认人。")
         for u in reid_unsure:
             warnings.append(f"at {u['at']:.1f} s a person came back (after a cut, a blackout or a turn) who could be "
                             f"any of tracks {[c[0] for c in u['candidates']]} (look {[c[1] for c in u['candidates']]}): "

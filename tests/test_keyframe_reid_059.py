@@ -93,7 +93,7 @@ def test_prepare_keeps_people_at_start_separate():
     histograms as 'the original person' and the log said 'people_at_start has 5 line(s)'."""
     src = open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "h3md_keyframe_nodes.py"),
                encoding="utf-8").read()
-    assert "track_looks = K.appearance(" in src
+    assert "track_looks = K.add_faces(K.appearance(" in src     # 0.5.91: + faces, still its own variable
     assert "\n            looks = K.appearance(" not in src
 
 
