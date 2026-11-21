@@ -102,13 +102,15 @@ def test_recast_who_is_who(clip, monkeypatch):
     todo = [m for m in job["moments"] if m["items"]]
     calls, prompts = [], []
 
-    def fake_enhance(pe_model, request, image_t, seed, unload):
+    def fake_enhance(pe_model, request, images, seed, unload):
         k = len(calls)
         calls.append(unload)
-        assert "阿比：红发" in request and "不修改图片" in request
+        assert "阿比：红发" in request and "把阿比换成图2中的人" in request and len(images) == 2
         m = todo[k]
-        return ("左1：伊娃，站立，看向镜头；左2：阿比，举起右手，微笑，穿黄色外套；左3：义父，站立" if m["at"] < 5.0 else
-                "保持<image1>不变。从左数第1位是阿比，跳起，张嘴大笑；从左数第2位是伊娃；从左数第3位是义父。")
+        if k == len(todo) - 1:      # a wrong enhancer answer: the tracker's place wins, flagged
+            return "从左数第3位是阿比，添加文字标签。"
+        return ("左1：伊娃，站立；左2：阿比，举起右手，穿黄色外套，替换为<image2>；左3：义父" if m["at"] < 5.0 else
+                "从左数第1位（红发）的人替换为<image2>中的人，添加文字标签；从左数第2位是伊娃；从左数第3位是义父。")
 
     def fake_edit(model, clip_, vae, sampler, sigmas, seed, prompt, images):
         prompts.append(prompt)
@@ -124,6 +126,5 @@ def test_recast_who_is_who(clip, monkeypatch):
     for m, p in zip(todo, prompts):
         r = 2 if m["at"] < 5.0 else 1
         assert f"从左数第{r}个人（阿比，红发）整个人换成图2中的人" in p and "a man with short red hair" in p
-        assert "全部服装和配饰都去掉" in p and "黄色" not in p and "外套" not in p
-    assert "举起右手，微笑" in prompts[0] and "跳起，张嘴大笑" in prompts[-1]
-    assert "tracker and enhancer agree" in report and "TRACKER SAYS" not in report
+        assert "全部服装和配饰都去掉" in p and "黄色" not in p and "举起" not in p and "标签" not in p
+    assert "tracker and enhancer agree" in report and "DIFFER: tracker 1, enhancer 3" in report

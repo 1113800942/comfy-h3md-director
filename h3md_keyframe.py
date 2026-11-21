@@ -25,7 +25,6 @@ CLEAR_IOU = 0.2
 COVERED = 0.3
 SPACING = 0.7            # keyframes are picked in (prev + 0.7 * max_gap, prev + max_gap]: as few as the gap allows
 EDIT_MP = 1.0             # 0.5.91: Qwen Image 2.1 edit canvas (megapixels) for the whole keyframe
-POSE_MAX = 80             # characters of the enhancer's pose description kept per person
 
 CN = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
 ORDINAL = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"]
@@ -747,17 +746,21 @@ def parse_roster(text: str) -> list:
 
 ROSTER_ASK = ("图1是视频里的一个画面。这一步不修改图片：请从左到右逐个描述图1中每个人的外貌，只写发型、发色和全身穿着"
               "（上衣、裤子或裙子、鞋），每人一句，格式为“左1：……；左2：……”。")
-IDENTIFY_ASK = ("图1是视频里的一个画面，画面里的人名字和外貌如下——{roster}他们站的位置可能和平时不一样。"
-                "这一步不修改图片：请按外貌认出图1中的每个人是谁，从左到右逐个写出“左1：名字，姿势和动作，表情，"
-                "头部和视线朝向”，不要写服装和发型。")
+# 0.5.91 (test 17:32): asked to "only name the people, change nothing" the enhancer - trained to write EDIT prompts -
+# wrote "add name labels under the people", named people wrongly and its label text leaked into our prompt (text
+# drawn in the keyframes).  Asked for the swap itself (test 17:12) it named all 15 people right.  So it is asked for
+# the swap, and only who stands where is read from its answer: nothing it writes goes into the edit prompt.
+IDENTIFY_ASK = ("图1是视频里的一个画面，里面的人名字和外貌如下——{roster}他们在画面里的位置可能和平时不一样，"
+                "请按外貌认出图1中每个人是谁。然后{swaps}；每个人保持原来的位置、大小、姿势、动作、表情和朝向，"
+                "背景和其他一切不变。描述时写明从左数第几个人是谁、换成谁。")
 _RANK = re.compile(r"(?:从左(?:往右)?(?:数|起)?|左(?:起|侧|边)?)\s*第?\s*([1-9]|[一二三四五六七八九])\s*(?:个|位|名|人|[:：])")
-_NOT_POSE = ("衣", "裙", "裤", "衫", "服", "装", "鞋", "靴", "手套", "外套", "吊带", "领", "发", "替换", "换成", "图",
-             "image", "名字", "外貌")
 
 
-def identify_ask(roster) -> str:
-    """the enhancer request: who is who in this keyframe, by look"""
-    return IDENTIFY_ASK.format(roster="".join(f"{n}：{l}；" for n, l in roster))
+def identify_ask(roster, swaps) -> str:
+    """the enhancer request (the swap, as in the test that named everybody right): roster [(name, look)], swaps
+    [(name, picture number in the request)]"""
+    sw = "，".join(f"把{n}换成图{i}中的人" for n, i in swaps)
+    return IDENTIFY_ASK.format(roster="".join(f"{n}：{l}；" for n, l in roster), swaps=sw)
 
 
 def _segments(text):
@@ -779,61 +782,59 @@ def parse_roster_answer(text: str) -> list:
     return [(f"人物{r}", seen[r]) for r in sorted(seen)]
 
 
-def pose_text(seg: str, names=()) -> str:
-    """the pose / expression / facing parts of a piece of the enhancer's answer: clothes, hair, the names and edit
-    words dropped (the edit prompt must not carry the original outfit back in)"""
-    keep = []
-    for part in re.split(r"[，,；;。、\n（）()]", seg):
-        part = part.strip(" ：:")
-        if part and not any(w in part for w in _NOT_POSE) and not any(n in part for n in names):
-            keep.append(part)
-    return "，".join(keep)[:POSE_MAX]
+def _look_bits(look):
+    """the first two parts of a look ('金色长卷发', '浅蓝色丝绸深V连衣裙'), to find a person the enhancer described
+    without her name"""
+    return [x.strip() for x in re.split(r"[，,、；;。]", look or "") if len(x.strip()) >= 3][:2]
 
 
-def parse_identify(text: str, names) -> tuple:
-    """the enhancer's answer to IDENTIFY_ASK -> ({name: place from the left}, {name: pose}).  A place is taken once,
-    a name once; the first name written in a place's piece is who stands there."""
-    ranks, poses = {}, {}
+def parse_identify(text: str, roster) -> dict:
+    """the enhancer's answer -> {name: place from the left}.  In each place's piece: the first name written there,
+    else the one person whose look (hair, first garment) is written there.  A place and a name are taken once.
+    The pictures it says she becomes are NOT read (it swapped them once, test 17:12)."""
+    names = [n for n, _ in roster]
+    ranks = {}
     for r, seg in _segments(text):
         if r in ranks.values():
             continue
-        found = sorted((seg.find(n), n) for n in names if n and n in seg)
-        if not found:
-            continue
-        n = found[0][1]
-        if n in ranks:
-            continue
-        ranks[n], poses[n] = r, pose_text(seg, names)
-    return ranks, poses
+        found = sorted((seg.find(n), n) for n in names if n and n in seg and n not in ranks)
+        n = found[0][1] if found else None
+        if n is None:
+            hit = [nm for nm, lk in roster if nm not in ranks and any(b in seg for b in _look_bits(lk))]
+            n = hit[0] if len(hit) == 1 else None
+        if n is not None:
+            ranks[n] = r
+    return ranks
 
 
 def settle_rank(tracker_rank, pe_rank):
-    """where a person stands in a keyframe: the tracker's place and the enhancer's (by look) checked against each
-    other -> (place, note).  They agree -> that place; only one known -> that one; they differ -> the enhancer's
-    (it reads the look in THIS frame; the tracker can swap two people who crossed), noted in the report."""
+    """where a person stands in a keyframe: the tracker's place checked against the enhancer's (by look) -> (place,
+    note).  They differ -> the tracker's (right in all 10 keyframes of the 17:12 and 17:32 tests; the enhancer was
+    wrong in 2 of 5 at 17:32), flagged in the report."""
     if pe_rank is None:
-        return tracker_rank, "enhancer did not place her - tracker's place used"
-    if tracker_rank is None or tracker_rank == pe_rank:
+        return tracker_rank, "enhancer did not place her - tracker's place"
+    if tracker_rank is None:
+        return pe_rank, "no tracker place - enhancer's place"
+    if tracker_rank == pe_rank:
         return pe_rank, "tracker and enhancer agree"
-    return pe_rank, f"TRACKER SAYS {tracker_rank}, ENHANCER (by look) SAYS {pe_rank} - enhancer's place used"
+    return tracker_rank, f"DIFFER: tracker {tracker_rank}, enhancer {pe_rank} - tracker's place used"
 
 
 SWAP_HEAD = "在图1上换人：图1的背景、光照、色调、构图、镜头远近和画面范围完全不变，画面里的人数不变。"
 SWAP_ONE = ("把图1中从左数第{rank}个人{who}整个人换成图{img}中的人：脸、发型、发色、肤色和身材与图{img}完全一致，"
             "全身穿着：{desc}；原来身上的全部服装和配饰都去掉，换成这一身。保持原来的位置、大小、姿势、动作、表情、"
-            "头部朝向和视线{pose}。")
+            "头部朝向和视线。")
 SWAP_TAIL = "图1中其他人保持原样不变。每个人只出现一次。"
 
 
 def recast_prompt(people) -> str:
-    """the Qwen Image 2.1 edit prompt for one keyframe, written by us (not by the enhancer): people = [{rank, img,
-    name, look, desc, pose}] -> 'person at place r (name, look) becomes picture img, the whole outfit changed'"""
+    """the Qwen Image 2.1 edit prompt for one keyframe, written by us (nothing from the enhancer): people = [{rank,
+    img, name, look, desc}] -> 'person at place r (name, look) becomes picture img, the whole outfit changed'"""
     parts = [SWAP_HEAD]
     for p in people:
         who = "，".join(x for x in (p.get("name") or "", p.get("look") or "") if x)
         parts.append(SWAP_ONE.format(rank=p["rank"], img=p["img"], who=f"（{who}）" if who else "",
-                                     desc=(p.get("desc") or f"与图{p['img']}一致的服装").rstrip("。. "),
-                                     pose=f"：{p['pose']}" if p.get("pose") else ""))
+                                     desc=(p.get("desc") or f"与图{p['img']}一致的服装").rstrip("。. ")))
     parts.append(SWAP_TAIL)
     return "".join(parts)
 

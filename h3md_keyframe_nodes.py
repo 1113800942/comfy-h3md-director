@@ -688,7 +688,7 @@ def _resized(u8, w, h):
     return to_tensor(np.asarray(Image.fromarray(u8).resize((w, h), Image.LANCZOS)))
 
 
-def _enhance(pe_model, request, image_t, seed, unload):
+def _enhance(pe_model, request, images, seed, unload):
     """one call of the Qwen Image 2.1 prompt enhancer (ComfyUI-Prompt-Enhancer's node, the user's PE loader settings),
     text only: the answer's prompt text.  unload=False keeps the enhancer loaded for the next keyframe."""
     import nodes
@@ -699,7 +699,8 @@ def _enhance(pe_model, request, image_t, seed, unload):
     out = cls().enhance(**{"Prompt": request, "Task": "Image Edit (edit)", "Seed": int(seed) & 0xFFFFFFFF,
                            "Use Cache": True, "Target Megapixels": 1.0, "Aspect Ratio": "Auto (model decides)",
                            "Prompt Count": 1, "Output Language": "Chinese (zh)", "Prompt Enhancement": True,
-                           "pe_model": dict(pe_model, unload=bool(unload)), "Image 1": image_t})
+                           "pe_model": dict(pe_model, unload=bool(unload)),
+                           **{f"Image {i + 1}": im for i, im in enumerate(images)}})
     v = out[0]
     return str(v[0] if isinstance(v, (list, tuple)) else v)
 
@@ -713,8 +714,9 @@ def _places(it):
 
 class H3MDKeyframeRecast:
     """0.5.91: per keyframe, (1) the Qwen Image 2.1 prompt enhancer tells who is who - by look, against the names and
-    looks of people_at_start, wherever they stand now - and how each one stands; it is checked against the tracker's
-    places; (2) WE write the edit prompt: the person at place r (name, look) becomes picture N, whole outfit changed
+    looks of people_at_start, wherever they stand now; it is asked for the swap (asked to only name people it wrote
+    'add name labels', test 17:32) and only the places are read; where it differs from the tracker the tracker's
+    place is used and flagged; (2) WE write the edit prompt, nothing of the enhancer's text in it: the person at place r (name, look) becomes picture N, whole outfit changed
     (user 2026-11-20 17:12: the enhancer, left to write the prompt itself, swapped two pictures once and kept the
     original clothes in 3 of 5 keyframes); (3) one Qwen Image 2.1 edit redraws the whole keyframe.
     The layered method (erase / make alone / put back, 817837a) is gone."""
@@ -783,7 +785,7 @@ class H3MDKeyframeRecast:
         else:
             t0 = time.time()
             first = todo[0]
-            ans = _enhance(pe_model, K.ROSTER_ASK, to_tensor(np.ascontiguousarray(job["frames"][first["at"]])),
+            ans = _enhance(pe_model, K.ROSTER_ASK, [to_tensor(np.ascontiguousarray(job["frames"][first["at"]]))],
                            seed, unload=False)
             roster = K.parse_roster_answer(ans)
             for q, r in _places(first["items"][0]):
@@ -792,16 +794,18 @@ class H3MDKeyframeRecast:
             lines.append(f"people (described by the enhancer at {first['at']:.2f} s, {time.time() - t0:.1f} s): " +
                          ("; ".join(f"{n}: {l}" for n, l in roster) if roster else
                           f"NOT UNDERSTOOD - places from the tracker only. Fill people_at_start. Answer: {ans[:300]}"))
-        names = [n for n, _ in who.values()]
-        # 1 the enhancer: who stands where in every keyframe (kept loaded until the last one)
-        found = {}
+        # 1 the enhancer: who stands where in every keyframe (asked for the swap; only the places are read; kept
+        # loaded until the last keyframe)
+        found, n = {}, 0
         for i, m in enumerate(todo):
             t0 = time.time()
+            refs = pics[n:n + len(m["items"])]
+            n += len(m["items"])
             src_t = to_tensor(np.ascontiguousarray(job["frames"][m["at"]]))
-            ans = (_enhance(pe_model, K.identify_ask(list(who.values())), src_t, seed, unload=i == len(todo) - 1)
-                   if who else "")
-            ranks, poses = K.parse_identify(ans, names)
-            found[m["at"]] = (ranks, poses, ans, time.time() - t0)
+            swaps = [(who[it["id"]][0], j + 2) for j, it in enumerate(m["items"]) if it["id"] in who]
+            ans = (_enhance(pe_model, K.identify_ask(list(who.values()), swaps), [src_t] + refs, seed,
+                            unload=i == len(todo) - 1) if who else "")
+            found[m["at"]] = (K.parse_identify(ans, list(who.values())), ans, time.time() - t0)
             pbar.update(1)
         # 2 our prompt + one Qwen Image 2.1 edit per keyframe
         done, out_imgs, n = {}, [], 0
@@ -811,13 +815,13 @@ class H3MDKeyframeRecast:
                 continue
             refs = pics[n:n + len(m["items"])]
             n += len(m["items"])
-            ranks, poses, ans, t_pe = found[m["at"]]
+            ranks, ans, t_pe = found[m["at"]]
             people, notes = [], []
             for j, it in enumerate(m["items"]):
                 nm, lk = who.get(it["id"], ("", it.get("look") or ""))
                 rank, note = K.settle_rank(it["rank"], ranks.get(nm) if nm else None)
                 people.append({"rank": rank, "img": j + 2, "name": nm, "look": lk, "desc": it.get("desc", ""),
-                               "pose": poses.get(nm, ""), "picture": it["picture"]})
+                               "picture": it["picture"]})
                 notes.append(f"  picture {it['picture']} = {nm or 'left ' + str(it['left'])}: place {rank} ({note})")
             if len({p["rank"] for p in people}) < len(people):
                 for p, it in zip(people, m["items"]):
