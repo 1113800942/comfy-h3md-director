@@ -395,10 +395,12 @@ class H3MDKeyframePrepare:
                                             "jacket, white T-shirt, black jeans'). Used in the edit prompt and the "
                                             "Remake prompt; English recommended. 每张图一行外貌描述。"}),
                 "people_at_start": ("STRING", {"multiline": True, "default": "", "tooltip":
-                                    "Optional: one line per person in the source, left to right at the start, what "
-                                    "they look like now (e.g. 'the woman with wavy dark-brown hair in a red crop top'). "
-                                    "Helps the edit model pick the right person and the Remake prompt keep the others. "
-                                    "可选：原片里从左到右每人一行，现在的样子。"}),
+                                    "One line per person in the source, left to right at the start: a name, then what "
+                                    "they look like (hair, every garment, shoes), e.g. 'Eva: long wavy blonde hair, light "
+                                    "blue silk dress, long light blue gloves'. Recast's prompt enhancer finds every "
+                                    "person by this look in every keyframe, wherever they stand. Empty: the enhancer "
+                                    "describes the people itself. 原片里从左到右每人一行：名字：外貌（发型、全身衣服、鞋），"
+                                    "例如「伊娃：金色长卷发，浅蓝丝绸长裙，浅蓝长手套」。"}),
                 "max_gap_s": ("FLOAT", {"default": 5.0, "min": 2.0, "max": 8.0, "step": 0.5, "tooltip":
                                         "Largest distance between two keyframes (Remake splits long videos into "
                                         "parts; each part needs a keyframe)."}),
@@ -431,7 +433,8 @@ class H3MDKeyframePrepare:
     DESCRIPTION = ("Multi-person swap keyframes, step 1. Finds and numbers the people in the source (left to right "
                    "at the start), picks keyframe moments at most max_gap_s apart (people standing apart, little "
                    "motion) and notes where every person to recast stands then. Then H3MD Keyframe 1b: Recast "
-                   "(MiniMax H3 Image character swap on the whole keyframe) and H3MD Keyframe 2: Assemble.")
+                   "(who is who by the prompt enhancer, one Qwen Image 2.1 edit per keyframe) and H3MD Keyframe 2: "
+                   "Assemble.")
 
     def prepare(self, video, mapping, descriptions, people_at_start, max_gap_s, threshold, max_people,
                 source_video=None, start_s=0.0, end_s=0.0, **pics):
@@ -560,7 +563,8 @@ class H3MDKeyframePrepare:
         prompt = K.swap_prompt(length, chosen, descs, len(order), changes, names, looks)
         job = {"video": plan_path(video, path), "video_abs": path, "duration": info["duration"],
                "has_audio": info["audio"], "size": list(size), "length": length, "moments": job_moments,
-               "frames": full, "prompt": prompt, "chosen": chosen, "order": order}
+               "frames": full, "prompt": prompt, "chosen": chosen, "order": order,
+               "roster": people_at_start or ""}
         if float(start_s or 0.0) > 0 or float(end_s or 0.0) > 0:
             # 0.5.6: where the cut part sits in the original, so H3MD RH can cut the same part from a whole original
             st = round(max(0.0, float(start_s or 0.0)), 3)
@@ -638,8 +642,6 @@ class H3MDKeyframeAssemble:
         plan_s = json.dumps(plan, ensure_ascii=False, indent=2)
         with open(os.path.join(kdir, "plan.json"), "w", encoding="utf-8") as fh:
             fh.write(plan_s)
-        for at, cm in (job.get("recast_layers") or {}).items():   # 0.5.91: the layers of every keyframe
-            Image.fromarray(cm).save(os.path.join(kdir, f"layers_{int(round(at * K.FPS)):04d}.png"))
         report = (job.get("recast") or {}).get("report")
         if report:
             with open(os.path.join(kdir, "recast_report.txt"), "w", encoding="utf-8") as fh:
@@ -664,62 +666,16 @@ class H3MDKeyframeAssemble:
         return {"ui": {"text": [msg]}, "result": (to_tensor(sheet), plan_s, zip_path)}
 
 
-def _detect(sam, image_t, cond, threshold):
-    """SAM3 single-image detection -> [(box xyxy px, bool mask)] (ComfyUI's SAM3_Detect, one mask per object)"""
-    from comfy_extras.nodes_sam3 import SAM3_Detect
-    masks, boxes = SAM3_Detect.execute(model=sam, image=image_t, conditioning=cond, threshold=threshold,
-                                       refine_iterations=2, individual_masks=True).result
-    bx = boxes[0] if boxes else []
-    out = []
-    for i, d in enumerate(bx):
-        m = masks[i].cpu().numpy() > 0.5 if i < masks.shape[0] else None
-        out.append(([d["x"], d["y"], d["x"] + d["width"], d["y"] + d["height"]], m))
-    return out
-
-
-def find_parts(sam, image_t, cond_face, cond_head):
-    """face boxes and head boxes in an image (SAM3, several per image)"""
-    return ([b for b, _ in _detect(sam, image_t, cond_face, K.HEAD_THRESHOLD)],
-            [b for b, _ in _detect(sam, image_t, cond_head, K.HEAD_THRESHOLD)])
-
-
-def cut_character(sam, picture, cond_person, cond_face, cond_head, threshold):
-    """the character in a picture: (rgb uint8, figure mask, figure box, face box or None, head box or None)"""
-    import numpy as np
-    rgb = to_u8(picture)
-    found = _detect(sam, picture[..., :3], cond_person, threshold)
-    if found:
-        box, m = max(found, key=lambda bm: (bm[0][2] - bm[0][0]) * (bm[0][3] - bm[0][1]))
-        if m is None or not m.any():
-            m = np.zeros(rgb.shape[:2], bool)
-            m[int(box[1]):int(box[3]), int(box[0]):int(box[2])] = True
-    else:                                       # nothing found: the whole picture is the character
-        h, w = rgb.shape[:2]
-        box, m = [0.0, 0.0, float(w), float(h)], np.ones((h, w), bool)
-    faces, heads = find_parts(sam, picture[..., :3], cond_face, cond_head)
-    return rgb, m, box, K.pick_head(box, faces), K.pick_head(box, heads)
-
-
-def _qwen_edit(model, clip, vae, sampler, sigmas, seed, prompt, images, mask=None):
+def _qwen_edit(model, clip, vae, sampler, sigmas, seed, prompt, images):
     """one Qwen Image 2.1 edit (as the user's 'Qwen2.1 image editor' chain): images = [tensor, ...] -> uint8 image on
-    image 1's canvas.  mask (bool, image 1's size): only there is redrawn - image 1's own latent with a noise mask,
-    as ComfyUI-Qwen-Region-Editor's QwenRegionMaskedLatent does."""
-    import torch
-    import torch.nn.functional as F
+    image 1's canvas"""
     import nodes
     from comfy_extras.nodes_qwen import TextEncodeQwenImage21
     from comfy_extras.nodes_custom_sampler import SamplerCustom
     enc = TextEncodeQwenImage21.execute(clip=clip, prompt=prompt, negative_prompt="", vae=vae, resolution=0,
                                         images={f"image_{i + 1}": im for i, im in enumerate(images)})
-    pos, neg, lat = enc.result[0], enc.result[1], enc.result[2]
-    if mask is not None:
-        ref = next(e[1]["reference_latents"][0] for e in pos if e[1].get("reference_latents"))
-        lh, lw = ref.shape[-2:]
-        mt = torch.from_numpy(mask.astype("float32"))[None, None]
-        cells = (F.interpolate(mt, size=(lh, lw), mode="area") > 0.02).float()
-        lat = {"samples": ref.clone(), "noise_mask": cells}
-    out = SamplerCustom.execute(model=model, add_noise=True, noise_seed=seed, cfg=1.0, positive=pos, negative=neg,
-                                sampler=sampler, sigmas=sigmas, latent_image=lat)
+    out = SamplerCustom.execute(model=model, add_noise=True, noise_seed=seed, cfg=1.0, positive=enc.result[0],
+                                negative=enc.result[1], sampler=sampler, sigmas=sigmas, latent_image=enc.result[2])
     img = nodes.VAEDecode().decode(vae, out.result[0])[0]
     img = img.reshape(-1, img.shape[-3], img.shape[-2], img.shape[-1])[:1].clamp(0, 1)
     return to_u8(img)
@@ -732,75 +688,36 @@ def _resized(u8, w, h):
     return to_tensor(np.asarray(Image.fromarray(u8).resize((w, h), Image.LANCZOS)))
 
 
-def _soft(mask, radius, inside=False):
-    """bool mask -> float alpha 0..1 with a soft edge (inside=True: the edge fades inside the mask only)"""
-    import numpy as np
-    from PIL import Image, ImageFilter
-    im = Image.fromarray(mask.astype(np.uint8) * 255)
-    if radius >= 0.5:
-        im = im.filter(ImageFilter.GaussianBlur(radius))
-    a = np.asarray(im, np.float32)[..., None] / 255.0
-    if inside:
-        a = np.clip((a - 0.5) * 2.0, 0.0, 1.0) * mask[..., None]
-    return a
+def _enhance(pe_model, request, image_t, seed, unload):
+    """one call of the Qwen Image 2.1 prompt enhancer (ComfyUI-Prompt-Enhancer's node, the user's PE loader settings),
+    text only: the answer's prompt text.  unload=False keeps the enhancer loaded for the next keyframe."""
+    import nodes
+    cls = nodes.NODE_CLASS_MAPPINGS.get("QwenImage21PromptEnhancer")
+    if cls is None:
+        raise K.KeyframeError(f"{TAG} the Qwen Image 2.1 Prompt Enhancer node is not installed "
+                              "(ComfyUI-Prompt-Enhancer). 没装 Qwen Image 2.1 提示词增强节点。")
+    out = cls().enhance(**{"Prompt": request, "Task": "Image Edit (edit)", "Seed": int(seed) & 0xFFFFFFFF,
+                           "Use Cache": True, "Target Megapixels": 1.0, "Aspect Ratio": "Auto (model decides)",
+                           "Prompt Count": 1, "Output Language": "Chinese (zh)", "Prompt Enhancement": True,
+                           "pe_model": dict(pe_model, unload=bool(unload)), "Image 1": image_t})
+    v = out[0]
+    return str(v[0] if isinstance(v, (list, tuple)) else v)
 
 
-def _fill_hole(u8, mask):
-    """fill the masked area of an image from its surroundings (normalised blur, coarse to fine), so an edit model
-    never sees what was there"""
-    import numpy as np
-    from scipy import ndimage
-    img = u8.astype(np.float32)
-    keep = (~mask).astype(np.float32)[..., None]
-    out = img.copy()
-    h, w = mask.shape
-    for k, r in enumerate((max(h, w) / 6.0, max(h, w) / 20.0, max(h, w) / 60.0)):
-        num = np.stack([ndimage.gaussian_filter(img[..., c] * keep[..., 0], r, mode="nearest") for c in range(3)], -1)
-        den = ndimage.gaussian_filter(keep[..., 0], r, mode="nearest")[..., None]
-        fill = num / np.maximum(den, 1e-4)
-        ok = mask[..., None] & ((den > 0.05) if k else (den > 0))      # finer passes only where they reach
-        out = np.where(ok, fill, out)
-    return np.clip(out, 0, 255).astype(np.uint8)
-
-
-def _main_piece(mask, erode=2):
-    """the largest connected piece of a bool mask, eroded by `erode` px (cut-outs from a white background: no
-    specks, no white rim)"""
-    import numpy as np
-    from scipy import ndimage
-    lab, n = ndimage.label(mask)
-    if n > 1:
-        sizes = ndimage.sum(mask, lab, range(1, n + 1))
-        mask = lab == (1 + int(np.argmax(sizes)))
-    return ~K.grow_mask(~mask, erode) if erode else mask
-
-
-def _put(dst, src, alpha, x0, y0):
-    """alpha-blend src (h, w, 3 uint8) into dst at (x0, y0), clipped"""
-    import numpy as np
-    H, W = dst.shape[:2]
-    h, w = src.shape[:2]
-    ax0, ay0, ax1, ay1 = max(0, x0), max(0, y0), min(W, x0 + w), min(H, y0 + h)
-    if ax1 <= ax0 or ay1 <= ay0:
-        return
-    s_ = src[ay0 - y0:ay1 - y0, ax0 - x0:ax1 - x0].astype(np.float32)
-    a_ = alpha[ay0 - y0:ay1 - y0, ax0 - x0:ax1 - x0]
-    d_ = dst[ay0:ay1, ax0:ax1].astype(np.float32)
-    dst[ay0:ay1, ax0:ax1] = np.clip(d_ * (1 - a_) + s_ * a_, 0, 255).astype(np.uint8)
+def _places(it):
+    """[(person id, place from the left)] of everybody in a keyframe, from one item's own / others boxes"""
+    allp = [(it["id"], it["own"])] + list(zip(it.get("others_ids") or [], it.get("others") or []))
+    allp.sort(key=lambda qb: (qb[1][0] + qb[1][2]) / 2.0)
+    return [(q, r) for r, (q, b) in enumerate(allp, 1)]
 
 
 class H3MDKeyframeRecast:
-    """0.5.91: the new characters are put into the keyframe in layers, one person at a time, every layer doing one
-    thing only (user 2026-11-20 16:37), with the user's Qwen Image 2.1 edit chain:
-      1 clean background - each person to recast (her SAM3 mask, grown) is erased: her area is first filled from
-        around it (so the model never sees her), then redrawn by masked sampling (the crop's own latent + noise mask,
-        as ComfyUI-Qwen-Region-Editor does); only her area is pasted back, so nothing else in the frame changes and
-        nothing of the original (props, tails, wide skirts) is left for the new character to fail to cover;
-      2 the new character alone - her picture + the crop of the person she replaces (pose, expression, build) -> the
-        character in that pose on white, the whole outfit from her description; SAM3 cuts her out;
-      3 together - far to near, each new character face on face (whole figure on box when no face) where the person
-        she replaces stood; people not recast who stand in front are put back on top from the source.
-    SCAIL-2 (tests 15:01-16:08: half-body pictures left the originals' skirts and trousers) is gone."""
+    """0.5.91: per keyframe, (1) the Qwen Image 2.1 prompt enhancer tells who is who - by look, against the names and
+    looks of people_at_start, wherever they stand now - and how each one stands; it is checked against the tracker's
+    places; (2) WE write the edit prompt: the person at place r (name, look) becomes picture N, whole outfit changed
+    (user 2026-11-20 17:12: the enhancer, left to write the prompt itself, swapped two pictures once and kept the
+    original clothes in 3 of 5 keyframes); (3) one Qwen Image 2.1 edit redraws the whole keyframe.
+    The layered method (erase / make alone / put back, 817837a) is gone."""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -814,35 +731,35 @@ class H3MDKeyframeRecast:
                 "vae": ("VAE", {"tooltip": "qwen_image_2.1_vae"}),
                 "sampler": ("SAMPLER", {"tooltip": "euler"}),
                 "sigmas": ("SIGMAS", {"tooltip": "ManualSigmas 1.0, 0.5, 0 (2-step LoRA)"}),
+                "pe_model": ("QWE_PE_MODEL", {"tooltip": "Qwen Image 2.1 PE Loader (GGUF): it only tells who is "
+                                              "who in every keyframe. Thinking on, Plan Tokens 400. "
+                                              "增强器只负责认人。"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "control_after_generate": True}),
             }
         }
 
     INPUT_IS_LIST = True
-    RETURN_TYPES = ("IMAGE", "H3MD_KEYFRAME_JOB", "STRING", "IMAGE")
-    RETURN_NAMES = ("keyframes", "job", "report", "layers")
-    OUTPUT_IS_LIST = (True, False, False, True)
+    RETURN_TYPES = ("IMAGE", "H3MD_KEYFRAME_JOB", "STRING")
+    RETURN_NAMES = ("keyframes", "job", "report")
+    OUTPUT_IS_LIST = (True, False, False)
     OUTPUT_TOOLTIPS = ("The finished keyframes, one per swap moment (whole frames).",
                        "The job with the keyframes (connect to Assemble).",
-                       "What every layer did, per keyframe and person, with times.",
-                       "Per keyframe: clean background | every new character on white.")
+                       "Per keyframe: who the enhancer found where, the check against the tracker, the edit prompt, "
+                       "times.")
     FUNCTION = "recast"
     CATEGORY = CATEGORY
-    DESCRIPTION = ("Multi-person swap keyframes, step 1b (0.5.91): in layers, one person at a time - erase the "
-                   "people -> clean background, make every new character alone in her pose, put them back far to "
-                   "near. Then H3MD Keyframe 2: Assemble.")
+    DESCRIPTION = ("Multi-person swap keyframes, step 1b (0.5.91): the Qwen Image 2.1 prompt enhancer tells who is "
+                   "who in every keyframe (by the names and looks in people_at_start), H3MD writes the swap prompt, "
+                   "one Qwen Image 2.1 edit per keyframe. Then H3MD Keyframe 2: Assemble.")
 
-    THRESHOLD = 0.5
-
-    def recast(self, job, pictures, model, clip, vae, sampler, sigmas, seed):
+    def recast(self, job, pictures, model, clip, vae, sampler, sigmas, pe_model, seed):
         import time
         import numpy as np
         import comfy.utils
-        import nodes
         from PIL import Image
         one = lambda v: v[0] if isinstance(v, list) else v
-        job, model, clip, vae, sampler, sigmas = (one(job), one(model), one(clip), one(vae), one(sampler),
-                                                  one(sigmas))
+        job, model, clip, vae, sampler, sigmas, pe_model = (one(job), one(model), one(clip), one(vae), one(sampler),
+                                                            one(sigmas), one(pe_model))
         seed = int(one(seed))
         pics = [p[b:b + 1] for p in pictures for b in range(int(p.shape[0]))]
         need = sum(len(m["items"]) for m in job["moments"])
@@ -851,138 +768,84 @@ class H3MDKeyframeRecast:
                                   "pictures. 请接上 Prepare 的 pictures。")
         W, H = job["size"]
         todo = [m for m in job["moments"] if m["items"]]
-        pbar = comfy.utils.ProgressBar(max(1, need * 2))
-        feather = max(1.0, K.FEATHER * H)
-        lines, done, out_imgs, out_layers, layers_saved = [], {}, [], [], {}
-        t_all = time.time()
-        sam, sclip = load_sam3()
-        patchers = [sam] + ([sclip.patcher] if getattr(sclip, "patcher", None) is not None else [])
-        te = nodes.CLIPTextEncode()
-        cond_person = te.encode(sclip, "person:16")[0]
-        cond_face, cond_head = te.encode(sclip, K.PART_PROMPTS[0])[0], te.encode(sclip, K.PART_PROMPTS[1])[0]
-        n = 0
-        try:
-            for m in job["moments"]:
-                if not m["items"]:
-                    continue
-                refs = pics[n:n + len(m["items"])]
-                n += len(m["items"])
-                src = np.ascontiguousarray(job["frames"][m["at"]])
-                src_t = to_tensor(src)
-                found = _detect(sam, src_t, cond_person, self.THRESHOLD)
-                faces, heads = find_parts(sam, src_t, cond_face, cond_head)
-                obj = {i: [b[0] / W, b[1] / H, b[2] / W, b[3] / H] for i, (b, _) in enumerate(found)}
-                got = K.match_people(obj, [[it["own"][0] / W, it["own"][1] / H, it["own"][2] / W, it["own"][3] / H]
-                                           for it in m["items"]])
-                lines.append(f"{m['at']:.2f} s ({len(m['items'])} to recast, {len(found)} people found):")
-                people = []
-                for j, it in enumerate(m["items"]):
-                    box = [float(v) for v in it["own"]]
-                    if got[j] is not None and found[got[j]][1] is not None:
-                        mk = found[got[j]][1]
-                        box = [float(v) for v in (K.mask_box(mk) or box)]
-                    else:
-                        mk = np.zeros((H, W), bool)
-                        mk[int(box[1]):int(box[3]), int(box[0]):int(box[2])] = True
-                        lines.append(f"  picture {it['picture']}: SAM3 did not find her - her box is used")
-                    people.append(dict(it=it, ref=refs[j], mask=mk, box=box, face=K.pick_head(box, faces),
-                                       head=K.pick_head(box, heads)))
-                order = K.far_to_near([p["box"] for p in people])
-                # 1 clean background: erase one person at a time, far to near
-                bg = src.copy()
-                for k in order:
-                    p = people[k]
-                    t0 = time.time()
-                    bh = p["box"][3] - p["box"][1]
-                    area = K.grow_mask(p["mask"], round(K.ERASE_GROW * bh))
-                    ab = K.mask_box(area)
-                    cx0, cy0, cx1, cy1 = K.grow_box(ab, K.ERASE_CONTEXT, K.ERASE_CONTEXT * 0.5, W, H)
-                    cw, ch = K.fit_size(cx1 - cx0, cy1 - cy0)
-                    hole = area[cy0:cy1, cx0:cx1]
-                    filled = _fill_hole(bg[cy0:cy1, cx0:cx1], hole)
-                    crop = np.asarray(Image.fromarray(filled).resize((cw, ch), Image.LANCZOS))
-                    hole_s = np.asarray(Image.fromarray(hole.astype(np.uint8) * 255).resize((cw, ch),
-                                                                                         Image.BILINEAR)) > 0
-                    er = _qwen_edit(model, clip, vae, sampler, sigmas, seed, K.ERASE_PROMPT, [to_tensor(crop)],
-                                    mask=hole_s)
-                    er = np.asarray(Image.fromarray(er).resize((cx1 - cx0, cy1 - cy0), Image.LANCZOS))
-                    _put(bg, er, _soft(hole, feather), cx0, cy0)
-                    p["t_erase"] = time.time() - t0
-                    pbar.update(1)
-                # 2 every new character alone, in the pose of the person she replaces
-                for k in order:
-                    p = people[k]
-                    t0 = time.time()
-                    px0, py0, px1, py1 = K.grow_box(p["box"], K.PERSON_PAD, K.PERSON_PAD * 0.5, W, H)
-                    pw, ph = K.fit_size(px1 - px0, py1 - py0)
-                    pose = _resized(np.ascontiguousarray(src[py0:py1, px0:px1]), pw, ph)
-                    gen = _qwen_edit(model, clip, vae, sampler, sigmas, seed, K.person_prompt(p["it"].get("desc")),
-                                     [pose, p["ref"]])
-                    gen_t = to_tensor(gen)
-                    g_rgb, g_m, g_box, g_face, g_head = cut_character(sam, gen_t, cond_person, cond_face, cond_head,
-                                                                     self.THRESHOLD)
-                    g_m = _main_piece(g_m)
-                    # generated-image px -> frame px (the crop it was made for), then face on face
-                    gsx, gsy = (px1 - px0) / float(gen.shape[1]), (py1 - py0) / float(gen.shape[0])
-                    to_f = lambda b: None if b is None else [px0 + b[0] * gsx, py0 + b[1] * gsy, px0 + b[2] * gsx,
-                                                             py0 + b[3] * gsy]
-                    if p["face"] and g_face:
-                        sc, dx, dy, _ = K.place_character(p["box"], to_f(g_box), p["face"], to_f(g_face))
-                        how = "face on face"
-                    elif p["head"] and g_head:
-                        sc, dx, dy, _ = K.place_character(p["box"], to_f(g_box), p["head"], to_f(g_head))
-                        how = "head on head"
-                    else:
-                        sc, dx, dy, _ = K.place_character(p["box"], to_f(g_box))
-                        how = "figure on box"
-                    p.update(gen=gen, gen_mask=g_m, scale=(sc * gsx, sc * gsy), shift=(dx + sc * px0, dy + sc * py0),
-                             how=how, t_make=time.time() - t0)
-                    pbar.update(1)
-                # 3 together, far to near; people not recast who stand in front go back on top
-                out = bg.copy()
-                for k in order:
-                    p = people[k]
-                    (ax, ay), (bx, by) = p["scale"], p["shift"]
-                    aff = (1.0 / ax, 0.0, -bx / ax, 0.0, 1.0 / ay, -by / ay)
-                    im = np.asarray(Image.fromarray(p["gen"]).transform((W, H), Image.AFFINE, aff,
-                                                                        resample=Image.BICUBIC))
-                    mk = np.asarray(Image.fromarray(p["gen_mask"].astype(np.uint8) * 255).transform(
-                        (W, H), Image.AFFINE, aff, resample=Image.BILINEAR)) > 127
-                    _put(out, im, _soft(mk, feather, inside=True), 0, 0)
-                    it = p["it"]
-                    lines.append(f"  picture {it['picture']} (left {it['left']}, now {K.ordinal(it['rank'])} from the "
-                                 f"left): erased {p['t_erase']:.1f} s, made {p['t_make']:.1f} s, placed {p['how']}")
-                mine = {got[j] for j in range(len(people)) if got[j] is not None}
-                for i, (b, mk) in enumerate(found):
-                    if i in mine or mk is None:
-                        continue
-                    if any(K.in_front(b, p["box"]) for p in people):
-                        _put(out, src, _soft(mk, feather), 0, 0)
-                        lines.append("  a person not recast stands in front: put back from the source")
-                lines.append(f"  seed {seed}")
-                done[m["at"]] = out
-                out_imgs.append(to_tensor(out))
-                strip = [bg] + [np.asarray(Image.fromarray(p["gen"]).resize(
-                    (max(1, int(p["gen"].shape[1] * H / p["gen"].shape[0])), H), Image.LANCZOS)) for p in people]
-                sheet = np.concatenate(strip, axis=1)
-                layers_saved[m["at"]] = sheet
-                out_layers.append(to_tensor(sheet))
-        finally:
-            _vram().unload_patchers(patchers, "(SAM3 unloaded)")
-            del sam, sclip, patchers
-            gc.collect()
-            _vram().soft_empty_cache("(SAM3 freed)")
-        lines.append(f"total {time.time() - t_all:.1f} s for {len(todo)} keyframe(s)")
+        pbar = comfy.utils.ProgressBar(max(1, 2 * len(todo)))
+        lines, t_all = [], time.time()
+        # who is who: names and looks from people_at_start (left to right at the start), else the enhancer
+        # describes the people of the first keyframe
+        who = {}
+        roster = K.parse_roster(job.get("roster", ""))
+        order = job.get("order") or []
+        if roster:
+            for k, nl in enumerate(roster, 1):
+                if k <= len(order):
+                    who[order[k - 1]] = nl
+            lines.append("people (people_at_start): " + "; ".join(f"{n}: {l}" for n, l in roster))
+        else:
+            t0 = time.time()
+            first = todo[0]
+            ans = _enhance(pe_model, K.ROSTER_ASK, to_tensor(np.ascontiguousarray(job["frames"][first["at"]])),
+                           seed, unload=False)
+            roster = K.parse_roster_answer(ans)
+            for q, r in _places(first["items"][0]):
+                if r <= len(roster):
+                    who[q] = roster[r - 1]
+            lines.append(f"people (described by the enhancer at {first['at']:.2f} s, {time.time() - t0:.1f} s): " +
+                         ("; ".join(f"{n}: {l}" for n, l in roster) if roster else
+                          f"NOT UNDERSTOOD - places from the tracker only. Fill people_at_start. Answer: {ans[:300]}"))
+        names = [n for n, _ in who.values()]
+        # 1 the enhancer: who stands where in every keyframe (kept loaded until the last one)
+        found = {}
+        for i, m in enumerate(todo):
+            t0 = time.time()
+            src_t = to_tensor(np.ascontiguousarray(job["frames"][m["at"]]))
+            ans = (_enhance(pe_model, K.identify_ask(list(who.values())), src_t, seed, unload=i == len(todo) - 1)
+                   if who else "")
+            ranks, poses = K.parse_identify(ans, names)
+            found[m["at"]] = (ranks, poses, ans, time.time() - t0)
+            pbar.update(1)
+        # 2 our prompt + one Qwen Image 2.1 edit per keyframe
+        done, out_imgs, n = {}, [], 0
+        gw, gh = K.fit_size(W, H)
+        for m in job["moments"]:
+            if not m["items"]:
+                continue
+            refs = pics[n:n + len(m["items"])]
+            n += len(m["items"])
+            ranks, poses, ans, t_pe = found[m["at"]]
+            people, notes = [], []
+            for j, it in enumerate(m["items"]):
+                nm, lk = who.get(it["id"], ("", it.get("look") or ""))
+                rank, note = K.settle_rank(it["rank"], ranks.get(nm) if nm else None)
+                people.append({"rank": rank, "img": j + 2, "name": nm, "look": lk, "desc": it.get("desc", ""),
+                               "pose": poses.get(nm, ""), "picture": it["picture"]})
+                notes.append(f"  picture {it['picture']} = {nm or 'left ' + str(it['left'])}: place {rank} ({note})")
+            if len({p["rank"] for p in people}) < len(people):
+                for p, it in zip(people, m["items"]):
+                    p["rank"] = it["rank"]
+                notes.append("  two people got the same place - the tracker's places used for all")
+            prompt = K.recast_prompt(people)
+            t0 = time.time()
+            src = np.ascontiguousarray(job["frames"][m["at"]])
+            out = _qwen_edit(model, clip, vae, sampler, sigmas, seed, prompt, [_resized(src, gw, gh)] + refs)
+            out = np.asarray(Image.fromarray(out).resize((W, H), Image.LANCZOS))
+            lines.append(f"{m['at']:.2f} s: enhancer {t_pe:.1f} s, edit {time.time() - t0:.1f} s ({gw}x{gh})")
+            lines.extend(notes)
+            lines.append("  enhancer: " + " ".join(ans.split())[:600])
+            lines.append("  prompt: " + prompt)
+            done[m["at"]] = out
+            out_imgs.append(to_tensor(out))
+            pbar.update(1)
+        lines.append(f"seed {seed}; total {time.time() - t_all:.1f} s for {len(todo)} keyframe(s)")
         report = "\n".join(lines)
         LOG.info("%s recast report:\n%s", TAG, report)
-        job = dict(job, recast_frames=done, recast_layers=layers_saved,
-                   recast={"method": "layers: erase, make alone, put back (Qwen Image 2.1)", "seed": seed,
-                           "report": report})
-        return {"ui": {"text": [report]}, "result": (out_imgs, job, report, out_layers)}
+        job = dict(job, recast_frames=done,
+                   recast={"method": "enhancer tells who is who, H3MD writes the prompt, one Qwen Image 2.1 edit",
+                           "seed": seed, "report": report})
+        return {"ui": {"text": [report]}, "result": (out_imgs, job, report)}
 
 
 NODE_CLASS_MAPPINGS = {"H3MDKeyframePrepare": H3MDKeyframePrepare, "H3MDKeyframeRecast": H3MDKeyframeRecast,
                        "H3MDKeyframeAssemble": H3MDKeyframeAssemble}
 NODE_DISPLAY_NAME_MAPPINGS = {"H3MDKeyframePrepare": "H3MD Keyframe 1: Prepare 准备关键帧 0.5.91",
-                              "H3MDKeyframeRecast": "H3MD Keyframe 1b: Recast 分层换人 0.5.91",
+                              "H3MDKeyframeRecast": "H3MD Keyframe 1b: Recast 认人换人 0.5.91",
                               "H3MDKeyframeAssemble": "H3MD Keyframe 2: Assemble 打包计划 0.5.91"}

@@ -57,9 +57,10 @@ def test_prepare_assemble(clip):
     inp, out = clip
     pic = torch.rand(1, 1200, 1000, 3)
     pics, job, sheet, info = N.H3MDKeyframePrepare().prepare(
-        "clips/src.mp4", "图1换左二", "a man with short red hair, yellow coat", "", 5.0, 0.4, 8,
-        picture_1=pic)["result"]
+        "clips/src.mp4", "图1换左二", "a man with short red hair, yellow coat", "伊娃：金发\n阿比：红发\n义父：黑发",
+        5.0, 0.4, 8, picture_1=pic)["result"]
     i = json.loads(info)
+    assert N.K.parse_roster(job["roster"]) == [("伊娃", "金发"), ("阿比", "红发"), ("义父", "黑发")]
     assert i["people_at_start"] == 3 and i["mapping"] == [{"picture": 1, "left": 2}]
     assert len(pics) == i["recasts"] == sum(len(m["items"]) for m in job["moments"]) >= 2
     assert job["size"] == [1664, 960] and job["length"] <= SEC * FPS
@@ -76,9 +77,7 @@ def test_prepare_assemble(clip):
             x0, y0, x1, y1 = [int(v) for v in it["own"]]
             f[y0:y1, x0:x1] = 255
         done[m["at"]] = f
-    cm = np.zeros((20, 40, 3), np.uint8)
-    job2 = dict(job, recast_frames=done, recast_layers={job["moments"][0]["at"]: cm},
-                recast={"flags": {str(job["moments"][0]["at"]): "swap"}, "report": "r"})
+    job2 = dict(job, recast_frames=done, recast={"report": "r"})
     sheet2, plan_s, zp = N.H3MDKeyframeAssemble().assemble(job2, "t1", True)["result"]
     plan = json.loads(plan_s)
     seg = plan["segments"][0]
@@ -86,10 +85,45 @@ def test_prepare_assemble(clip):
     assert plan["media"]["videos"][0]["file"] == "clips/src.mp4"
     kf = plan["media"]["images"][0]["file"]
     assert os.path.isfile(inp / kf) and os.path.isfile(inp / os.path.dirname(kf) / "recast_report.txt")
-    assert len([f for f in os.listdir(inp / os.path.dirname(kf)) if f.startswith("layers_")]) == 1
     with zipfile.ZipFile(zp) as z:
         names = z.namelist()
     assert "plan.json" in names and any(n.endswith("src.mp4") for n in names)
     assert len([n for n in names if n.endswith(".png")]) == len(plan["media"]["images"])
     with pytest.raises(N.K.KeyframeError):                    # Assemble needs Recast's job
         N.H3MDKeyframeAssemble().assemble(job, "t2", False)
+
+
+def test_recast_who_is_who(clip, monkeypatch):
+    """0.5.91: the enhancer only tells who stands where (by look); H3MD writes the prompt; one edit per keyframe"""
+    pic = torch.rand(1, 1200, 1000, 3)
+    pics, job, sheet, info = N.H3MDKeyframePrepare().prepare(
+        "clips/src.mp4", "图1换左二", "a man with short red hair, yellow coat", "伊娃：金发\n阿比：红发\n义父：黑发",
+        5.0, 0.4, 8, picture_1=pic)["result"]
+    todo = [m for m in job["moments"] if m["items"]]
+    calls, prompts = [], []
+
+    def fake_enhance(pe_model, request, image_t, seed, unload):
+        k = len(calls)
+        calls.append(unload)
+        assert "阿比：红发" in request and "不修改图片" in request
+        m = todo[k]
+        return ("左1：伊娃，站立，看向镜头；左2：阿比，举起右手，微笑，穿黄色外套；左3：义父，站立" if m["at"] < 5.0 else
+                "保持<image1>不变。从左数第1位是阿比，跳起，张嘴大笑；从左数第2位是伊娃；从左数第3位是义父。")
+
+    def fake_edit(model, clip_, vae, sampler, sigmas, seed, prompt, images):
+        prompts.append(prompt)
+        assert len(images) == 2
+        return np.zeros((int(images[0].shape[1]), int(images[0].shape[2]), 3), np.uint8)
+
+    monkeypatch.setattr(N, "_enhance", fake_enhance)
+    monkeypatch.setattr(N, "_qwen_edit", fake_edit)
+    imgs, job2, report = N.H3MDKeyframeRecast().recast([job], pics, [None], [None], [None], [None], [None],
+                                                       [{"unload": True}], [7])["result"]
+    assert calls == [False] * (len(todo) - 1) + [True]               # the enhancer stays loaded until the last
+    assert len(imgs) == len(todo) == len(job2["recast_frames"]) and imgs[0].shape[1:3] == (960, 1664)
+    for m, p in zip(todo, prompts):
+        r = 2 if m["at"] < 5.0 else 1
+        assert f"从左数第{r}个人（阿比，红发）整个人换成图2中的人" in p and "a man with short red hair" in p
+        assert "全部服装和配饰都去掉" in p and "黄色" not in p and "外套" not in p
+    assert "举起右手，微笑" in prompts[0] and "跳起，张嘴大笑" in prompts[-1]
+    assert "tracker and enhancer agree" in report and "TRACKER SAYS" not in report

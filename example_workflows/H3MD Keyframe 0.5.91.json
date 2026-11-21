@@ -232,7 +232,7 @@
     "",
     "图1换左一\n图2换左二\n图3换左三",
     "a young European woman in her mid twenties with a fair oval face, grey-blue eyes and long wavy blonde hair, in a white ribbed tank top, long black jeans and white sneakers\na European man around thirty with a strong square jaw, hazel eyes, a well-trimmed short beard and short dark brown hair, in a beige trench coat over a white shirt, dark grey trousers and brown leather shoes\nan East Asian man in his mid twenties with a clean-shaven face, dark almond-shaped eyes and short black hair trimmed close at the sides, a muscular build, in a fitted black T-shirt, long dark blue jeans and black sneakers",
-    "",
+    "伊娃：金色长卷发，浅蓝色丝绸深V连衣裙，戴浅蓝色长手套\n阿比：棕红色长发，深蓝色缎面吊带短上衣和深蓝色短裙，黑色长靴\n义父：黑色头发盘起，深蓝色缎面V领裹身长裙，黑色高跟鞋",
     5.0,
     0.4,
     8,
@@ -617,6 +617,46 @@
    "title": "2 steps 两步"
   },
   {
+   "id": 29,
+   "type": "QwenImage21PELoaderGGUF",
+   "pos": [
+    800,
+    920
+   ],
+   "size": [
+    380,
+    260
+   ],
+   "flags": {},
+   "order": 16,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "pe_model",
+     "type": "QWE_PE_MODEL",
+     "links": [
+      18
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "QwenImage21PELoaderGGUF"
+   },
+   "widgets_values": [
+    "qwenimage-pe/pe_t2i_heretic-Q4_K_M.gguf",
+    "qwenimage-pe/pe_i2i_heretic-Q4_K_M.gguf",
+    "qwenimage-pe/pe_i2i_heretic.mmproj-bf16.gguf",
+    -1,
+    "16384",
+    "",
+    true,
+    true,
+    400
+   ],
+   "title": "Prompt enhancer 增强器（只认人）"
+  },
+  {
    "id": 30,
    "type": "H3MDKeyframeRecast",
    "pos": [
@@ -628,7 +668,7 @@
     300
    ],
    "flags": {},
-   "order": 16,
+   "order": 17,
    "mode": 0,
    "inputs": [
     {
@@ -665,6 +705,11 @@
      "name": "sigmas",
      "type": "SIGMAS",
      "link": 17
+    },
+    {
+     "name": "pe_model",
+     "type": "QWE_PE_MODEL",
+     "link": 18
     }
    ],
    "outputs": [
@@ -672,7 +717,7 @@
      "name": "keyframes",
      "type": "IMAGE",
      "links": [
-      18
+      19
      ]
     },
     {
@@ -687,13 +732,6 @@
      "type": "STRING",
      "links": [
       20
-     ]
-    },
-    {
-     "name": "layers",
-     "type": "IMAGE",
-     "links": [
-      19
      ]
     }
    ],
@@ -718,34 +756,6 @@
     300
    ],
    "flags": {},
-   "order": 17,
-   "mode": 0,
-   "inputs": [
-    {
-     "name": "images",
-     "type": "IMAGE",
-     "link": 18
-    }
-   ],
-   "outputs": [],
-   "properties": {
-    "Node name for S&R": "PreviewImage"
-   },
-   "widgets_values": [],
-   "title": "Keyframes 关键帧"
-  },
-  {
-   "id": 34,
-   "type": "PreviewImage",
-   "pos": [
-    1220,
-    640
-   ],
-   "size": [
-    440,
-    300
-   ],
-   "flags": {},
    "order": 18,
    "mode": 0,
    "inputs": [
@@ -760,18 +770,18 @@
     "Node name for S&R": "PreviewImage"
    },
    "widgets_values": [],
-   "title": "Layers 分层（左：干净背景，右：单独做出的每个角色）"
+   "title": "Keyframes 关键帧"
   },
   {
    "id": 32,
    "type": "PreviewAny",
    "pos": [
     1220,
-    960
+    640
    ],
    "size": [
     440,
-    260
+    420
    ],
    "flags": {},
    "order": 19,
@@ -928,7 +938,7 @@
     "Node name for S&R": "MarkdownNote"
    },
    "widgets_values": [
-    "## H3MD Keyframe 0.5.91 关键帧\n\n1. 原片拖进 **Source video**；角色图放 图1/图2/图3（全身、背景干净）。\n2. **mapping**：图1换左一 …（编号按开头第一个看清的画面从左往右，看 People 预览核对）。\n3. **descriptions**：每张图一行，写人种、年龄、脸、发型、全身衣服和鞋。\n4. 每张关键帧分层换人（Qwen Image 2.1），一次一个人：先把要换的人删掉得到干净背景，再单独做出每个新角色（摆原来那个人的姿势，全身衣着按描述），最后从远到近脸对脸放回去。看 Layers 预览检查每一层。\n5. 看 **Report**：每个人删、做、放各用了多久，是脸对脸还是整个人对框。\n6. 打包后在导演台（H3MD Director Remake.json）Import plan。"
+    "## H3MD Keyframe 0.5.91 关键帧\n\n1. 原片拖进 **Source video**；角色图放 图1/图2/图3（全身、背景干净）。\n2. **mapping**：图1换左一 …（编号按开头第一个看清的画面从左往右，看 People 预览核对）。\n3. **descriptions**：每张图一行，写人种、年龄、脸、发型、全身衣服和鞋。\n4. **people_at_start**：原片里从左到右每人一行，`名字：外貌`（发型、全身衣服、鞋），例如`伊娃：金色长卷发，浅蓝丝绸长裙`。增强器按外貌在每张关键帧里认出谁是谁（不管站到哪里）；不填就让增强器自己描述。\n5. 每张关键帧：增强器只认人、写姿势表情；换谁、换成哪张图、整个人连衣服一起换，由 H3MD 写进提示词；Qwen Image 2.1 整帧改一次。\n6. 看 **Report**：增强器认出的站位、和跟踪的对照、最后用的提示词、每步用时。\n7. 打包后在导演台（H3MD Director Remake.json）Import plan。"
    ],
    "title": "How to use 用法"
   }
@@ -1072,17 +1082,17 @@
   ],
   [
    18,
+   29,
+   0,
    30,
-   0,
-   31,
-   0,
-   "IMAGE"
+   7,
+   "QWE_PE_MODEL"
   ],
   [
    19,
    30,
-   3,
-   34,
+   0,
+   31,
    0,
    "IMAGE"
   ],
