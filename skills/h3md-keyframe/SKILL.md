@@ -147,6 +147,12 @@ original. Typical misses:
   the frame edge that stays.
 - anything in the background named (a wall, a window, a building): the model paints it in where the original shows
   something else - say only that the background stays exactly as it is.
+- in a frame with several similar people, outfits swapped between them (two yellow shirts, the wrong trousers):
+  in every "Subject Picture N takes the place of ..." sentence name that person's shirt and trousers again
+  ("Subject Picture 4, in the yellow shirt and light-blue jeans, takes the place of the fifth person"), so each outfit
+  stays bound to its place;
+- trousers / shoes left out for a person whose legs do show in the frame (even only one leg at the edge): the model
+  then invents them, often from another person.
 
 After the run, look at the Compare sheet for the background too, not only the people: anything that is not in the
 original (a new wall, window, building, sign) means a redo with the background left unnamed. Recast's report names
