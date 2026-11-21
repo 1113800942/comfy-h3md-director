@@ -775,22 +775,70 @@ def parse_redo(text, n):
     return sel or None
 
 
-def pe_caption(text):
-    """the enhancer's expanded_caption (its answer is one JSON object, after an optional thinking part) or None"""
+def parse_prompts(text, n):
+    """the AI's answer -> {keyframe number: prompt}: a JSON object {"1": "...", ...} (or {"prompts": {...}}), or
+    lines '#1: ...' / '1: ...' (a prompt may run over several lines until the next number)"""
     import json
-    t = str(text or "")
-    if "</think>" in t:
-        t = t.rsplit("</think>", 1)[1]
-    i, j = t.find("{"), t.rfind("}")
-    if i < 0 or j <= i:
-        return None
+    t = str(text or "").strip()
+    if not t:
+        return {}
+    out = {}
     try:
-        cap = json.loads(t[i:j + 1]).get("expanded_caption")
-    except Exception:
-        m = re.search(r'"expanded_caption"\s*:\s*"((?:[^"\\]|\\.)*)"', t[i:j + 1], re.S)
-        cap = json.loads('"' + m.group(1) + '"') if m else None
-    cap = (cap or "").strip()
-    return cap or None
+        d = json.loads(t)
+        if isinstance(d, dict) and isinstance(d.get("prompts"), (dict, list)):
+            d = d["prompts"]
+        if isinstance(d, list):
+            d = {str(i + 1): v for i, v in enumerate(d)}
+        for k, v in d.items():
+            m = re.search(r"\d+", str(k))
+            if m and isinstance(v, str) and v.strip():
+                out[int(m.group())] = v.strip()
+    except ValueError:
+        cur = None
+        for line in t.splitlines():
+            m = re.match(r"^\s*#?\s*(\d+)\s*[:：.)]\s*(.*)$", line)
+            if m:
+                cur = int(m.group(1))
+                out[cur] = m.group(2).strip()
+            elif cur is not None and line.strip():
+                out[cur] = (out[cur] + " " + line.strip()).strip()
+    bad = [k for k in out if not 1 <= k <= n]
+    if bad:
+        raise KeyframeError(f"{TAG} prompts: keyframes are numbered 1 to {n}, got {bad}. 提示词编号应为 1 到 {n}。")
+    return {k: v for k, v in out.items() if v}
+
+
+AI_README = """# H3MD keyframes - write the H3 Image prompts
+
+You are writing one MiniMax H3 Image edit prompt per keyframe (request.json lists them).
+
+For keyframe k the edit model gets, in this order:
+  <Picture 1> = keyframe file (the original video frame),
+  <Picture 2>, <Picture 3>, ... = the character pictures listed for that keyframe ("pictures", in order).
+
+What each keyframe must become is in its "sentence" (the user's own words): every listed person in <Picture 1>
+(counted from the left as they stand in THIS frame) is replaced by the person in the given picture; the
+orientation, pose, action, hand and palm gesture, expression, mouth, place and size in the picture, and who
+stands in front of / behind whom must stay exactly as in <Picture 1>; the faces, hair and clothes come from the
+pictures.
+
+Write each prompt in English, in the structure of the official H3 Image prompt enhancer:
+  1. Define every character picture as a Subject: "The <looks> in <Picture n> is <Subject k>." - describe the
+     character positively and completely from the picture and the "description" given (face, hair, every garment,
+     shoes; what the hands carry or do not carry, e.g. bare hands). Never describe the clothes of the people in
+     <Picture 1>.
+  2. Define <Picture 1> as a Subject too and say it is partially preserved: background, floor, lighting, camera,
+     framing and crop, and the spatial layout of the people (places, spacing, sizes, who is in front, overlaps)
+     are retained while the people are replaced.
+  3. For every replaced person: which Subject goes to which place, and EXACTLY what the person there does,
+     read from <Picture 1>: body and head orientation, pose, action, each arm, each hand (fist, open palm,
+     pointing, on the hip, touching someone), legs and stance, expression, mouth, front/back and overlap, and
+     where the frame cuts the body (say so plainly when the feet are outside the picture and do not mention
+     footwear for that person then).
+  4. People not to be replaced: say they stay exactly as in <Picture 1>.
+
+Answer with prompts.json: {"1": "prompt for keyframe 1", "2": "...", ...} - one entry per keyframe.
+"""
 
 
 def plan_length(n_frames: int) -> int:

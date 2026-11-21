@@ -31,11 +31,15 @@ def test_parse_redo():
         K.parse_redo("9", 5)
 
 
-def test_pe_caption():
-    assert K.pe_caption('{"expanded_caption": "A woman \\"Eva\\" stands.", "aspect_ratio": "16:9"}') == 'A woman "Eva" stands.'
-    assert K.pe_caption('<think>plan {x}</think>\n{"expanded_caption": "B", "aspect_ratio": "1:1"}') == "B"
-    assert K.pe_caption('{"expanded_caption": "C, broken json", "aspect_ratio": 16:9}') == "C, broken json"
-    assert K.pe_caption("no json here") is None and K.pe_caption('{"expanded_caption": ""}') is None
+def test_parse_prompts():
+    assert K.parse_prompts("", 5) == {}
+    assert K.parse_prompts('{"1": "A", "2": " B ", "3": ""}', 5) == {1: "A", 2: "B"}
+    assert K.parse_prompts('{"prompts": ["A", "B"]}', 5) == {1: "A", 2: "B"}
+    assert K.parse_prompts('{"keyframe 2": "B"}', 5) == {2: "B"}
+    assert K.parse_prompts("#1: first line\ngoes on\n#2: second", 5) == {1: "first line goes on", 2: "second"}
+    with pytest.raises(K.KeyframeError):
+        K.parse_prompts('{"7": "x"}', 5)
+    assert "<Picture 1>" in K.AI_README and "prompts.json" in K.AI_README
 
 
 def test_h3_size():

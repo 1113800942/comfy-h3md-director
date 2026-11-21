@@ -662,14 +662,84 @@ class H3MDKeyframeAssemble:
         return {"ui": {"text": [msg]}, "result": (to_tensor(sheet), plan_s, zip_path)}
 
 
+class H3MDKeyframeExport:
+    """0.5.91 (user 21:56): the keyframes, the character pictures and what each keyframe must become (the user's plain
+    sentence) as a package for an AI that writes the H3 Image prompts (the slow part the local enhancer did)."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "job": ("H3MD_KEYFRAME_JOB", {"tooltip": "From H3MD Keyframe 1: Prepare"}),
+                "pictures": ("IMAGE", {"tooltip": "Prepare's pictures output"}),
+                "name": ("STRING", {"default": "multiswap", "tooltip":
+                                    "Package name: input/H3MD_keyframes/<name>_ai/ and <name>_ai.zip in it. 包名。"}),
+            }
+        }
+
+    INPUT_IS_LIST = True
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("package",)
+    OUTPUT_TOOLTIPS = ("The package zip: give it to the AI, paste its answer into Recast's prompts.",)
+    OUTPUT_NODE = True
+    FUNCTION = "export"
+    CATEGORY = CATEGORY
+    DESCRIPTION = ("Multi-person swap keyframes, step 1a (0.5.91): writes the keyframes, the character pictures and "
+                   "what each keyframe must become as a package for the AI that writes the prompts. Give the zip to "
+                   "the AI, paste its prompts.json into H3MD Keyframe 1b: Recast.")
+
+    def export(self, job, pictures, name):
+        import zipfile
+        import numpy as np
+        import folder_paths
+        from PIL import Image
+        one = lambda v: v[0] if isinstance(v, list) else v
+        job, name = one(job), _plan_io().safe_name(str(one(name)) or "multiswap", "multiswap")
+        pics = [p[b:b + 1] for p in pictures for b in range(int(p.shape[0]))]
+        d = os.path.join(folder_paths.get_input_directory(), KF_SUBDIR, name + "_ai")
+        os.makedirs(d, exist_ok=True)
+        todo = [m for m in job["moments"] if m["items"]]
+        req, saved, n = [], {}, 0
+        for k, m in enumerate(todo, 1):
+            refs = pics[n:n + len(m["items"])]
+            n += len(m["items"])
+            kf = f"keyframe_{k}.png"
+            Image.fromarray(np.ascontiguousarray(job["frames"][m["at"]])).save(os.path.join(d, kf))
+            files = []
+            for it, r in zip(m["items"], refs):
+                f = f"character_picture_{it['picture']}.png"
+                if it["picture"] not in saved:
+                    Image.fromarray(to_u8(r)).save(os.path.join(d, f))
+                    saved[it["picture"]] = f
+                files.append(f)
+            n_people = max(int(it.get("n") or 0) for it in m["items"])
+            req.append({"keyframe": k, "at_seconds": round(m["at"], 2), "picture_1": kf,
+                        "pictures": [{"picture": j + 2, "file": f, "description": it.get("desc", ""),
+                                      "replaces_person_from_left": it["rank"]}
+                                     for j, (it, f) in enumerate(zip(m["items"], files))],
+                        "people_in_frame": n_people,
+                        "sentence": K.swap_sentence([(it["rank"], j + 2) for j, it in enumerate(m["items"])],
+                                                    n_people)})
+        with open(os.path.join(d, "request.json"), "w", encoding="utf-8") as fh:
+            json.dump({"video": job.get("video"), "keyframes": req}, fh, ensure_ascii=False, indent=1)
+        with open(os.path.join(d, "README_for_AI.md"), "w", encoding="utf-8") as fh:
+            fh.write(K.AI_README)
+        zp = os.path.join(d, name + "_ai.zip")
+        with zipfile.ZipFile(zp, "w", zipfile.ZIP_DEFLATED) as z:
+            for f in sorted(os.listdir(d)):
+                if f.endswith((".png", ".json", ".md")):
+                    z.write(os.path.join(d, f), f)
+        msg = (f"{len(todo)} keyframes -> {zp}\nGive this zip to the AI; paste its prompts.json into Recast. "
+               f"把这个 zip 交给 AI，把它回的 prompts.json 粘贴到 Recast 的 prompts 里。")
+        LOG.info("%s %s", TAG, msg)
+        return {"ui": {"text": [msg]}, "result": (zp,)}
+
+
 class H3MDKeyframeRecast:
-    """0.5.91: the user's own H3 Image AIO v1.01 chain, moved into H3MD (user 18:31).  Per keyframe: one plain sentence
-    (the user's wording: who stands at which place from the left becomes which picture; keep pose, expression, mouth,
-    place, size, occlusion; keep the new people's faces, hair, clothes) -> the official MiniMax H3 Image prompt
-    enhancer (TextGenerateV2, its system and task prompts, thinking on) writes the prompt, the sentence itself when it
-    gives no caption -> one MiniMax H3 Image edit of the whole keyframe (<Picture 1> = the keyframe, 2... = the new
-    people), the tuned 6-step sigmas.  All keyframes go through the enhancer first, then all edits (each model loaded
-    once).  Test 18:27 (the user's workflow, 0 s keyframe): all three swapped right."""
+    """0.5.91: one MiniMax H3 Image edit per keyframe (<Picture 1> = the keyframe, 2... = the new people, the H3 Image
+    AIO v1.01 model chain, tuned 6-step sigmas), with the prompts an AI wrote from the Export package (user 21:56:
+    the reading of the pictures - the slow local enhancer - is done once, by the AI).  'redo' makes single keyframes
+    again (another seed); the others come from the last run of the video."""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -682,10 +752,9 @@ class H3MDKeyframeRecast:
                 "vae": ("VAE", {"tooltip": "minimax_h3_image_vae"}),
                 "sampler": ("SAMPLER", {"tooltip": "euler"}),
                 "sigmas": ("SIGMAS", {"tooltip": "the tuned exact 6-step PDD sigmas"}),
-                "pe_clip": ("CLIP", {"tooltip": "The prompt enhancer: qwen3.5_9b (type minimax)"}),
-                "pe_system_prompt": ("STRING", {"forceInput": True, "tooltip": "The enhancer system prompt"}),
-                "pe_task_prompt": ("STRING", {"forceInput": True,
-                                              "tooltip": "The enhancer task prompt (with {input text})"}),
+                "prompts": ("STRING", {"multiline": True, "default": "", "tooltip":
+                                       "The AI's prompts.json (or lines '#1: ...'), one prompt per keyframe. "
+                                       "粘贴 AI 回的 prompts.json。"}),
                 "megapixels": ("FLOAT", {"default": K.EDIT_MP, "min": 0.5, "max": 8.0, "step": 0.1,
                                          "tooltip": "Edit canvas, keyframe aspect, multiple of 32 (AIO: 4.0)"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "control_after_generate": True}),
@@ -702,37 +771,25 @@ class H3MDKeyframeRecast:
     OUTPUT_IS_LIST = (True, False, False)
     OUTPUT_TOOLTIPS = ("The finished keyframes, one per swap moment (whole frames).",
                        "The job with the keyframes (connect to Assemble).",
-                       "Per keyframe: the sentence, the enhancer's prompt, times.")
+                       "Per keyframe (#1, #2 ...): the prompt and the time.")
     FUNCTION = "recast"
     CATEGORY = CATEGORY
-    DESCRIPTION = ("Multi-person swap keyframes, step 1b (0.5.91): the H3 Image AIO chain - a plain sentence, the "
-                   "official H3 Image prompt enhancer, one H3 Image edit per keyframe. Then H3MD Keyframe 2: Assemble.")
+    DESCRIPTION = ("Multi-person swap keyframes, step 1b (0.5.91): one H3 Image edit per keyframe with the prompts "
+                   "the AI wrote from H3MD Keyframe 1a: Export. Then H3MD Keyframe 2: Assemble.")
 
-    PE_MAX = 8196
-    PE_SAMPLING = {"sampling_mode": "on", "temperature": 1.0, "top_k": 20, "top_p": 0.95, "min_p": 0.0,
-                   "repetition_penalty": 1.0, "presence_penalty": 0.0}
-
-    def recast(self, job, pictures, model, clip, vae, sampler, sigmas, pe_clip, pe_system_prompt, pe_task_prompt,
-               megapixels, seed, redo=""):
+    def recast(self, job, pictures, model, clip, vae, sampler, sigmas, prompts, megapixels, seed, redo=""):
         import time
         import numpy as np
         import comfy.utils
         import nodes
+        import folder_paths
         from PIL import Image
         from comfy_extras.nodes_minimax_h3 import MiniMaxH3ImageConditioning
         from comfy_extras.nodes_custom_sampler import BasicGuider, RandomNoise, SamplerCustomAdvanced
-        from comfy_extras.nodes_textgen import TextGenerateV2
         one = lambda v: v[0] if isinstance(v, list) else v
-        job, model, clip, vae, sampler, sigmas, pe_clip = (one(job), one(model), one(clip), one(vae), one(sampler),
-                                                           one(sigmas), one(pe_clip))
-        system, task = str(one(pe_system_prompt)), str(one(pe_task_prompt))
+        job, model, clip, vae, sampler, sigmas = (one(job), one(model), one(clip), one(vae), one(sampler),
+                                                  one(sigmas))
         mp, seed = float(one(megapixels)), int(one(seed))
-        import folder_paths
-        cache = os.path.join(folder_paths.get_input_directory(), KF_SUBDIR, "_recast",
-                             os.path.splitext(os.path.basename(str(job.get("video_abs") or job.get("video"))))[0])
-        if "{input text}" not in task:
-            raise K.KeyframeError(f"{TAG} pe_task_prompt has no '{{input text}}': connect the enhancer task prompt. "
-                                  "增强器任务提示词里没有 {input text}。")
         pics = [p[b:b + 1] for p in pictures for b in range(int(p.shape[0]))]
         need = sum(len(m["items"]) for m in job["moments"])
         if len(pics) != need:
@@ -742,41 +799,30 @@ class H3MDKeyframeRecast:
         gw, gh = K.h3_size(W, H, mp=mp)
         todo = [m for m in job["moments"] if m["items"]]
         sel = K.parse_redo(one(redo), len(todo))
+        given = K.parse_prompts(one(prompts), len(todo))
+        cache = os.path.join(folder_paths.get_input_directory(), KF_SUBDIR, "_recast",
+                             os.path.splitext(os.path.basename(str(job.get("video_abs") or job.get("video"))))[0])
         kept = {}                       # keyframe number -> image from the last run (only the chosen ones are redone)
         if sel:
             for k, m in enumerate(todo, 1):
                 f = os.path.join(cache, f"kf_{int(round(m['at'] * K.FPS)):04d}.png")
                 if k not in sel and os.path.isfile(f):
                     kept[k] = np.asarray(Image.open(f).convert("RGB").resize((W, H), Image.LANCZOS))
-        pbar = comfy.utils.ProgressBar(max(1, 2 * (len(todo) - len(kept))))
-        lines, t_all, work, n = [], time.time(), [], 0
-        # 1 the enhancer, every keyframe to make (empty answer: once more with the next seed)
+        missing = [k for k in range(1, len(todo) + 1) if k not in kept and k not in given]
+        if missing:
+            raise K.KeyframeError(f"{TAG} no prompt for keyframe(s) {missing}: run H3MD Keyframe 1a: Export, give the "
+                                  f"package to the AI and paste its prompts.json into 'prompts'. 第 {missing} 张没有提示词："
+                                  "先用 Export 导出，交给 AI，把回来的 prompts.json 粘贴到 prompts。")
+        pbar = comfy.utils.ProgressBar(max(1, len(todo) - len(kept)))
+        lines, done, made, out_imgs, n, t_all = [], {}, {}, [], 0, time.time()
         for k, m in enumerate(todo, 1):
             refs = pics[n:n + len(m["items"])]
             n += len(m["items"])
             if k in kept:
                 continue
             frame = to_tensor(np.ascontiguousarray(job["frames"][m["at"]]))
-            n_people = max(int(it.get("n") or 0) for it in m["items"])
-            sentence = K.swap_sentence([(it["rank"], j + 2) for j, it in enumerate(m["items"])], n_people)
+            prompt = given[k]
             t0 = time.time()
-            tries = 0
-            for tries in (1, 2):
-                pe = TextGenerateV2.execute(clip=pe_clip, prompt=task.replace("{input text}", sentence),
-                                            max_length=self.PE_MAX,
-                                            sampling_mode=dict(self.PE_SAMPLING, seed=seed + tries - 1),
-                                            thinking=True, use_default_template=True, mtp="off", system_prompt=system,
-                                            images={f"image{j + 1}": im for j, im in enumerate([frame] + refs)})
-                caption = K.pe_caption(pe.result[0])
-                if caption:
-                    break
-            work.append((k, m, frame, refs, sentence, caption, time.time() - t0, str(pe.result[0])[:300], tries))
-            pbar.update(1)
-        # 2 one H3 Image edit per keyframe
-        done, made = {}, {}
-        for k, m, frame, refs, sentence, caption, t_pe, raw, tries in work:
-            t0 = time.time()
-            prompt = caption or sentence
             enc = MiniMaxH3ImageConditioning.execute(clip=clip, prompt=prompt, width=gw, height=gh, vae=vae,
                                                      images={f"image_{j}": im for j, im in enumerate([frame] + refs)})
             guider = BasicGuider.execute(model=model, conditioning=enc.result[0]).result[0]
@@ -788,17 +834,12 @@ class H3MDKeyframeRecast:
             out = to_u8(img)
             if out.shape[1] != W or out.shape[0] != H:
                 out = np.asarray(Image.fromarray(out).resize((W, H), Image.LANCZOS))
-            lines.append(f"#{k} {m['at']:.2f} s: enhancer {t_pe:.1f} s"
-                         + (f" ({tries} tries)" if tries > 1 else "") + f", edit {time.time() - t0:.1f} s ({gw}x{gh})")
-            lines.append("  sentence: " + sentence)
-            lines.append("  prompt: " + (caption if caption else
-                                         f"ENHANCER GAVE NO CAPTION TWICE - the sentence used; CHECK THIS KEYFRAME, "
-                                         f"redo it with another seed. 增强器两次都没写出来，这张请换种子重做。 Its output: {raw!r}"))
+            lines.append(f"#{k} {m['at']:.2f} s: {time.time() - t0:.1f} s ({gw}x{gh})")
+            lines.append("  prompt: " + prompt)
             made[k] = out
             os.makedirs(cache, exist_ok=True)
             Image.fromarray(out).save(os.path.join(cache, f"kf_{int(round(m['at'] * K.FPS)):04d}.png"))
             pbar.update(1)
-        out_imgs = []
         for k, m in enumerate(todo, 1):
             out = made.get(k)
             if out is None:
@@ -811,13 +852,15 @@ class H3MDKeyframeRecast:
         report = "\n".join(lines)
         LOG.info("%s recast report:\n%s", TAG, report)
         job = dict(job, recast_frames=done,
-                   recast={"method": "H3 Image AIO chain: plain sentence, official enhancer, one edit", "seed": seed,
+                   recast={"method": "H3 Image, prompts written by an AI from the Export package", "seed": seed,
                            "report": report})
         return {"ui": {"text": [report]}, "result": (out_imgs, job, report)}
 
 
-NODE_CLASS_MAPPINGS = {"H3MDKeyframePrepare": H3MDKeyframePrepare, "H3MDKeyframeRecast": H3MDKeyframeRecast,
+NODE_CLASS_MAPPINGS = {"H3MDKeyframePrepare": H3MDKeyframePrepare, "H3MDKeyframeExport": H3MDKeyframeExport,
+                       "H3MDKeyframeRecast": H3MDKeyframeRecast,
                        "H3MDKeyframeAssemble": H3MDKeyframeAssemble}
 NODE_DISPLAY_NAME_MAPPINGS = {"H3MDKeyframePrepare": "H3MD Keyframe 1: Prepare 准备关键帧 0.5.91",
-                              "H3MDKeyframeRecast": "H3MD Keyframe 1b: Recast H3 Image 换人 0.5.91",
+                              "H3MDKeyframeExport": "H3MD Keyframe 1a: Export 导出给 AI 0.5.91",
+                              "H3MDKeyframeRecast": "H3MD Keyframe 1b: Recast 按 AI 提示词出图 0.5.91",
                               "H3MDKeyframeAssemble": "H3MD Keyframe 2: Assemble 打包计划 0.5.91"}

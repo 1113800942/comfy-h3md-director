@@ -93,82 +93,54 @@ def test_prepare_assemble(clip):
 
 
 
-def test_recast_h3aio(clip, monkeypatch):
-    """0.5.91: the H3 Image AIO chain - plain sentence (places from the tracker) -> enhancer -> one edit per keyframe"""
+
+def _fake_h3(monkeypatch, value):
     from types import SimpleNamespace as NS
-    import comfy_extras.nodes_textgen as TG
     import comfy_extras.nodes_minimax_h3 as MH
     import comfy_extras.nodes_custom_sampler as CS
     import nodes as CN
+    seen = []
+
+    def fake_cond(**kw):
+        seen.append(kw)
+        return NS(result=("COND", {"samples": None}))
+
+    monkeypatch.setattr(MH.MiniMaxH3ImageConditioning, "execute", staticmethod(fake_cond))
+    monkeypatch.setattr(CS.BasicGuider, "execute", staticmethod(lambda **kw: NS(result=("G",))))
+    monkeypatch.setattr(CS.RandomNoise, "execute", staticmethod(lambda **kw: NS(result=("N",))))
+    monkeypatch.setattr(CS.SamplerCustomAdvanced, "execute", staticmethod(lambda **kw: NS(result=("LAT", None))))
+    monkeypatch.setattr(CN.VAEDecode, "decode", lambda self, vae, s: (torch.full((1, 1504, 2624, 3), value),))
+    return seen
+
+
+def test_export_then_recast(clip, monkeypatch):
+    """0.5.91 (user 21:56): Export writes the package for the AI; Recast makes the pictures from its prompts;
+    'redo' makes single keyframes again and keeps the others"""
+    inp, out = clip
     pic = torch.rand(1, 1200, 1000, 3)
     pics, job, sheet, info = N.H3MDKeyframePrepare().prepare(
         "clips/src.mp4", "图1换左二", "a man with short red hair, yellow coat", "", 5.0, 0.4, 8, picture_1=pic)["result"]
     todo = [m for m in job["moments"] if m["items"]]
-    asked, prompts, order = [], [], []
-
-    def fake_pe(**kw):
-        order.append("pe")
-        asked.append(kw["prompt"])
-        assert kw["thinking"] is True and kw["mtp"] == "off" and kw["system_prompt"] == "SYS" and len(kw["images"]) == 2
-        return NS(result=('{"expanded_caption": "CAP %d", "aspect_ratio": "16:9"}' % len(asked),))
-
-    def fake_cond(**kw):
-        order.append("edit")
-        prompts.append(kw["prompt"])
-        assert list(kw["images"]) == ["image_0", "image_1"] and (kw["width"], kw["height"]) == (2624, 1504)
-        return NS(result=("COND", {"samples": None}))
-
-    monkeypatch.setattr(TG.TextGenerateV2, "execute", staticmethod(fake_pe))
-    monkeypatch.setattr(MH.MiniMaxH3ImageConditioning, "execute", staticmethod(fake_cond))
-    monkeypatch.setattr(CS.BasicGuider, "execute", staticmethod(lambda **kw: NS(result=("G",))))
-    monkeypatch.setattr(CS.RandomNoise, "execute", staticmethod(lambda **kw: NS(result=("N",))))
-    monkeypatch.setattr(CS.SamplerCustomAdvanced, "execute", staticmethod(lambda **kw: NS(result=("LAT", None))))
-    monkeypatch.setattr(CN.VAEDecode, "decode", lambda self, vae, s: (torch.rand(1, 1536, 2688, 3),))
-    imgs, job2, report = N.H3MDKeyframeRecast().recast(
-        [job], pics, [None], [None], [None], [None], [None], [None], ["SYS"], ["TASK: {input text}"], [4.0],
-        [7])["result"]
-    assert order == ["pe"] * len(todo) + ["edit"] * len(todo)            # enhancer for all first, then the edits
-    for m, a in zip(todo, asked):
-        r = 2 if m["at"] < 5.0 else 1
-        assert a.startswith(f"TASK: 把图1里从左数第{r}个人替换成图2里的人，图1里其他的人保持不变，")
-    assert prompts == [f"CAP {k + 1}" for k in range(len(todo))]
-    assert len(imgs) == len(todo) and imgs[0].shape[1:3] == (960, 1664) and "seed 7" in report
-
-
-def test_recast_retry_and_redo(clip, monkeypatch):
-    """an empty enhancer answer is asked once more with the next seed; 'redo' makes only the chosen keyframes again
-    and takes the others from the last run of this video"""
-    from types import SimpleNamespace as NS
-    import comfy_extras.nodes_textgen as TG
-    import comfy_extras.nodes_minimax_h3 as MH
-    import comfy_extras.nodes_custom_sampler as CS
-    import nodes as CN
-    pic = torch.rand(1, 1200, 1000, 3)
-    pics, job, sheet, info = N.H3MDKeyframePrepare().prepare(
-        "clips/src.mp4", "图1换左二", "a man", "", 5.0, 0.4, 8, picture_1=pic)["result"]
-    todo = [m for m in job["moments"] if m["items"]]
-    seeds, edits = [], []
-
-    def fake_pe(**kw):
-        seeds.append(kw["sampling_mode"]["seed"])
-        return NS(result=("" if len(seeds) == 1 else '{"expanded_caption": "CAP", "aspect_ratio": "16:9"}',))
-
-    def fake_cond(**kw):
-        edits.append(kw["prompt"])
-        return NS(result=("COND", {"samples": None}))
-
-    monkeypatch.setattr(TG.TextGenerateV2, "execute", staticmethod(fake_pe))
-    monkeypatch.setattr(MH.MiniMaxH3ImageConditioning, "execute", staticmethod(fake_cond))
-    monkeypatch.setattr(CS.BasicGuider, "execute", staticmethod(lambda **kw: NS(result=("G",))))
-    monkeypatch.setattr(CS.RandomNoise, "execute", staticmethod(lambda **kw: NS(result=("N",))))
-    monkeypatch.setattr(CS.SamplerCustomAdvanced, "execute", staticmethod(lambda **kw: NS(result=("LAT", None))))
-    monkeypatch.setattr(CN.VAEDecode, "decode", lambda self, vae, s: (torch.full((1, 1504, 2624, 3), 0.2),))
-    args = [[job], pics] + [[None]] * 6 + [["SYS"], ["TASK: {input text}"], [4.0]]
-    imgs, job2, report = N.H3MDKeyframeRecast().recast(*args, [7], [""])["result"]
-    assert seeds[:2] == [7, 8] and "(2 tries)" in report and edits == ["CAP"] * len(todo)
-    seeds.clear(); edits.clear()
-    monkeypatch.setattr(CN.VAEDecode, "decode", lambda self, vae, s: (torch.full((1, 1504, 2624, 3), 0.8),))
-    imgs2, job3, report2 = N.H3MDKeyframeRecast().recast(*args, [9], ["2"])["result"]
-    assert len(edits) == 1 and len(imgs2) == len(todo) and "kept from the last run" in report2
+    (zp,) = N.H3MDKeyframeExport().export([job], pics, ["t5"])["result"]
+    with zipfile.ZipFile(zp) as z:
+        names = set(z.namelist())
+        req = json.loads(z.read("request.json").decode("utf-8"))
+    assert {"request.json", "README_for_AI.md", "character_picture_1.png"} <= names
+    assert {f"keyframe_{k}.png" for k in range(1, len(todo) + 1)} <= names
+    k1 = req["keyframes"][0]
+    assert k1["picture_1"] == "keyframe_1.png" and k1["pictures"][0]["picture"] == 2
+    assert k1["pictures"][0]["description"].startswith("a man") and k1["people_in_frame"] == 3
+    assert k1["sentence"].startswith("把图1里从左数第2个人替换成图2里的人，图1里其他的人保持不变，")
+    args = [[job], pics] + [[None]] * 5
+    with pytest.raises(N.K.KeyframeError):                     # no prompts yet: says to export and ask the AI
+        N.H3MDKeyframeRecast().recast(*args, [""], [4.0], [7], [""])
+    answer = json.dumps({str(k): f"P{k}" for k in range(1, len(todo) + 1)})
+    seen = _fake_h3(monkeypatch, 0.2)
+    imgs, job2, report = N.H3MDKeyframeRecast().recast(*args, [answer], [4.0], [7], [""])["result"]
+    assert [s["prompt"] for s in seen] == [f"P{k}" for k in range(1, len(todo) + 1)]
+    assert list(seen[0]["images"]) == ["image_0", "image_1"] and (seen[0]["width"], seen[0]["height"]) == (2624, 1504)
+    assert len(imgs) == len(todo) and imgs[0].shape[1:3] == (960, 1664) and "#1 " in report
+    seen = _fake_h3(monkeypatch, 0.8)
+    imgs2, job3, report2 = N.H3MDKeyframeRecast().recast(*args, ['{"2": "P2b"}'], [4.0], [9], ["2"])["result"]
+    assert [s["prompt"] for s in seen] == ["P2b"] and "kept from the last run" in report2
     assert abs(float(imgs2[0].mean()) - 0.2) < 0.02 and abs(float(imgs2[1].mean()) - 0.8) < 0.02
-    assert "1 of" in report2 and "(redo [2])" in report2
