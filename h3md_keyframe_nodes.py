@@ -1379,56 +1379,12 @@ class H3MDKeyframeRecast:
                 "result": (out_imgs, job, report, pages_tensor(cmp))}
 
 
-class H3MDKeyframeRecastQwen(H3MDKeyframeRecast):
-    """0.5.91 test (user 05:13 / 06:15): the same Recast with Qwen Image 2.1 edit (the user's 'Qwen2.1 image editor'
-    chain: qwen_image_2.1 int8 + 2-step LoRA + detailer + low-res slider, AuraFlow shift 1, qwen3-vl-8b, euler,
-    1.0 / 0.5 / 0) instead of H3 Image.  The prompts are written for Qwen Image by the AI with the skill
-    qwen-image-21-prompt (the rules of the official prompt enhancer): <image1> = the keyframe (canvas), <image2>... =
-    the new people, identity taken from the pictures, not described.  H3 Image prompts are refused (the first test
-    converted them and Qwen re-framed the shots)."""
-
-    METHOD = "Qwen Image 2.1 edit, prompts written by an AI for Qwen Image (official prompt-enhancer rules)"
-    CACHE_TAG = "_qwen"  # own folder: a redo never mixes in (or overwrites) the H3 Image keyframes
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        t = super().INPUT_TYPES()
-        req = dict(t["required"])
-        req["model"] = ("MODEL", {"tooltip": "Qwen Image 2.1 (+ 2-step / detailer / low-res slider LoRAs, AuraFlow 1)"})
-        req["clip"] = ("CLIP", {"tooltip": "qwen3-vl-8b (type qwen_image)"})
-        req["vae"] = ("VAE", {"tooltip": "qwen_image_2.1_vae"})
-        req["sigmas"] = ("SIGMAS", {"tooltip": "1.0, 0.5, 0 (2-step LoRA)"})
-        req["megapixels"] = ("FLOAT", {"default": 2.0, "min": 0.5, "max": 4.0, "step": 0.1,
-                                       "tooltip": "Edit canvas (the keyframe's size): Qwen Image 2.1 works at 1-2 MP"})
-        return dict(t, required=req)
-
-    def _edit(self, frame, refs, prompt, model, clip, vae, sampler, sigmas, seed, gw, gh):
-        import math
-        import nodes
-        from comfy_extras.nodes_qwen import TextEncodeQwenImage21
-        from comfy_extras.nodes_custom_sampler import SamplerCustom
-        if "<image1>" not in prompt:
-            raise K.KeyframeError(f"{TAG} this prompt is not written for Qwen Image (no <image1>): the answer must be "
-                                  "written with the skill qwen-image-21-prompt. 这条提示词不是给 Qwen 写的。")
-        res = int(round(math.sqrt(gw * gh) / 32) * 32)
-        enc = TextEncodeQwenImage21.execute(clip=clip, prompt=prompt, negative_prompt="", vae=vae, resolution=res,
-                                            images={f"image_{j + 1}": im for j, im in enumerate([frame] + refs)})
-        pos, neg, lat = enc.result
-        out = SamplerCustom.execute(model=model, add_noise=True, noise_seed=seed, cfg=1.0, positive=pos,
-                                    negative=neg, sampler=sampler, sigmas=sigmas, latent_image=lat)
-        img = nodes.VAEDecode().decode(vae, out.result[0])[0]
-        img = img.reshape(-1, img.shape[-3], img.shape[-2], img.shape[-1])[:1].clamp(0, 1)
-        return img, (int(img.shape[2]), int(img.shape[1]))
-
-
 NODE_CLASS_MAPPINGS = {"H3MDKeyframePrepare": H3MDKeyframePrepare, "H3MDKeyframeExport": H3MDKeyframeExport,
                        "H3MDKeyframeImport": H3MDKeyframeImport, "H3MDKeyframeRecast": H3MDKeyframeRecast,
-                       "H3MDKeyframeRecastQwen": H3MDKeyframeRecastQwen,
                        "H3MDKeyframeRedo": H3MDKeyframeRedo, "H3MDKeyframeAssemble": H3MDKeyframeAssemble}
 NODE_DISPLAY_NAME_MAPPINGS = {"H3MDKeyframePrepare": "H3MD Keyframe Prepare",
                               "H3MDKeyframeExport": "H3MD Keyframe Export",
                               "H3MDKeyframeImport": "H3MD Keyframe Import",
                               "H3MDKeyframeRecast": "H3MD Keyframe Recast",
-                              "H3MDKeyframeRecastQwen": "H3MD Keyframe Recast (Qwen Image, test)",
                               "H3MDKeyframeRedo": "H3MD Keyframe Redo",
                               "H3MDKeyframeAssemble": "H3MD Keyframe Assemble"}
