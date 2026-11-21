@@ -484,9 +484,13 @@ class Panel {
     const old = this.root.querySelector(".hint");
     if (!old) return;
     const h = hintText(W(this.node, "segments_to_run")?.value);
-    if (old.firstChild?.textContent !== "↑ " + h.t) old.replaceWith(this.hintEl(h));
+    let changed = false;
+    if (old.firstChild?.textContent !== "↑ " + h.t) { old.replaceWith(this.hintEl(h)); changed = true; }
     const sig = JSON.stringify(trialParts()) + (W(this.node, "segments_to_run")?.value || "");
-    if (sig !== this.trialSig) { this.trialSig = sig; this.root.querySelector(".trials")?.replaceWith(this.trialsEl()); }
+    if (sig !== this.trialSig) { this.trialSig = sig; this.root.querySelector(".trials")?.replaceWith(this.trialsEl()); changed = true; }
+    // 0.5.91 (user 15:18): after Import plan the trial buttons (试镜 1-4) arrive here, a second later - the panel grew
+    // but the node kept its old height, so the last LoRA rows hung out below it until another style was clicked
+    if (changed) this.fit();
   }
 
   render() {
@@ -505,15 +509,23 @@ class Panel {
   }
 
   // the node grows / shrinks with the LoRA tables (+ / ✕ rows), keeping its width
-  fit() {
+  fit(tries = 0) {
     requestAnimationFrame(() => {
       // content height (not scrollHeight: the root is stretched to the widget area, so it never shrinks)
       const last = this.root.lastElementChild, first = this.root.firstElementChild;
-      const need = last && first ? Math.ceil(last.offsetTop + last.offsetHeight - first.offsetTop) + 14 : 360;
-      if (!need || need === this.minH) return;
+      if (!last || !first || !last.offsetHeight) {      // not laid out yet (node off screen, panel just built)
+        if (tries < 20) setTimeout(() => this.fit(tries + 1), 150);
+        return;
+      }
+      const need = Math.ceil(last.offsetTop + last.offsetHeight - first.offsetTop) + 14;
+      const grew = need !== this.minH;
       this.minH = need;
       const size = this.node.computeSize?.();
-      if (size && this.node.setSize) this.node.setSize([this.node.size[0], size[1]]);
+      // the content changed, or the node is shorter than its content (a plan import / a restored layout changed it
+      // behind our back); a node the user made taller is left alone
+      if (size && this.node.setSize && (grew || (this.node.size?.[1] || 0) < size[1] - 1)) {
+        this.node.setSize([this.node.size[0], size[1]]);
+      }
       this.node.setDirtyCanvas?.(true, true);
     });
   }
