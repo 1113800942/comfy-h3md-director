@@ -727,6 +727,8 @@ class H3MDKeyframePrepare:
             _TRACK_CACHE.clear()
             _TRACK_CACHE[tkey] = (times, small, per_frame, reid_joins, reid_unsure)
         frames = K.report(per_frame, times)
+        frames, clean_notes = K.clean_frames(frames)        # 0.5.91: double / wide / hidden boxes
+        LOG.info("%s %s", TAG, clean_notes[0])
         people = K.cast(frames)
         order = [a["id"] for a in people]
         if not mp:

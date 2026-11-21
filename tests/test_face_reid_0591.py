@@ -96,3 +96,45 @@ def test_split_by_face_number_passed_on_at_a_crossing():
     assert new[29][nick] == R and new[25][nick] == R             # the stray face did not cut track 4
     assert all(set(fr) == {howie, nick} for fr in new)
     assert len(notes) == 2
+
+
+def test_odd_angle_cluster_on_one_track_is_no_new_person():
+    """_012 (24.2-26.5 s): the lead singer turning away gave faces that formed a 6th 'person' seen on his track only -
+    no cut there, he stays himself"""
+    import numpy as np
+    rng = np.random.default_rng(3)
+    per_frame = [{4: [0.3, 0.1, 0.6, 0.95], 1: [0.7, 0.1, 0.9, 0.95]} for _ in range(40)]
+    obs = []
+    for i in range(40):
+        obs.append((i, 4, _emb(5 if 15 <= i < 25 else 4, rng)))     # 5 = odd angle, only on track 4
+        obs.append((i, 1, _emb(1, rng)))
+    labels, cents = K.face_clusters([o[2] for o in obs])
+    new, person_of, notes = K.split_by_face(per_frame, obs, labels)
+    lead = [q for q, v in new[0].items() if v == [0.3, 0.1, 0.6, 0.95]][0]
+    assert all(fr.get(lead) == [0.3, 0.1, 0.6, 0.95] for fr in new) and not notes
+
+
+def test_same_box_twice_is_one_detection():
+    """_012 (8.5 s): one person twice with the same box after the split - one copy, no phantom 'kept' person"""
+    import numpy as np
+    rng = np.random.default_rng(4)
+    B = [0.3, 0.1, 0.6, 0.95]
+    per_frame = [{4: B, 9: list(B)} for _ in range(10)]
+    obs = [(i, 4, _emb(4, rng)) for i in range(10)] + [(i, 9, _emb(4, rng)) for i in range(10)]
+    labels, cents = K.face_clusters([o[2] for o in obs])
+    new, person_of, notes = K.split_by_face(per_frame, obs, labels)
+    assert all(len(fr) == 1 for fr in new)
+
+
+def test_clean_frames_wide_and_hidden_boxes():
+    fr = []
+    for i in range(20):
+        who = [[1, [0.30, 0.10, 0.50, 0.95]], [2, [0.60, 0.20, 0.75, 0.90]]]
+        if i == 10:
+            who[1] = [2, [0.20, 0.20, 0.80, 0.90]]                 # spans two people
+        if i == 12:
+            who.append([3, [0.35, 0.30, 0.42, 0.50]])               # hidden behind 1
+        fr.append({"at": i / 6.0, "who": who})
+    out, notes = K.clean_frames(fr)
+    assert out[10].get("bad") == [2] and K.score(out, 10, {1, 2}) is None
+    assert all(w[0] != 3 for w in out[12]["who"])

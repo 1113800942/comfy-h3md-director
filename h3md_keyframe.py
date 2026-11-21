@@ -336,6 +336,19 @@ def split_by_face(per_frame, obs, labels, keep_run=FACE_KEEP_RUN):
     for (i, pid, _), lab in zip(obs, labels):
         if lab >= 0:
             by_id.setdefault(pid, []).append((i, lab))
+    # 0.5.91 (_012, 24.2-26.5 s): the lead singer turning away gave a 6th "person" whose faces all came from his own
+    # track - a cluster seen on one track only, on a track that is mostly someone else, is that someone at an odd
+    # angle: no cut
+    tracks_of = {}
+    for pid, seq in by_id.items():
+        for _, lab in seq:
+            tracks_of.setdefault(lab, set()).add(pid)
+    for pid, seq in by_id.items():
+        counts = {}
+        for _, lab in seq:
+            counts[lab] = counts.get(lab, 0) + 1
+        main = max(counts, key=counts.get)
+        by_id[pid] = [(i, main if (lab != main and tracks_of.get(lab) == {pid}) else lab) for i, lab in seq]
     pieces = {}                                           # id -> [(from frame, to frame, person)]
     notes = []
     for pid, seq in by_id.items():
@@ -375,8 +388,10 @@ def split_by_face(per_frame, obs, labels, keep_run=FACE_KEEP_RUN):
                 if a <= i <= z:
                     nid = FACE_ID + lab
                     break
-            if nid in row:                                # one person twice in a frame: keep them apart
-                nid = SPLIT_ID + pid
+            if nid in row:                                # one person twice in a frame
+                if iou(row[nid], b) >= DUP_IOU:           # 0.5.91 (_012, 8.5 s): the same box twice - one copy
+                    continue
+                nid = SPLIT_ID + pid                      # else keep them apart
             row[nid] = b
             if nid >= FACE_ID and nid < SPLIT_ID:
                 person_of[nid] = nid - FACE_ID
@@ -385,6 +400,44 @@ def split_by_face(per_frame, obs, labels, keep_run=FACE_KEEP_RUN):
 
 
 FACE_ID, SPLIT_ID = 1000, 5000   # ids given by split_by_face (tracker ids are small numbers)
+DUP_IOU = 0.7                    # two boxes of one person overlapping this much are one detection
+WIDE_BOX = 1.6                   # 0.5.91: a box this much wider than the person's usual box spans two people
+HIDDEN_COVER, HIDDEN_AREA = 0.8, 0.35   # a box this much inside a bigger one (and this small) = a hidden person
+
+
+def clean_frames(frames):
+    """0.5.91 (_012 keyframes 4-6, 8, 15): mark what the tracker got wrong, before any keyframe is chosen.
+    - a box much wider than that person's usual box (WIDE_BOX x the median width) spans two people (a hidden man and
+      the one in front): the frame gets "bad": [id] and is never a keyframe (score() is None);
+    - a small box almost entirely inside another person's bigger box is someone hidden behind him: he does not count
+      as seen in that frame (dropped from "who").
+    -> the same frames, changed in place, and notes"""
+    import statistics
+    widths = {}
+    for f in frames:
+        for pid, b in f.get("who") or ():
+            widths.setdefault(pid, []).append(b[2] - b[0])
+    med = {pid: statistics.median(ws) for pid, ws in widths.items() if len(ws) >= 3}
+    n_wide = n_hidden = 0
+    for f in frames:
+        who = f.get("who") or []
+        keep = []
+        for pid, b in who:
+            area = (b[2] - b[0]) * (b[3] - b[1])
+            hidden = any(covered(b, c) >= HIDDEN_COVER and area < HIDDEN_AREA * (c[2] - c[0]) * (c[3] - c[1])
+                         for q, c in who if q != pid)
+            if hidden:
+                n_hidden += 1
+                continue
+            keep.append([pid, b])
+        f["who"] = keep
+        bad = [pid for pid, b in keep if pid in med and (b[2] - b[0]) > WIDE_BOX * med[pid]
+               and any(iou(b, c) > CLEAR_IOU for q, c in keep if q != pid)]
+        if bad:
+            f["bad"] = bad
+            n_wide += 1
+    return frames, [f"{n_wide} frame(s) with a box spanning two people (never keyframes), {n_hidden} hidden "
+                    "person box(es) not counted as seen"]
 
 
 def reid_merge(per_frame, looks=None, times=None, keep=None):
@@ -630,6 +683,8 @@ def cut_at_bottom(box):
 def score(frames, i, chosen_ids):
     """(chosen people seen, smallest gap of a chosen person to anybody else (capped), -motion, mean height) or None
     (nobody chosen seen, or a close-up)"""
+    if frames[i].get("bad"):              # 0.5.91: a box spanning two people (clean_frames)
+        return None
     vis = visible(frames[i])
     ch = [w for w in vis if w[0] in chosen_ids]
     if not ch or closeup(frames[i], chosen_ids):
@@ -878,9 +933,12 @@ def kf_people(frames, i, chosen_ids):
 COVER_S = 3.0             # 0.5.91 (user 03:31): every replaced person on screen has a keyframe at least every this
                           # many seconds - the Director's parts depend on the GPU it runs on (token budget), and each
                           # part takes the look of a person only from its own keyframes
+COVER_APART = 0.75        # ... and an added keyframe is at least this far from the others (no near copies)
+COVER_MIN_S = 0.5         # ... when he is seen for at least this long in that stretch (a short
+                          # appearance in a part still gets his look from a keyframe)
 
 
-def ensure_cover(frames, moments, chosen_ids, duration, every=COVER_S, min_s=CAST_MIN_S):
+def ensure_cover(frames, moments, chosen_ids, duration, every=COVER_S, min_s=COVER_MIN_S):
     """0.5.91: for every replaced person, every stretch of `every` seconds in which he is seen clearly for min_s or
     more holds a keyframe that shows him (a part of any length >= every then has one).  Greedy from the start: the
     first such stretch without one gets the frame in its first half where he is seen best (most replaced people,
@@ -905,7 +963,7 @@ def ensure_cover(frames, moments, chosen_ids, duration, every=COVER_S, min_s=CAS
                 t_next = max(cov) + half
             else:
                 cand = [i for u, i in seen if t <= u <= t + half and score(frames, i, chosen_ids) is not None
-                        and all(abs(frames[i]["at"] - frames[m[0]]["at"]) >= 0.25 for m in out)]
+                        and all(abs(frames[i]["at"] - frames[m[0]]["at"]) >= COVER_APART for m in out)]
                 if not cand:
                     warns.append(f"a replaced person seen around {t:.1f} s has no frame clear enough for a keyframe "
                                  f"there: Remake may give him another character's look. {t:.1f} 秒附近有一个要换的人"
