@@ -3,8 +3,8 @@
 The nodes in h3md_keyframe_nodes.py wrap this file:
   1 Prepare: who is who (numbered left to right at the start), which moments become keyframes, where every person to
     recast stands at every moment.
-  1b Recast (0.5.91): one H3 Image edit per keyframe, the prompt filled in here in the official H3 Image
-    enhancer's structure (who at which place becomes which picture, full outfit, every kept detail).
+  1b Recast (0.5.91): the user's H3 Image AIO chain - one plain sentence (who at which place becomes which
+    picture), the official H3 Image prompt enhancer writes the prompt, one H3 Image edit redraws the keyframe.
   2 Assemble: the keyframes are saved and the Remake plan is written.
 
 Method = skill 12d, line A, measured in demo5 (2026-11-16: our own 26 s five-person clip, 4 keyframes, Remake swapped
@@ -23,7 +23,7 @@ LOOK_S = 3.0              # the numbering moment is searched in the first second
 CLEAR_IOU = 0.2
 COVERED = 0.3
 SPACING = 0.7            # keyframes are picked in (prev + 0.7 * max_gap, prev + max_gap]: as few as the gap allows
-EDIT_MP = 2.0             # 0.5.91: H3 Image edit canvas (megapixels), keyframe aspect, multiple of 32 (keyframes are ~1.6 MP)
+EDIT_MP = 4.0             # 0.5.91: H3 Image canvas (megapixels), as the user's AIO v1.01 (4.0, multiple 32)
 
 CN = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
 ORDINAL = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"]
@@ -732,27 +732,13 @@ def parse_people(text: str) -> list:
     return [re.sub(r"^(?:左|left|L)?\s*\d+\s*[:：.、)]\s*", "", l, flags=re.I).rstrip("。.") for l in lines]
 
 
-# ----------------------------------------------- 0.5.91 Recast: H3 Image, the prompt filled in by H3MD (21:52)
-# Built line by line on what the official H3 Image enhancer wrote in the user's run that came out right (18:27):
-# the pictures of the new people as Subjects; <Picture 1> itself as a Subject whose background and ORIGINAL SPATIAL
-# LAYOUT are retained while the people are replaced; one sentence on how the people stand together; each new person
-# integrated into "the position of the person originally there", adopting that person's stance - with what that
-# person does read from the keyframe.  The reader (qwen3.5 9b, no thinking) reads per person the user's keep list
-# (21:32: orientation, pose, action, palm gesture, expression, mouth, place and size, front/back and overlap) and one
-# line on the group (spacing, who is in front, crop).  Clothes words are dropped from what it reads (it wrote
-# "hands in long gloves", 21:24).  No size percentages, no "shoes outside the image" (contradicted the description,
-# the picture widened, 19:55).
-H3_DEFINE = "The person in <Picture {img}> is <Subject {s}>: {desc}."
-H3_SOURCE = "The group of people in <Picture 1> is <Subject {s}>."
-H3_SCENE = "The target image keeps <Picture 1> exactly: {group}."
-H3_KEEP = ("<Subject {s}> is partially preserved: its background, floor, lighting, camera angle, framing and crop and "
-           "the original spatial layout of the people - their places, spacing, sizes in the picture, who stands in "
-           "front of whom and who overlaps whom - are retained, while the people in it are replaced.")
-H3_ONE = ("<Subject {s}> is partially preserved: the face, hair and outfit from <Picture {img}> are integrated into "
-          "the position of the {ord} person from the left in <Picture 1>, adopting exactly that person's body and "
-          "head orientation, pose, action, hand and palm gestures, facial expression, mouth shape, size in the "
-          "picture and overlap with the others{pose}.")
-H3_OTHERS = "Every other person in <Picture 1> stays exactly as before."
+# ----------------------------------------------- 0.5.91 Recast: the user's H3 Image AIO v1.01 chain (18:31)
+# One plain sentence (the user's own wording, 18:28) -> the official MiniMax H3 Image prompt enhancer writes the
+# prompt -> one H3 Image edit of the whole keyframe.  Test 18:27 (user, 0 s keyframe): all three swapped right, in
+# place, pose kept, whole outfit, no extra people.  Our own long prompt template (17:32/17:47: people added instead
+# of replaced) and the Qwen Image 2.1 path are gone.
+SWAP_KEEP = ("严格保持图1中的对应人物的朝向,姿势,动作,手掌姿势,表情,口型,人物在图片里的位置和所占比例的大小,还有前后遮挡关系不变. "
+             "严格保持{pics}里的人的五官外貌,发型发色,服装等特征不变,")
 
 
 def h3_size(w, h, mp=EDIT_MP, grid=32):
@@ -763,60 +749,48 @@ def h3_size(w, h, mp=EDIT_MP, grid=32):
             max(grid, int(round(math.sqrt(mp * 1e6 / asp) / grid)) * grid))
 
 
-POSE_ASK = ("There are {n} people in this picture. Describe only what can be seen of the bodies: no clothes, no "
-            "accessories, no hair, no names. For each person, from left to right, write one line 'k: ...' (k = 1 for "
-            "the leftmost), starting with a verb, saying: which way the body and the head face; the pose and the "
-            "action; where each arm is and what each hand and palm does (fist, open palm, pointing, on the hip, "
-            "touching someone); the legs and stance; the facial expression; the mouth (open, closed, smiling); "
-            "whether this person stands in front of or behind the neighbours and who overlaps whom; where the edge of "
-            "the picture cuts the body. Then one last line 'group: ...' saying how the people stand together: how "
-            "close, who is in front and who is behind, who leans towards whom, how much of the picture they fill and "
-            "where the bottom edge of the picture cuts them.")
-_CLOTHES = re.compile(r"\b(glove|dress|skirt|gown|shirt|top|blouse|jacket|coat|trouser|pant|jean|boot|heel|shoe|"
-                      r"sneaker|sock|sleeve|strap|belt|scarf|hat|cap|necklace|earring|bracelet|ring|hair|satin|silk|"
-                      r"fabric|outfit|wear|wearing|dressed|cloth)", re.I)
+_CN_COUNT = "零一二三四五六七八九十"
 
 
-def _no_clothes(text):
-    """drop every part of the reader's sentence that names clothes, accessories or hair"""
-    parts = [p.strip() for p in re.split(r"[,;]", str(text or ""))]
-    return ", ".join(p for p in parts if p and not _CLOTHES.search(p)).strip().rstrip(".")
+def swap_sentence(pairs, n_people) -> str:
+    """the user's plain request (21:32 wording) for the enhancer: pairs [(place from the left in this keyframe,
+    picture number)], n_people in the keyframe.  Everybody recast: '把图1里从左到右的三个人，替换成图3、图4、图2里的人' -
+    the pictures in the order the people stand now; only some: '从左数第2个人替换成图2里的人' + the others kept."""
+    pairs = sorted(pairs)
+    pics = "、".join(f"图{i}" for i in sorted(i for _, i in pairs))
+    if [r for r, _ in pairs] == list(range(1, n_people + 1)):
+        cnt = _CN_COUNT[n_people] if n_people < len(_CN_COUNT) else str(n_people)
+        head = (f"把图1里从左到右的{cnt}个人，替换成" + "、".join(f"图{i}" for _, i in pairs) + "里的人，")
+    else:
+        head = ("把图1里" + "，".join(f"从左数第{r}个人替换成图{i}里的人" for r, i in pairs) + "，图1里其他的人保持不变，")
+    return head + SWAP_KEEP.format(pics=pics)
 
 
-def parse_poses(text, n):
-    """the reader's answer -> ({place from the left: sentence}, group sentence)"""
-    out, group = {}, ""
-    for line in str(text or "").splitlines():
-        g = re.match(r"^\s*[\-*]?\s*group\s*[:.)\-]\s*(.+?)\s*$", line, re.I)
-        if g and not group:
-            group = _no_clothes(g.group(1))
-            continue
-        m = re.match(r"^\s*[\-*]?\s*(?:person\s*)?(\d+)\s*[:.)\-]\s*(.+?)\s*$", line, re.I)
-        if m and 1 <= int(m.group(1)) <= n and int(m.group(1)) not in out:
-            out[int(m.group(1))] = _no_clothes(m.group(2))
-    return out, group
+def parse_redo(text, n):
+    """'2' / '2,4' / '2 4' / '第2张' -> the keyframe numbers (1..n) to make again; empty -> None (all of them)"""
+    nums = [int(x) for x in re.findall(r"\d+", str(text or ""))]
+    sel = sorted({k for k in nums if 1 <= k <= n})
+    if nums and not sel:
+        raise KeyframeError(f"{TAG} redo: keyframes are numbered 1 to {n}. 重做的编号是 1 到 {n}。")
+    return sel or None
 
 
-def h3_prompt(people, n_people, poses=None, group="") -> str:
-    """the H3 Image edit prompt for one keyframe: people = [(place from the left in this keyframe, picture number,
-    description of the new person)], n_people in the keyframe, poses {place: what that person does}, group = how
-    the people stand together (both read from the keyframe)"""
-    poses = poses or {}
-    people = sorted(p[:3] for p in people)
-    subs = {img: k + 1 for k, (r, img, d) in enumerate(people)}
-    src = len(people) + 1
-    clean = lambda d: (d or "the person exactly as shown in the picture").strip().rstrip(".。 ")
-    parts = [H3_DEFINE.format(img=img, s=subs[img], desc=clean(d)) for r, img, d in sorted(people, key=lambda p: p[1])]
-    parts.append(H3_SOURCE.format(s=src))
-    if group:
-        parts.append(H3_SCENE.format(group=group.rstrip(".")))
-    parts.append(H3_KEEP.format(s=src))
-    for r, img, d in people:
-        pz = (poses.get(r) or "").strip().rstrip(".。 ")
-        parts.append(H3_ONE.format(s=subs[img], img=img, ord=ordinal(r), pose=f": that person {pz}" if pz else ""))
-    if len(people) < n_people:
-        parts.append(H3_OTHERS)
-    return " ".join(parts)
+def pe_caption(text):
+    """the enhancer's expanded_caption (its answer is one JSON object, after an optional thinking part) or None"""
+    import json
+    t = str(text or "")
+    if "</think>" in t:
+        t = t.rsplit("</think>", 1)[1]
+    i, j = t.find("{"), t.rfind("}")
+    if i < 0 or j <= i:
+        return None
+    try:
+        cap = json.loads(t[i:j + 1]).get("expanded_caption")
+    except Exception:
+        m = re.search(r'"expanded_caption"\s*:\s*"((?:[^"\\]|\\.)*)"', t[i:j + 1], re.S)
+        cap = json.loads('"' + m.group(1) + '"') if m else None
+    cap = (cap or "").strip()
+    return cap or None
 
 
 def plan_length(n_frames: int) -> int:
