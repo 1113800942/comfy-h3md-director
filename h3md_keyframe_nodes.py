@@ -1205,6 +1205,7 @@ class H3MDKeyframeRecast:
                    "the AI wrote from H3MD Keyframe 1a: Export. Then H3MD Keyframe 2: Assemble.")
 
     METHOD = "H3 Image, prompts written by an AI from the Export package"
+    CACHE_TAG = ""      # the last run's keyframes (kept ones of a redo) live in input/H3MD_keyframes/_recast<tag>/
 
     def _edit(self, frame, refs, prompt, model, clip, vae, sampler, sigmas, seed, gw, gh):
         """one edit of a whole keyframe -> (image [1,H,W,3] 0-1, canvas size)"""
@@ -1243,7 +1244,7 @@ class H3MDKeyframeRecast:
         todo = [m for m in job["moments"] if m["items"]]
         sel = K.parse_redo(one(redo), len(todo))
         given = K.parse_prompts(one(prompts), len(todo))
-        cache = os.path.join(folder_paths.get_input_directory(), KF_SUBDIR, "_recast",
+        cache = os.path.join(folder_paths.get_input_directory(), KF_SUBDIR, "_recast" + self.CACHE_TAG,
                              os.path.splitext(os.path.basename(str(job.get("video_abs") or job.get("video"))))[0])
         kept = {}                       # keyframe number -> image from the last run (only the chosen ones are redone)
         if sel:
@@ -1301,6 +1302,7 @@ class H3MDKeyframeRecastQwen(H3MDKeyframeRecast):
     changed before encoding (nothing else)."""
 
     METHOD = "Qwen Image 2.1 edit, prompts written by an AI from the Export package (names -> <imageN>)"
+    CACHE_TAG = "_qwen"  # own folder: a redo never mixes in (or overwrites) the H3 Image keyframes
 
     @classmethod
     def INPUT_TYPES(cls):
