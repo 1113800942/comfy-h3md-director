@@ -249,12 +249,16 @@ non_diegetic_music:
 关键帧、提示词,最后交计划包(或图片清单)**。Remake 会照着关键帧拍:关键帧里人挪了位、变了大小、换错了人,视频就跟着错。
 所以每张关键帧都要过第 5 步的自查,不合格就重画,不能凑合交。不要用 TARA、depth 或 H3 遮罩重画来做这件事。
 
-**本地用户直接用工作流,不用智能体**:`example_workflows/Qwen Image 2.1 Keyframe.json` 一次跑完 A 线:
-H3MD Keyframe 1: Prepare(编号、找剪辑点、挑时刻,0.5.8 起每个镜头至少一张关键帧)、1b: Recast 串行换人(Qwen Image 2.1
-编辑,一个人一个人换,后一个人从已换好前面人的帧上裁;`mask_grow` 默认 0.25,原角色的假发、耳朵、尾巴、蓬裙有残留时
-调到 0.3-0.35)、2: Assemble(对色、贴回、第 6 步的提示词和计划包)。用户每个角色写一行描述:人种、年龄、长相、发型、
-每件衣服,**还有鞋和腿(光腿 / 袜子)以及没有什么**("bare legs and black stiletto heels; no socks, no boots, no apron"),
-否则修图会照抄原角色的。先推荐用户用它;下面两条路线留给智能体手工做,或单独修某一张关键帧。
+**本地用户用关键帧工作流(0.5.91)**:`example_workflows/H3MD_Keyframe_MultiSwap_0.5.91.json`,一个工作流两组:
+1. **Keyframe Export**:H3MD Keyframe Prepare(编号、找剪辑点、挑时刻,每个镜头至少一张关键帧)+ H3MD Keyframe Export,
+   写出 `<名字>_keyframe_export_<日期>_<序号>.zip`。
+2. 智能体按 **H3MD 关键帧 skill(`skills/h3md-keyframe`)** 读这个包,回一个 `.h3kf`(或 `.json`),每张关键帧一段
+   MiniMax H3 Image 提示词。
+3. **Keyframe Import**:Import(按钮导入)→ Recast(H3 Image,每张约 25 秒)→ Compare(原图 | 新图)。哪张不对用 Redo
+   节点单张重做。Assemble 写出 `<名字>_multiswap_plan_<日期>_<序号>.zip`,交给导演台。
+
+用户每个角色写一行从头到脚的描述:人种、年龄、长相、发型、每件衣服,**还有鞋,以及参考图上看不到的部分**(半身图要写
+裤子和鞋)。如果是你来写这些关键帧提示词,照 `skills/h3md-keyframe` 做。下面两条路线留给智能体自己画关键帧。
 
 **两条路线**:按你自己的能力选一条,其余步骤两条线共用。
 - **A 线:你能运行代码**(Claude Code、Codex、Cursor 之类,或接着本地 ComfyUI):裁图 → 修图 → 贴回 → 对色。构图在原理上
@@ -264,7 +268,7 @@ H3MD Keyframe 1: Prepare(编号、找剪辑点、挑时刻,0.5.8 起每个镜头
 
 **真人素材**:在线修图服务(Grok、GPT-image、豆包等)通常拒绝修改真人照片,名人几乎一定被拒。素材要用你有权使用的视频;真人素材只能走 A 线 + 本地修图模型。不要用这个功能冒充真实的人。
 
-**修图模型**:本地用 Qwen Image 2.1 编辑(A 线);只能聊天出图就用 ChatGPT(B 线)。要求是:能同时看两张以上
+**修图模型**:本地用 MiniMax H3 Image(关键帧工作流)或其他修图模型(A 线);只能聊天出图就用 ChatGPT(B 线)。要求是:能同时看两张以上
 的图(原帧 + 角色图),输出尺寸可以指定或保持原图大小。
 
 ### 1. 认人:按位置编号,编号一直不变

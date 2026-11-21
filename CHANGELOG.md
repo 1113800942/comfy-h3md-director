@@ -2,7 +2,36 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
-## [0.5.91] - unreleased (keyframes; in development)
+## [0.5.91] - 2026-11-21
+
+### Added / 新增
+- Multi-person swap keyframes, new flow: **one workflow, two groups, all by buttons** (`example_workflows/H3MD_Keyframe_MultiSwap_0.5.91.json`).
+  1. **Keyframe Export**: Prepare + the new **H3MD Keyframe Export** write `output/H3MD_keyframes/<name>_keyframe_export_<date>_<no>.zip` (keyframes, character pictures, who replaces whom, a README for the AI) and preview its keyframes.
+  2. An AI (Claude, ChatGPT, Gemini ...) reads the keyframes with the new skill **`skills/h3md-keyframe`** and answers with `<name>_keyframe_import_<date>_<no>.h3kf` (or a `.json`): one MiniMax H3 Image prompt per keyframe.
+  3. **Keyframe Import**: the new **H3MD Keyframe Import** (Import package button; group 1 can stay bypassed) -> **H3MD Keyframe Recast** (MiniMax H3 Image, int8, 4 MP, the tuned 6-step sigmas, ~25 s a keyframe; shows original | new, numbered) -> the new **H3MD Keyframe Redo** (one button per keyframe: only the chosen ones are made again) -> **H3MD Keyframe Assemble** (`output/H3MD_plans/<name>_multiswap_plan_<date>_<no>.zip`).
+  Packages get a date and a number and are never overwritten. Reading the keyframes is the slow and decisive part (H3 Image draws what the text says), so it is done once by the AI; the skill says what to read and get right for every person (orientation, each hand, legs as a still pose, head, expression, place, size, overlaps, crop; image left/right) and how to check before answering.
+  多人换人关键帧新流程:**一个工作流两组,全用按钮**。第 1 组导出关键帧包,AI 按新 skill `skills/h3md-keyframe` 读图写 H3 Image 提示词回包(.h3kf / .json),第 2 组按钮导入、出图(每张约 25 秒)、原图 | 新图对比、单张重做按钮、打计划包。包名带日期和序号,不覆盖。
+- Example: `example_plans/H3MD_multiswap_3dancers_0.5.91.zip` - the three-dancer swap (17 s): the export package, the AI's answer, the plan and the result.
+  示例:三人舞蹈换人(17 秒)的导出包、AI 回包、计划包和成片。
+
+### Changed / 变更
+- H3MD Keyframe Recast no longer reads the keyframes itself (the local prompt enhancer took 55-83 s a keyframe and sometimes answered empty). Its result is cut to the video's aspect before scaling (no stretch).
+  Recast 不再自己看图写提示词(本地反推每张 55-83 秒,偶尔回空);出图先按视频比例裁齐再缩放,不拉伸。
+- Control Panel style 多人互换 switches on only the LMS LoRA (high-res 0.2, nothing on low-res) instead of keeping the previous style's LoRAs; a multi-swap plan's global prompt is the LMS trigger words.
+  总控台「多人互换」只开 LMS(高清 0.2,低清不开),不再沿用上一个风格的 LoRA;多人换人计划的全局提示词是 LMS 触发词。
+- Keyframe node names are English (H3MD Keyframe Prepare / Export / Import / Recast / Redo / Assemble + version). The two older keyframe workflows and the flat prompt-skill files `skills/h3md_director_prompt_skill-cn/en.md` are removed.
+  关键帧节点名改为英文;旧的关键帧工作流和旧的单文件 skill 删除。
+
+### Fixed / 修复
+- Loop: a trial (试镜) or `segments_to_run` took segments it did not run from the cache even when they had been made for **another plan** (the cache folder is shared by every plan with the same settings; only the frame count was checked). The old take was spliced into the video and used as the tail lock of the re-made segment. Every cached segment now records what it was made from; a segment is kept from the cache only when it matches this plan. Caches written before 0.5.91 are made again once when repairing.
+  Loop:试镜 / 只跑某几段时,没跑的段会从缓存拿,哪怕是**别的计划**做的(缓存文件夹按设置共用,只查了帧数):旧视频被接进成片,还被当成重做那段的锁尾。现在每段缓存记下它是用哪份计划内容做的,对得上才沿用。0.5.91 以前的缓存修补时会重做一次。
+- Director Import plan keeps the global prompt already in the Director when the imported plan has none (it was wiped).
+  导演台导入计划时,计划里没有全局提示词就保留导演台原有的(以前会被清空)。
+- Director: importing a portrait plan while the Control Panel was set to landscape (or the other way) ran at the wrong size. Import plan now sets the Control Panel's width / height to the plan's, and a multi-swap plan run at a Remake size of the other orientation follows the plan (1664x960 -> 960x1664, 2560x1472 -> 1472x2560).
+  导演台:横屏的总控台导入竖屏计划(或反过来)会按错的尺寸跑。现在导入计划时总控台宽高自动改成计划的;多人换人计划遇到另一方向的 Remake 尺寸也跟计划走。
+- Keyframe package: request.json lists per keyframe who stays (`keeps_people_from_left`, any positions, different per keyframe), and the keyframe skill says to describe every kept person too - with only "stays as in Picture 1", H3 Image redrew two kept men as copies of the new characters.
+  关键帧包:request.json 每张写明哪些人保留(`keeps_people_from_left`,任意位置、每张不同),skill 要求保留的人也要描述——只写“保持原样”时 H3 Image 把两个保留的人画成了新角色的复制品。
+- Registry scan test reads file names as UTF-8 (Chinese workflow names).
 
 ### Fixed / 修复
 - Director (RefMod): in the new ComfyUI frontend (Nodes 2.0) the plan editor inside the node shrank to a narrow strip after clicking the node. The editor now always keeps the node's width. Fix by Civitai user zhendao - thank you!

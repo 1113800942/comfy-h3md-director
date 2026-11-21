@@ -201,6 +201,23 @@ function syncPlanRemake(on) {
     } catch { /* leave a broken plan for the Director to report */ }
   }
 }
+// 0.5.91 (user 00:54): Import plan -> the Control Panel takes the plan's width / height (a portrait plan imported
+// into a landscape panel ran at the wrong size). Returns the number of panels changed.
+export function setPanelsSize(w, h) {
+  w = Math.round(Number(w) || 0); h = Math.round(Number(h) || 0);
+  if (w < 64 || h < 64) return 0;
+  let n = 0;
+  for (const node of app.graph?._nodes || []) {
+    if (node.type !== NODE || node.mode === 2 || node.mode === 4) continue;
+    const ww = W(node, "width"), hw = W(node, "height");
+    if (!ww || !hw || (ww.value === w && hw.value === h)) continue;
+    ww.value = w; ww.callback?.(w);
+    hw.value = h; hw.callback?.(h);
+    node.setDirtyCanvas?.(true, true);
+    n++;
+  }
+  return n;
+}
 // Director checkbox -> control panel style, without rewriting the plan a second time.
 export function setPanelsFromRemake(on) {
   for (const n of app.graph?._nodes || []) {

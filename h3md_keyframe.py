@@ -849,7 +849,10 @@ H3 Image draws what the text says: the prompt decides the result. Read the keyfr
        towards whom, standing apart or pressed together.
      Left and right always mean the sides of the image ("the hand on the left side of the image"), never the
      person's own left/right.
-  e. People who are not replaced stay exactly as in <Picture 1>.
+  e. People who are NOT replaced ("keeps_people_from_left" in request.json - any positions, different per keyframe,
+     never assume they are the last ones): say how many people the frame holds and which positions stay, describe every
+     kept person positively and completely as they look in <Picture 1> (face, hair, every garment, shoes, place, pose)
+     and that they stay themselves - else H3 Image redraws them as copies of the new characters.
 Write general rules for what to look at; describe only what this keyframe shows.
 
 ## 4. Check before you answer

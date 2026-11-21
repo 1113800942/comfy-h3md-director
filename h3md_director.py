@@ -409,6 +409,14 @@ def _remake_size(w: int, h: int, pw: int, ph: int, notes: list) -> tuple:
     """0.5.5: a swap (Remake) plan only runs at the sizes Remake was trained on. If the Control Panel size is not one
     of them, use the plan's size when it is, otherwise 1664x960 / 960x1664 with the same orientation, and say so."""
     if (w, h) in REMAKE_SIZES:
+        if (pw, ph) in REMAKE_SIZES and (w > h) != (pw > ph):
+            # 0.5.91 (user 00:54): a Remake size of the other orientation (landscape panel, portrait plan): the plan's
+            # orientation wins, the panel's tier stays (1664x960 -> 960x1664, 2560x1472 -> 1472x2560)
+            notes.append(f"multi-person swap: size {w}x{h} -> {h}x{w} (the plan is "
+                         f"{'portrait' if ph > pw else 'landscape'})")
+            LOG.warning("[H3MD Director] multi-person swap: size %dx%d -> %dx%d to match the plan's orientation. "
+                        "多人互换：尺寸 %dx%d 改成 %dx%d，跟计划的横竖一致。", w, h, h, w, w, h, h, w)
+            return h, w
         return w, h
     if (pw, ph) in REMAKE_SIZES:
         nw, nh = pw, ph

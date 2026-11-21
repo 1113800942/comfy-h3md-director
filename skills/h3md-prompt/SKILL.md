@@ -411,14 +411,18 @@ picture list)**. Remake follows the keyframes: a person moved, resized or swappe
 with it. Every keyframe must pass the self-check in step 5; redraw failures, never hand them over. Do not use TARA,
 depth or H3 mask repaint for this.
 
-**Local users: no agent needed.** `example_workflows/Qwen Image 2.1 Keyframe.json` does route A in one run:
-H3MD Keyframe 1: Prepare (numbering, cuts, moments - at least one keyframe in every shot since 0.5.8), 1b: Recast
-(Qwen Image 2.1 Edit, one person after another, each crop cut from the frame where the people before her are already
-recast; `mask_grow` 0.25, 0.3-0.35 when bits of a bigger original such as a wig, ears, tail or wide skirt stay) and
-2: Assemble (colour match, paste back, the step-6 prompt and the plan .zip). The user writes one description line per
-character: race, age, face, hair, every garment, **shoes and legwear, and what she does not wear** ("bare legs and black
-stiletto heels; no socks, no boots, no apron"), or the editor keeps the original's. Point the user there first; the
-routes below are for agents doing it by hand or fixing single keyframes.
+**Local users: use the keyframe workflow (0.5.91).** `example_workflows/H3MD_Keyframe_MultiSwap_0.5.91.json`, two
+groups:
+1. **Keyframe Export**: H3MD Keyframe Prepare (numbering, cuts, moments - at least one keyframe in every shot)
+   + H3MD Keyframe Export write `<name>_keyframe_export_<date>_<no>.zip`.
+2. An agent reads the package with **the H3MD keyframe skill (`skills/h3md-keyframe`)** and answers with a `.h3kf`
+   (or `.json`) holding one MiniMax H3 Image prompt per keyframe.
+3. **Keyframe Import**: Import (button) -> Recast (H3 Image, ~25 s a keyframe) -> Compare (original | new). The Redo
+   node redoes single keyframes. Assemble writes `<name>_multiswap_plan_<date>_<no>.zip` for this Director.
+
+The user writes one description line per character, head to toe: race, age, face, hair, every garment, **the shoes
+and what the picture does not show** (a half-body picture: trousers and shoes). If you are asked to write those
+keyframe prompts, follow `skills/h3md-keyframe`. The routes below are for agents painting keyframes themselves.
 
 **Two routes** - pick the one you can do; the other steps are shared.
 - **Route A: you can run code** (Claude Code, Codex, Cursor, or a local ComfyUI): crop -> edit -> paste back ->
@@ -431,8 +435,8 @@ routes below are for agents doing it by hand or fixing single keyframes.
 always refuse famous ones. Use footage you have the right to use; real-people footage needs route A with a local
 editor. Never use this to pass someone off as a real person.
 
-**Image editor**: locally Qwen Image 2.1 Edit (route A); in a chat, ChatGPT (route B). It must be one that takes two or more
-images (source frame + character pictures) and can keep or set the output size.
+**Image editor**: locally MiniMax H3 Image (the keyframe workflow) or another editor that takes two or more images
+(source frame + character pictures) and can keep or set the output size; in a chat, ChatGPT (route B).
 
 ### 1. Who is who: number by position, the number never changes
 - The user names people by position, e.g. "picture 1 replaces the 2nd from the left". Number the performers **left to

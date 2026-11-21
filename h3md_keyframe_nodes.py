@@ -798,6 +798,9 @@ class H3MDKeyframeExport:
                                           "replaces_person_from_left": it["rank"]}
                                          for j, (it, f) in enumerate(zip(m["items"], files))],
                             "people_in_frame": n_people,
+                            # 0.5.91 (user 00:54): who stays, counted from the left in THIS keyframe - write them too
+                            "keeps_people_from_left": [r for r in range(1, n_people + 1)
+                                                       if r not in {it["rank"] for it in m["items"]}],
                             "sentence": K.swap_sentence([(it["rank"], j + 2) for j, it in enumerate(m["items"])],
                                                         n_people)})
             z.writestr("request.json", json.dumps({"package": stem, "answer_file": imp + ".h3kf",

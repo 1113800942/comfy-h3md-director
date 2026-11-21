@@ -9,7 +9,7 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import * as M from "./h3md_plan.js";
-import { setPanelsFromRemake } from "./h3md_control_panel.js";
+import { setPanelsFromRemake, setPanelsSize } from "./h3md_control_panel.js";
 import { PERF_CSS, videoThumb, attachHoverPlay, installMoveWatch, watchNode, unwatchNode } from "./h3md_director_perf.js";
 import { hideWidgets } from "./h3md_hide_widgets.js";
 
@@ -871,11 +871,14 @@ class DirectorEditor {
       const np = RM.ensure(M.ensureShape(JSON.parse(j.plan_json)));
       const kept = !String(np.globalPrompt || "").trim() && prevGlobal.trim();
       if (kept) np.globalPrompt = prevGlobal;
+      let sized = 0;
+      try { sized = setPanelsSize(np.width, np.height); } catch (err) { console.warn("[H3MD] control panel size", err); }
       this.plan = np;
       this.importDlg = null;
       this.commit();
       this.probeAll();
-      this.setPlanIOMsg(`imported plan '${j.name}'` + (kept ? " (your global prompt kept)" : ""));
+      this.setPlanIOMsg(`imported plan '${j.name}'` + (kept ? " (your global prompt kept)" : "")
+        + (sized ? ` (Control Panel size -> ${np.width}x${np.height})` : ""));
     };
     const useAll = async () => {
       const wf = JSON.parse(JSON.stringify(j.workflow));

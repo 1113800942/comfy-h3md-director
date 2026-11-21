@@ -138,6 +138,7 @@ def test_export_import_recast(clip, monkeypatch):
     k1 = req["keyframes"][0]
     assert k1["picture_1"] == "keyframe_1.png" and k1["pictures"][0]["picture"] == 2
     assert k1["pictures"][0]["description"].startswith("a man") and k1["people_in_frame"] == 3
+    assert k1["keeps_people_from_left"] == [1, 3]               # who stays, in THIS keyframe (user 00:54)
     assert k1["sentence"].startswith("把图1里从左数第2个人替换成图2里的人，图1里其他的人保持不变，")
     # the AI's answer: the package + prompts.json, as .h3kf
     answer = {"package": req["package"], "prompts": {str(k): f"P{k}" for k in range(1, len(todo) + 1)}}
