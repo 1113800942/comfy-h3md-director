@@ -233,7 +233,7 @@ def face_app():
     return app
 
 
-def face_observations(path, times, per_frame, size, every=FACE_EVERY):
+def face_observations(path, times, per_frame, size, every=FACE_EVERY, boxes_out=None):
     """[(frame index, id, L2-normalised ArcFace embedding)] of every face in the full-size frames (every `every`-th
     tracking frame); each face goes to the person whose box holds it in its upper part.  [] without InsightFace."""
     import numpy as np
@@ -254,6 +254,8 @@ def face_observations(path, times, per_frame, size, every=FACE_EVERY):
             x0, y0, x1, y1 = [float(v) for v in f.bbox]
             if (x1 - x0) < FACE_MIN_PX or float(getattr(f, "det_score", 1.0)) < FACE_MIN_SCORE:
                 continue
+            if boxes_out is not None:     # 0.5.91: where faces are, for clean_frames (a half-hidden person)
+                boxes_out.setdefault(i, []).append((x0 / W, y0 / H, x1 / W, y1 / H))
             emb = getattr(f, "normed_embedding", None)
             if emb is None:
                 continue
@@ -768,7 +770,7 @@ class H3MDKeyframePrepare:
                 int(max_people), round(dur, 3))
         hit = _TRACK_CACHE.get(tkey)
         if hit is not None:
-            times, small, per_frame, reid_joins, reid_unsure = hit
+            times, small, per_frame, reid_joins, reid_unsure, face_boxes = hit
             K.FRAME_ASPECT = size[0] / float(size[1])
             LOG.info("%s tracking reused from the last run (same clip and settings)", TAG)
         else:
@@ -778,11 +780,11 @@ class H3MDKeyframePrepare:
             per_frame = K.link_windows(windows)[:len(times)]
             # 0.5.9: join people the tracker split (blackout, cut, spin, out and back in) - elimination, then hair /
             # clothes colour.  Before, the person a picture is mapped to was "lost" and later keyframes missed her.
-            faces = {}
+            faces, face_boxes = {}, {}
             try:   # 0.5.91: faces tell apart people in the same clothes (a cut, a close-up, five men in white).  The
                 # faces are grouped into people first; where a track's face turns into another person's (the tracker
                 # passed the number on at a crossing) the track is cut there, and every piece is named after its person
-                obs = face_observations(path, times, per_frame, size)
+                obs = face_observations(path, times, per_frame, size, boxes_out=face_boxes)
                 labels, cents = K.face_clusters([o[2] for o in obs]) if obs else ([], [])
                 per_frame, person_of, split_notes = K.split_by_face(per_frame, obs, labels)
                 faces = {nid: cents[p] for nid, p in person_of.items()}
@@ -813,9 +815,9 @@ class H3MDKeyframePrepare:
                 LOG.info("%s person found again at %.1f s (track %s = track %s, %s, look %.2f)", TAG, j["at"], j["new"],
                          j["into"], j["why"], j["look"])
             _TRACK_CACHE.clear()
-            _TRACK_CACHE[tkey] = (times, small, per_frame, reid_joins, reid_unsure)
+            _TRACK_CACHE[tkey] = (times, small, per_frame, reid_joins, reid_unsure, face_boxes)
         frames = K.report(per_frame, times)
-        frames, clean_notes = K.clean_frames(frames)        # 0.5.91: double / wide / hidden boxes
+        frames, clean_notes = K.clean_frames(frames, face_boxes)   # 0.5.91: double / wide / hidden boxes
         LOG.info("%s %s", TAG, clean_notes[0])
         people = K.cast(frames)
         order = [a["id"] for a in people]

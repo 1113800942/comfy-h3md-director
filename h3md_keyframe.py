@@ -413,12 +413,27 @@ WIDE_BOX = 1.6                   # 0.5.91: a box this much wider than the person
 HIDDEN_COVER, HIDDEN_AREA = 0.8, 0.35   # a box this much inside a bigger one (and this small) = a hidden person
 
 
-def clean_frames(frames):
+def face_of_hidden(b, q_box, faces):
+    """0.5.91 (user 07:00, keyframe #4: the man peeking out behind the front man was dropped as 'hidden', so nobody
+    replaced him and H3 Image drew a copy of the front man there): is a face of its own visible in the small box `b`
+    that lies inside the bigger box `q_box`?  Yes when a face's centre is inside `b` and another face sits in the
+    head part of `q_box` (the front person's own face).  faces: face boxes (0-1) of this frame."""
+    def inside(f, box, top=1.0):
+        cx, cy = (f[0] + f[2]) / 2, (f[1] + f[3]) / 2
+        return box[0] <= cx <= box[2] and box[1] - 0.02 <= cy <= box[1] + top * (box[3] - box[1])
+    mine = [f for f in faces if inside(f, b)]
+    if not mine:
+        return False
+    return any(inside(g, q_box, 0.4) and not any(g is f for f in mine) for g in faces)
+
+
+def clean_frames(frames, face_boxes=None):
     """0.5.91 (_012 keyframes 4-6, 8, 15): mark what the tracker got wrong, before any keyframe is chosen.
     - a box much wider than that person's usual box (WIDE_BOX x the median width) spans two people (a hidden man and
       the one in front): the frame gets "bad": [id] and is never a keyframe (score() is None);
     - a small box almost entirely inside another person's bigger box is someone hidden behind him: he does not count
-      as seen in that frame (dropped from "who").
+      as seen in that frame (dropped from "who") - unless his own face shows there (face_boxes: {frame index: [face
+      boxes 0-1]}, face_of_hidden): then he is in the picture and must be replaced like everyone else.
     -> the same frames, changed in place, and notes"""
     import statistics
     widths = {}
@@ -427,13 +442,19 @@ def clean_frames(frames):
             widths.setdefault(pid, []).append(b[2] - b[0])
     med = {pid: statistics.median(ws) for pid, ws in widths.items() if len(ws) >= 3}
     n_wide = n_hidden = 0
-    for f in frames:
+    n_face = 0
+    for fi, f in enumerate(frames):
         who = f.get("who") or []
         keep = []
+        faces = (face_boxes or {}).get(fi) or []
         for pid, b in who:
             area = (b[2] - b[0]) * (b[3] - b[1])
-            hidden = any(covered(b, c) >= HIDDEN_COVER and area < HIDDEN_AREA * (c[2] - c[0]) * (c[3] - c[1])
-                         for q, c in who if q != pid)
+            cover = [c for q, c in who if q != pid and covered(b, c) >= HIDDEN_COVER
+                     and area < HIDDEN_AREA * (c[2] - c[0]) * (c[3] - c[1])]
+            hidden = bool(cover)
+            if hidden and faces and any(face_of_hidden(b, c, faces) for c in cover):
+                hidden = False      # his face shows beside the front person: he is seen
+                n_face += 1
             if hidden:
                 n_hidden += 1
                 continue
@@ -445,7 +466,7 @@ def clean_frames(frames):
             f["bad"] = bad
             n_wide += 1
     return frames, [f"{n_wide} frame(s) with a box spanning two people (never keyframes), {n_hidden} hidden "
-                    "person box(es) not counted as seen"]
+                    f"person box(es) not counted as seen, {n_face} half-hidden with the face showing kept"]
 
 
 def reid_merge(per_frame, looks=None, times=None, keep=None):
