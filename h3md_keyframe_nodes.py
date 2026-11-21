@@ -661,8 +661,43 @@ class H3MDKeyframeAssemble:
         return {"ui": {"text": [msg]}, "result": (to_tensor(sheet), plan_s, zip_path)}
 
 
+def _detect(sam, image_t, cond, threshold):
+    """SAM3 single-image detection -> [(box xyxy px, bool mask)] (ComfyUI's SAM3_Detect, one mask per object)"""
+    from comfy_extras.nodes_sam3 import SAM3_Detect
+    masks, boxes = SAM3_Detect.execute(model=sam, image=image_t, conditioning=cond, threshold=threshold,
+                                       refine_iterations=2, individual_masks=True).result
+    bx = boxes[0] if boxes else []
+    out = []
+    for i, d in enumerate(bx):
+        m = masks[i].cpu().numpy() > 0.5 if i < masks.shape[0] else None
+        out.append(([d["x"], d["y"], d["x"] + d["width"], d["y"] + d["height"]], m))
+    return out
+
+
+def grey_people(frame_u8, found, boxes, grow=K.GREY_GROW):
+    """the keyframe with the people to recast painted plain grey (Openjutsu's grey mannequin): found = SAM3 [(box,
+    mask)], boxes = their tracker boxes (px).  -> (image, [matched or not per box])"""
+    import numpy as np
+    from scipy import ndimage
+    out, ok, used = frame_u8.copy(), [], set()
+    for b in boxes:
+        best = max(((K.iou(b, fb), i) for i, (fb, fm) in enumerate(found) if i not in used and fm is not None),
+                   default=(0.0, None))
+        if best[1] is None or best[0] < 0.3:
+            ok.append(False)
+            continue
+        used.add(best[1])
+        m = found[best[1]][1]
+        if grow:
+            m = ndimage.binary_dilation(m, iterations=int(grow))
+        out[m] = K.GREY
+        ok.append(True)
+    return out, ok
+
+
 class H3MDKeyframeRecast:
-    """0.5.91: one MiniMax H3 Image edit per keyframe (<Picture 1> = the keyframe, 2... = the new people), the user's
+    """0.5.91: one MiniMax H3 Image edit per keyframe (<Picture 1> = the keyframe with the people to recast painted as
+    plain grey figures - Openjutsu's grey mannequin, user 21:07 -, 2... = the new people), the user's
     H3 Image AIO v1.01 model chain (6-step tuned sigmas).  The prompt is filled in here, in the structure the official
     H3 Image enhancer wrote every time (user 19:23: the enhancer took 55-83 s a keyframe and once gave nothing): every
     new person defined as a Subject from its picture with the full description, placed at its place from the left (the
@@ -724,7 +759,25 @@ class H3MDKeyframeRecast:
         todo = [m for m in job["moments"] if m["items"]]
         pbar = comfy.utils.ProgressBar(max(1, 2 * len(todo)))
         lines, done, out_imgs, n, t_all = [], {}, [], 0, time.time()
-        # 1 what every person in each keyframe does, in words (all keyframes first: each model loaded once)
+        # 0 the people to recast become plain grey figures (SAM3 silhouettes): shape, place and crop stay, their look
+        # goes (test 19:55: original clothes and gloves came back, framing widened)
+        greyed, sam, sclip = {}, None, None
+        try:
+            sam, sclip = load_sam3()
+            cond_person = nodes.CLIPTextEncode().encode(sclip, "person:16")[0]
+            for m in todo:
+                src = np.ascontiguousarray(job["frames"][m["at"]])
+                found = _detect(sam, to_tensor(src), cond_person, 0.5)
+                greyed[m["at"]] = grey_people(src, found, [it["own"] for it in m["items"]])
+        finally:
+            if sam is not None:
+                _vram().unload_patchers([sam] + ([sclip.patcher] if getattr(sclip, "patcher", None) is not None
+                                                 else []), "(SAM3 unloaded)")
+                del sam, sclip
+                gc.collect()
+                _vram().soft_empty_cache("(SAM3 freed)")
+        # 1 what every person in each keyframe does, in words, read on the ORIGINAL keyframe (expression, mouth: the
+        # grey figures have no face) - all keyframes first, each model loaded once
         read = {}
         for m in todo:
             t0 = time.time()
@@ -743,6 +796,8 @@ class H3MDKeyframeRecast:
             frame = to_tensor(np.ascontiguousarray(job["frames"][m["at"]]))
             n_people = max(int(it.get("n") or 0) for it in m["items"])
             poses, ans, t_pose = read[m["at"]]
+            grey_img, grey_ok = greyed[m["at"]]
+            frame = to_tensor(grey_img)
             prompt = K.h3_prompt([(it["rank"], j + 2, it.get("desc", ""),
                                    ((it["own"][3] - it["own"][1]) / float(H), bool(it.get("cut_bottom"))))
                                   for j, it in enumerate(m["items"])], n_people, poses)
@@ -761,6 +816,9 @@ class H3MDKeyframeRecast:
             lines.append(f"{m['at']:.2f} s: poses {t_pose:.1f} s ({len(poses)}/{n_people}), edit "
                          f"{time.time() - t0:.1f} s ({gw}x{gh}), places "
                          + ", ".join(f"picture {it['picture']} -> {K.ordinal(it['rank'])}" for it in m["items"]))
+            if not all(grey_ok):
+                lines.append("  NOT GREYED (SAM3 found no matching person): pictures "
+                             + ", ".join(str(it["picture"]) for it, g in zip(m["items"], grey_ok) if not g))
             if len(poses) < n_people:
                 lines.append("  POSE READER ANSWER NOT UNDERSTOOD FOR EVERYBODY: " + " ".join(ans.split())[:400])
             lines.append("  prompt: " + prompt)

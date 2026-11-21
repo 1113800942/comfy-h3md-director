@@ -13,7 +13,7 @@ def test_h3_prompt_changed_places():
     assert "where <Subject 1>, <Subject 2> and <Subject 3> take the places" in p
     assert ("<Subject 1> is partially preserved: the face, the hair and the complete outfit of <Subject 1> come from "
             "<Picture 3>") in p and "follow the first person from the left in <Picture 1>" in p
-    assert "The third person from the left is now <Subject 3>, a young woman" in p and "bare hands." in p
+    assert "The third grey figure from the left is now <Subject 3>, a young woman" in p and "bare hands." in p
     assert "hand gestures (fists stay fists" in p and "mouth shape" in p and "in front of or behind" in p
     assert "Every other person" not in p and p.endswith(K.H3_END) and "bare hands.." not in p
 
@@ -33,8 +33,8 @@ def test_poses():
     assert K.parse_poses(ans, 3) == {1: "stands with hands on the hips, smiling, cut off at the thighs",
                                      2: "raises both fists", 3: "claps"}
     p = K.h3_prompt([(1, 2, EVA)], 3, {1: "claps above the head."})
-    assert "follow the first person from the left in <Picture 1>, who claps above the head." in p
-    assert "in exactly the pose, framing and crop of the original first person from the left in <Picture 1>." in p
+    assert "follow the first person from the left in <Picture 1>, shown there as a plain grey figure, who claps above the head." in p
+    assert "filling exactly the silhouette, pose, framing and crop of that grey figure." in p
     assert "There are 3 people" in K.POSE_ASK.format(n=3)
 
 

@@ -110,6 +110,7 @@ def test_recast_h3(clip, monkeypatch):
     def fake_cond(**kw):
         order.append("edit")
         prompts.append(kw["prompt"])
+        greys.append(kw["images"]["image_0"])
         assert list(kw["images"]) == ["image_0", "image_1"] and (kw["width"], kw["height"]) == (1856, 1088)
         return NS(result=("COND", {"samples": None}))
 
@@ -121,6 +122,21 @@ def test_recast_h3(clip, monkeypatch):
         return NS(result=("1: stands still\n2: raises both fists, mouth open\n3: claps",))
 
     monkeypatch.setattr(TG.TextGenerateV2, "execute", staticmethod(fake_read))
+    W, H = job["size"]
+
+    def fake_detect(sam, image_t, cond, threshold):          # SAM3: every tracker box, as a filled mask
+        out = []
+        for b in todo[0]["items"][0]["others"] + [it["own"] for m in todo for it in m["items"]]:
+            mk = np.zeros((H, W), bool)
+            mk[int(b[1]):int(b[3]), int(b[0]):int(b[2])] = True
+            out.append((list(b), mk))
+        return out
+
+    greys = []
+    monkeypatch.setattr(N, "load_sam3", lambda: ("SAM", None))
+    monkeypatch.setattr(N, "_detect", fake_detect)
+    monkeypatch.setattr(CN.CLIPTextEncode, "encode", lambda self, c, t: ("C",))
+    monkeypatch.setattr(N, "_vram", lambda: NS(unload_patchers=lambda *a: None, soft_empty_cache=lambda *a: None))
     monkeypatch.setattr(MH.MiniMaxH3ImageConditioning, "execute", staticmethod(fake_cond))
     monkeypatch.setattr(CS.BasicGuider, "execute", staticmethod(lambda **kw: NS(result=("G",))))
     monkeypatch.setattr(CS.RandomNoise, "execute", staticmethod(lambda **kw: NS(result=("N",))))
@@ -132,6 +148,14 @@ def test_recast_h3(clip, monkeypatch):
     for m, p in zip(todo, prompts):
         r = "second" if m["at"] < 5.0 else "first"
         who = "raises both fists, mouth open" if m["at"] < 5.0 else "stands still"
-        assert f"follow the {r} person from the left in <Picture 1>, who {who}." in p and "a man with short red hair" in p
-        assert N.K.H3_OTHERS in p
+        assert f"follow the {r} person from the left in <Picture 1>, shown there as a plain grey figure, who {who}." in p and "a man with short red hair" in p
+        assert N.K.H3_OTHERS in p and "shown there as a plain grey figure" in p
     assert len(imgs) == len(todo) and imgs[0].shape[1:3] == (960, 1664) and "seed 7" in report
+    for m, g in zip(todo, greys):                            # the person to recast is grey, the others are not
+        x0, y0, x1, y1 = [int(v) for v in m["items"][0]["own"]]
+        c = g[0, (y0 + y1) // 2, (x0 + x1) // 2].numpy() * 255
+        assert abs(c - 128).max() < 1.5
+        o = m["items"][0]["others"][0]
+        c2 = g[0, int((o[1] + o[3]) / 2), int((o[0] + o[2]) / 2)].numpy() * 255
+        assert abs(c2 - 128).max() > 1.5
+    assert "NOT GREYED" not in report

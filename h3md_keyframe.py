@@ -741,14 +741,18 @@ def parse_people(text: str) -> list:
 # person written head to toe, positively, from the descriptions (half-body pictures: legs and shoes are not seen).
 H3_DEFINE = "The person in <Picture {img}> is <Subject {s}>: {desc}."
 H3_SCENE = ("The target image is <Picture 1> with exactly the same background, lighting, colors, camera angle, framing "
-            "and composition, where {subs} take the places of the people standing there.")
+            "and composition, where {subs} take the places of the plain grey figures standing there.")
+GREY = (128, 128, 128)    # 0.5.91 (20:43, Openjutsu's grey mannequin): people to recast are painted this grey in
+                          # <Picture 1>: their exact silhouette (place, size, crop, arms, fingers) stays readable, their
+                          # look (clothes, gloves, colours) is gone, so the edit cannot carry it over
+GREY_GROW = 3             # px the grey silhouette is grown (no rim of the original clothes left at the edge)
 H3_ONE = ("<Subject {s}> is partially preserved: the face, the hair and the complete outfit of <Subject {s}> come from "
           "<Picture {img}>, while the position in the image, the size in the frame, the body and head orientation, the "
           "pose, the action, the hand gestures (fists stay fists, open hands stay open, pointing stays pointing), the "
           "facial expression, the mouth shape and what stands in front of or behind this person exactly follow the "
-          "{ord} person from the left in <Picture 1>{pose}.")
-H3_WEAR = ("The {ord} person from the left is now <Subject {s}>, {desc}, in exactly the pose, framing and "
-           "crop of the original {ord} person from the left in <Picture 1>.")
+          "{ord} person from the left in <Picture 1>, shown there as a plain grey figure{pose}.")
+H3_WEAR = ("The {ord} grey figure from the left is now <Subject {s}>, {desc}, filling exactly the silhouette, "
+           "pose, framing and crop of that grey figure.")
 H3_SIZE = ("<Subject {s}> is exactly as big in the image as that original person, about {pct}% of the image height"
            "{cut}.")
 H3_CUT = (", and the bottom edge of the image cuts through the legs at the same place, so the feet and shoes are "
