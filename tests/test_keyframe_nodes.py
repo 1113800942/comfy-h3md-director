@@ -113,40 +113,71 @@ def _fake_h3(monkeypatch, value):
     return seen
 
 
-def test_export_then_recast(clip, monkeypatch):
-    """0.5.91 (user 21:56): Export writes the package for the AI; Recast makes the pictures from its prompts;
-    'redo' makes single keyframes again and keeps the others"""
+def test_export_import_recast(clip, monkeypatch):
+    """0.5.91 (user 21:56, 22:47): Export writes a stamped package for the AI; the AI's answer (.h3kf = the package +
+    prompts.json, or the .json alone) is loaded by Import, which restores the job without Prepare; Recast makes the
+    pictures, shows original | new, and 'redo' (the Redo node) makes single keyframes again"""
     inp, out = clip
     pic = torch.rand(1, 1200, 1000, 3)
     pics, job, sheet, info = N.H3MDKeyframePrepare().prepare(
         "clips/src.mp4", "图1换左二", "a man with short red hair, yellow coat", "", 5.0, 0.4, 8, picture_1=pic)["result"]
     todo = [m for m in job["moments"] if m["items"]]
-    (zp,) = N.H3MDKeyframeExport().export([job], pics, ["t5"])["result"]
+    day = __import__("datetime").date.today().strftime("%Y%m%d")
+    zp, shown = N.H3MDKeyframeExport().export([job], pics, ["t5"])["result"]
+    assert os.path.basename(zp) == f"t5_keyframe_export_{day}_001.zip" and os.path.dirname(zp) == str(out / "H3MD_keyframes")
+    assert shown.shape[0] == 1
+    zp2, _ = N.H3MDKeyframeExport().export([job], pics, ["t5"])["result"]      # never overwritten
+    assert os.path.basename(zp2).endswith("_002.zip") and os.path.isfile(zp)
     with zipfile.ZipFile(zp) as z:
         names = set(z.namelist())
         req = json.loads(z.read("request.json").decode("utf-8"))
-    assert {"request.json", "README_for_AI.md", "character_picture_1.png"} <= names
+        readme = z.read("README_for_AI.md").decode("utf-8")
+    assert {"request.json", "README_for_AI.md", "character_picture_1.png", "_h3md/job.json"} <= names
     assert {f"keyframe_{k}.png" for k in range(1, len(todo) + 1)} <= names
-    # a stale answer or extra keyframe left in the folder must not go into a new package (22:25 run)
-    for stale in ("prompts.json", "keyframe_99.png"):
-        open(os.path.join(os.path.dirname(zp), stale), "wb").write(b"old")
-    (zp,) = N.H3MDKeyframeExport().export([job], pics, ["t5"])["result"]
-    with zipfile.ZipFile(zp) as z:
-        assert set(z.namelist()) == names
+    assert req["answer_file"] == f"t5_keyframe_import_{day}_001.h3kf" and req["answer_file"] in readme
     k1 = req["keyframes"][0]
     assert k1["picture_1"] == "keyframe_1.png" and k1["pictures"][0]["picture"] == 2
     assert k1["pictures"][0]["description"].startswith("a man") and k1["people_in_frame"] == 3
     assert k1["sentence"].startswith("把图1里从左数第2个人替换成图2里的人，图1里其他的人保持不变，")
-    args = [[job], pics] + [[None]] * 5
-    with pytest.raises(N.K.KeyframeError):                     # no prompts yet: says to export and ask the AI
-        N.H3MDKeyframeRecast().recast(*args, [""], [4.0], [7], [""])
-    answer = json.dumps({str(k): f"P{k}" for k in range(1, len(todo) + 1)})
+    # the AI's answer: the package + prompts.json, as .h3kf
+    answer = {"package": req["package"], "prompts": {str(k): f"P{k}" for k in range(1, len(todo) + 1)}}
+    h3kf = inp / "H3MD_keyframes" / "imports" / req["answer_file"]
+    h3kf.parent.mkdir(parents=True)
+    with zipfile.ZipFile(zp) as z, zipfile.ZipFile(h3kf, "w") as o:
+        for n in z.namelist():
+            o.writestr(n, z.read(n))
+        o.writestr("prompts.json", json.dumps(answer))
+    rel = "H3MD_keyframes/imports/" + req["answer_file"]
+    job_i, pics_i, prompts, kf_sheet, inf = N.H3MDKeyframeImport().load(rel)["result"]
+    assert [m["at"] for m in job_i["moments"]] == [m["at"] for m in job["moments"]] and len(pics_i) == len(pics)
+    assert all(np.array_equal(job_i["frames"][m["at"]], job["frames"][m["at"]]) for m in job["moments"])
+    assert job_i["moments"][0]["items"] == json.loads(json.dumps(job["moments"][0]["items"]))
+    # the .json alone finds its export package by name
+    js = inp / "H3MD_keyframes" / "imports" / "a.json"
+    js.write_text(json.dumps(answer), encoding="utf-8")
+    assert N.H3MDKeyframeImport().load(str(js))["result"][2] == json.dumps(answer)
+    js.write_text(json.dumps(answer["prompts"]), encoding="utf-8")
+    with pytest.raises(N.K.KeyframeError):                     # no package name: say what is missing
+        N.H3MDKeyframeImport().load(str(js))
+    args = [[job_i], pics_i] + [[None]] * 5
+    with pytest.raises(N.K.KeyframeError):                     # no prompts: says to export and ask the AI
+        N.H3MDKeyframeRecast().recast(*args, [""], [4.0], [7])
     seen = _fake_h3(monkeypatch, 0.2)
-    imgs, job2, report = N.H3MDKeyframeRecast().recast(*args, [answer], [4.0], [7], [""])["result"]
+    imgs, job2, report, cmp = N.H3MDKeyframeRecast().recast(*args, [prompts], [4.0], [7])["result"]
     assert [s["prompt"] for s in seen] == [f"P{k}" for k in range(1, len(todo) + 1)]
     assert list(seen[0]["images"]) == ["image_0", "image_1"] and (seen[0]["width"], seen[0]["height"]) == (2624, 1504)
     assert len(imgs) == len(todo) and imgs[0].shape[1:3] == (960, 1664) and "#1 " in report
+    assert cmp.shape[1] == 480 * len(todo) and cmp.shape[2] == 1664                  # original | new per row
+    (redo,) = N.H3MDKeyframeRedo().pick("2", len(todo))
     seen = _fake_h3(monkeypatch, 0.8)
-    imgs2, job3, report2 = N.H3MDKeyframeRecast().recast(*args, ['{"2": "P2b"}'], [4.0], [9], ["2"])["result"]
+    imgs2, job3, report2, _ = N.H3MDKeyframeRecast().recast(*args, ['{"2": "P2b"}'], [4.0], [9], [redo])["result"]
     assert [s["prompt"] for s in seen] == ["P2b"] and "kept from the last run" in report2
     assert abs(float(imgs2[0].mean()) - 0.2) < 0.02 and abs(float(imgs2[1].mean()) - 0.8) < 0.02
+    _, _, plan_zip = N.H3MDKeyframeAssemble().assemble(job3, "t5", True)["result"]
+    assert os.path.basename(plan_zip) == f"t5_multiswap_plan_{day}_001.zip"
+
+
+def test_crop_to_aspect():
+    assert N.K.crop_to_aspect(2624, 1504, 1664, 960) == (8, 0, 2615, 1504)           # 32-px rounding: crop, no stretch
+    assert N.K.crop_to_aspect(1000, 1000, 2, 1) == (0, 250, 1000, 750)
+    assert N.K.crop_to_aspect(1000, 500, 1, 1) == (250, 0, 750, 500)

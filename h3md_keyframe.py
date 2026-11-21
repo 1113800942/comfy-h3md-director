@@ -808,37 +808,93 @@ def parse_prompts(text, n):
     return {k: v for k, v in out.items() if v}
 
 
-AI_README = """# H3MD keyframes - write the H3 Image prompts
+AI_README = """# H3MD keyframe package - write the H3 Image prompts
 
-You are writing one MiniMax H3 Image edit prompt per keyframe (request.json lists them).
+You get this package from the H3MD Keyframe Export node. Write one MiniMax H3 Image edit prompt per keyframe, so
+that the people in each keyframe are replaced by the character pictures and nothing else changes.
 
-For keyframe k the edit model gets, in this order:
-  <Picture 1> = keyframe file (the original video frame),
-  <Picture 2>, <Picture 3>, ... = the character pictures listed for that keyframe ("pictures", in order).
+## 1. Check the package first
+Read request.json. The package must contain: request.json, keyframe_1.png ... keyframe_N.png (one per entry in
+"keyframes"), every character_picture_*.png named in "pictures", and per keyframe a "sentence" and for every picture
+"replaces_person_from_left" and a "description". "people_in_frame" must match the people you see in the keyframe.
+If something is missing or does not match (a file, a description, the number of people, a person who is not
+there), stop and tell the user exactly what is missing and how to fix it (run Export again, write the description,
+...). Do not guess.
 
-What each keyframe must become is in its "sentence" (the user's own words): every listed person in <Picture 1>
-(counted from the left as they stand in THIS frame) is replaced by the person in the given picture; the
-orientation, pose, action, hand and palm gesture, expression, mouth, place and size in the picture, and who
-stands in front of / behind whom must stay exactly as in <Picture 1>; the faces, hair and clothes come from the
-pictures.
+## 2. What the edit model gets
+For keyframe k: <Picture 1> = keyframe_k.png (the original video frame), <Picture 2>, <Picture 3>, ... = the
+character pictures listed for that keyframe in "pictures", in that order. People are counted from the left as they
+stand in THIS keyframe (after a place change the order differs from the start - use replaces_person_from_left).
+H3 Image draws what the text says: the prompt decides the result. Read the keyframe carefully.
 
-Write each prompt in English, in the structure of the official H3 Image prompt enhancer:
-  1. Define every character picture as a Subject: "The <looks> in <Picture n> is <Subject k>." - describe the
-     character positively and completely from the picture and the "description" given (face, hair, every garment,
-     shoes; what the hands carry or do not carry, e.g. bare hands). Never describe the clothes of the people in
-     <Picture 1>.
-  2. Define <Picture 1> as a Subject too and say it is partially preserved: background, floor, lighting, camera,
-     framing and crop, and the spatial layout of the people (places, spacing, sizes, who is in front, overlaps)
-     are retained while the people are replaced.
-  3. For every replaced person: which Subject goes to which place, and EXACTLY what the person there does,
-     read from <Picture 1>: body and head orientation, pose, action, each arm, each hand (fist, open palm,
-     pointing, on the hip, touching someone), legs and stance, expression, mouth, front/back and overlap, and
-     where the frame cuts the body (say so plainly when the feet are outside the picture and do not mention
-     footwear for that person then).
-  4. People not to be replaced: say they stay exactly as in <Picture 1>.
+## 3. Write each prompt (English, the structure of the official H3 Image prompt enhancer)
+  a. Define every character picture as a Subject and describe the person positively and completely, head to toe,
+     from the picture and its "description": face, hair, every garment, shoes - and what they do NOT have (bare
+     hands, no gloves). Never describe or mention the clothes of the people in <Picture 1>; never write what to
+     remove.
+  b. Define <Picture 1> as a Subject that is partially preserved: background, floor, lighting, camera angle,
+     framing and crop, the places, spacing and sizes of the people, who is in front, the overlaps.
+  c. Body parts the frame cuts off are not mentioned (feet outside the picture: no shoes for that person) - else
+     the model pulls the camera back. Say where the frame cuts each person.
+  d. For every replaced person, which Subject takes which place, and every one of these, read from <Picture 1>:
+     - body orientation and how far it is turned; head turn and tilt (towards which side of the image), up/down;
+     - EACH hand separately: where (above the head, beside the head, shoulder, chest, waist, thigh, behind the
+       back, on someone), shape (fist, open, fingers spread or together, pointing, palms together, on the hip,
+       hidden), which way the palm faces, the arm (straight or bent, up, forward, sideways);
+     - legs: how much the knees bend, squat depth, which leg carries the weight, how far apart the feet are, where
+       the toes point. Describe the still pose you see; never write a motion you guess from one frame (walking,
+       stepping, jumping);
+     - expression, eyes and mouth (open, shouting, closed smile, pout);
+     - place and size in the frame; who is in front of / behind whom, which part of whom is hidden, who leans
+       towards whom, standing apart or pressed together.
+     Left and right always mean the sides of the image ("the hand on the left side of the image"), never the
+     person's own left/right.
+  e. People who are not replaced stay exactly as in <Picture 1>.
+Write general rules for what to look at; describe only what this keyframe shows.
 
-Answer with prompts.json: {"1": "prompt for keyframe 1", "2": "...", ...} - one entry per keyframe.
+## 4. Check before you answer
+Put each prompt next to its keyframe and check every person, item by item (orientation, both hands, legs, head,
+expression, mouth, front/back, overlap, crop). The result must not differ visibly from the keyframe: a keyframe that
+starts wrong (one fist instead of two, the wrong turn, the wrong overlap) cannot be pulled back later. If you are not
+sure about something, say so instead of guessing.
+
+## 5. Answer (the user imports it with one button - no copy and paste)
+Best: send back this package as the file  {answer_file}  : the same zip, every file unchanged, with one file
+added at the top: prompts.json = {{"package": "{package}", "prompts": {{"1": "prompt for keyframe 1", "2": "..."}}}}.
+If you cannot make files: give the user the text of that prompts.json and tell them to save it as
+{answer_json}  next to the export package.
+Only redoing some keyframes: put only those numbers in "prompts"; the user picks the same numbers on the Redo node.
+The folder _h3md/ is for the nodes - leave it as it is.
 """
+
+
+def stamp_name(folder, name, kind, ext, today=None):
+    """0.5.91 (user 22:52): '<name>_<kind>_<YYYYMMDD>_<NNN><ext>' in `folder`, NNN = next free number of that day
+    for that name and kind (any extension), so a package is never overwritten and the export / import / plan of one
+    run share date and number"""
+    import datetime
+    import os
+    day = today or datetime.date.today().strftime("%Y%m%d")
+    pre = f"{name}_{kind}_{day}_"
+    used = []
+    if os.path.isdir(folder):
+        for f in os.listdir(folder):
+            m = re.match(re.escape(pre) + r"(\d{3})(?!\d)", f)
+            if m:
+                used.append(int(m.group(1)))
+    return os.path.join(folder, f"{pre}{max(used, default=0) + 1:03d}{ext}")
+
+
+def crop_to_aspect(w, h, tw, th):
+    """the centred box (x0, y0, x1, y1) of a w x h picture with the aspect of tw x th (H3 Image's canvas is rounded
+    to 32 px: crop the few extra pixels, then scale, instead of stretching)"""
+    if w * th > tw * h:                      # too wide
+        nw = int(round(h * tw / th))
+        x0 = (w - nw) // 2
+        return (x0, 0, x0 + nw, h)
+    nh = int(round(w * th / tw))
+    y0 = (h - nh) // 2
+    return (0, y0, w, y0 + nh)
 
 
 def plan_length(n_frames: int) -> int:

@@ -129,7 +129,7 @@ def _read_version():
 
 
 H3MD_VERSION = _read_version()
-for _k in ("H3MDDirectorRefMod", "H3MDDirector", "H3MDKeyframePrepare", "H3MDKeyframeExport", "H3MDKeyframeRecast", "H3MDKeyframeAssemble"):   # display name only: node ids, widgets and caches unchanged
+for _k in ("H3MDDirectorRefMod", "H3MDDirector", "H3MDKeyframePrepare", "H3MDKeyframeExport", "H3MDKeyframeImport", "H3MDKeyframeRecast", "H3MDKeyframeRedo", "H3MDKeyframeAssemble"):   # display name only: node ids, widgets and caches unchanged
     if _k in NODE_DISPLAY_NAME_MAPPINGS:
         NODE_DISPLAY_NAME_MAPPINGS[_k] = f"{NODE_DISPLAY_NAME_MAPPINGS[_k]} v{H3MD_VERSION}"
 logging.info("[H3MD] H3MD Director v%s loaded", H3MD_VERSION)
