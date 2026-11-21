@@ -743,8 +743,9 @@ class H3MDKeyframeRecast:
             frame = to_tensor(np.ascontiguousarray(job["frames"][m["at"]]))
             n_people = max(int(it.get("n") or 0) for it in m["items"])
             poses, ans, t_pose = read[m["at"]]
-            prompt = K.h3_prompt([(it["rank"], j + 2, it.get("desc", "")) for j, it in enumerate(m["items"])],
-                                 n_people, poses)
+            prompt = K.h3_prompt([(it["rank"], j + 2, it.get("desc", ""),
+                                   ((it["own"][3] - it["own"][1]) / float(H), bool(it.get("cut_bottom"))))
+                                  for j, it in enumerate(m["items"])], n_people, poses)
             t0 = time.time()
             enc = MiniMaxH3ImageConditioning.execute(clip=clip, prompt=prompt, width=gw, height=gh, vae=vae,
                                                      images={f"image_{j}": im for j, im in enumerate([frame] + refs)})

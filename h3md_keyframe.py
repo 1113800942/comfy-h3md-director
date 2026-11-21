@@ -749,6 +749,10 @@ H3_ONE = ("<Subject {s}> is partially preserved: the face, the hair and the comp
           "{ord} person from the left in <Picture 1>{pose}.")
 H3_WEAR = ("The {ord} person from the left is now <Subject {s}>, {desc}, in exactly the pose, framing and "
            "crop of the original {ord} person from the left in <Picture 1>.")
+H3_SIZE = ("<Subject {s}> is exactly as big in the image as that original person, about {pct}% of the image height"
+           "{cut}.")
+H3_CUT = (", and the bottom edge of the image cuts through the legs at the same place, so the feet and shoes are "
+          "outside the image")
 H3_OTHERS = "Every other person in <Picture 1> stays exactly as before."
 H3_END = "Nothing else in <Picture 1> changes."
 
@@ -782,11 +786,13 @@ def parse_poses(text, n):
 
 def h3_prompt(people, n_people, poses=None) -> str:
     """the H3 Image edit prompt for one keyframe, in the official enhancer's structure: people = [(place from the left
-    in this keyframe, picture number, description of the new person head to toe)], n_people in the keyframe, poses
+    in this keyframe, picture number, description of the new person head to toe[, (share of the image height, cut
+    by the bottom edge)])], n_people in the keyframe, poses
     {place: what that person in the keyframe does} (test 19:40: without the pose in words every new person stood
     straight, framing widened to show the described shoes)"""
     poses = poses or {}
-    people = sorted(people)
+    size = {p[0]: p[3] for p in people if len(p) > 3 and p[3]}
+    people = sorted(p[:3] for p in people)
     subs = {img: k + 1 for k, (r, img, d) in enumerate(people)}
     clean = lambda d: (d or "the person exactly as shown in the picture").strip().rstrip(".。 ")
     parts = [H3_DEFINE.format(img=img, s=subs[img], desc=clean(d)) for r, img, d in sorted(people, key=lambda p: p[1])]
@@ -797,6 +803,8 @@ def h3_prompt(people, n_people, poses=None) -> str:
         parts.append(H3_ONE.format(s=subs[img], img=img, ord=ordinal(r), pose=f", who {pz}" if pz else ""))
     for r, img, d in people:
         parts.append(H3_WEAR.format(ord=ordinal(r), s=subs[img], desc=clean(d)))
+        if r in size:          # test 19:47: framing widened to show the described shoes when the frame cuts the legs
+            parts.append(H3_SIZE.format(s=subs[img], pct=int(round(100 * size[r][0])), cut=H3_CUT if size[r][1] else ""))
     if len(people) < n_people:
         parts.append(H3_OTHERS)
     parts.append(H3_END)

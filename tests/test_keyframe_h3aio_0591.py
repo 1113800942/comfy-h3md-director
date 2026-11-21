@@ -36,3 +36,10 @@ def test_poses():
     assert "follow the first person from the left in <Picture 1>, who claps above the head." in p
     assert "in exactly the pose, framing and crop of the original first person from the left in <Picture 1>." in p
     assert "There are 3 people" in K.POSE_ASK.format(n=3)
+
+
+def test_size_and_cut():
+    p = K.h3_prompt([(1, 2, EVA, (0.82, True)), (2, 3, PETER, (0.5, False))], 2)
+    assert "<Subject 1> is exactly as big in the image as that original person, about 82% of the image height" in p
+    assert "so the feet and shoes are outside the image." in p
+    assert "about 50% of the image height." in p
