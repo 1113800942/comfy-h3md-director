@@ -339,16 +339,24 @@ def split_by_face(per_frame, obs, labels, keep_run=FACE_KEEP_RUN):
     # 0.5.91 (_012, 24.2-26.5 s): the lead singer turning away gave a 6th "person" whose faces all came from his own
     # track - a cluster seen on one track only, on a track that is mostly someone else, is that someone at an odd
     # angle: no cut
-    tracks_of = {}
+    # (_014: a few stray faces of that 'person' on other tracks kept the cut: count them instead - a person is
+    # established only when a fair share of his faces are on OTHER tracks)
+    total = {}
     for pid, seq in by_id.items():
         for _, lab in seq:
-            tracks_of.setdefault(lab, set()).add(pid)
+            total.setdefault(lab, {}).setdefault(pid, 0)
+            total[lab][pid] += 1
     for pid, seq in by_id.items():
         counts = {}
         for _, lab in seq:
             counts[lab] = counts.get(lab, 0) + 1
         main = max(counts, key=counts.get)
-        by_id[pid] = [(i, main if (lab != main and tracks_of.get(lab) == {pid}) else lab) for i, lab in seq]
+
+        def elsewhere(lab):
+            n_all = sum(total[lab].values())
+            n_out = n_all - total[lab].get(pid, 0)
+            return n_out >= max(FACE_MIN_COUNT, 0.3 * n_all)
+        by_id[pid] = [(i, main if (lab != main and not elsewhere(lab)) else lab) for i, lab in seq]
     pieces = {}                                           # id -> [(from frame, to frame, person)]
     notes = []
     for pid, seq in by_id.items():
