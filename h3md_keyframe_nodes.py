@@ -726,9 +726,9 @@ class H3MDKeyframeExport:
             fh.write(K.AI_README)
         zp = os.path.join(d, name + "_ai.zip")
         with zipfile.ZipFile(zp, "w", zipfile.ZIP_DEFLATED) as z:
-            for f in sorted(os.listdir(d)):
-                if f.endswith((".png", ".json", ".md")):
-                    z.write(os.path.join(d, f), f)
+            # only what this run wrote: an old prompts.json or keyframes left in the folder must not ride along
+            for f in ([r["picture_1"] for r in req] + sorted(saved.values()) + ["request.json", "README_for_AI.md"]):
+                z.write(os.path.join(d, f), f)
         msg = (f"{len(todo)} keyframes -> {zp}\nGive this zip to the AI; paste its prompts.json into Recast. "
                f"把这个 zip 交给 AI，把它回的 prompts.json 粘贴到 Recast 的 prompts 里。")
         LOG.info("%s %s", TAG, msg)

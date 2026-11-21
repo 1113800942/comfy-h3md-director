@@ -127,6 +127,12 @@ def test_export_then_recast(clip, monkeypatch):
         req = json.loads(z.read("request.json").decode("utf-8"))
     assert {"request.json", "README_for_AI.md", "character_picture_1.png"} <= names
     assert {f"keyframe_{k}.png" for k in range(1, len(todo) + 1)} <= names
+    # a stale answer or extra keyframe left in the folder must not go into a new package (22:25 run)
+    for stale in ("prompts.json", "keyframe_99.png"):
+        open(os.path.join(os.path.dirname(zp), stale), "wb").write(b"old")
+    (zp,) = N.H3MDKeyframeExport().export([job], pics, ["t5"])["result"]
+    with zipfile.ZipFile(zp) as z:
+        assert set(z.namelist()) == names
     k1 = req["keyframes"][0]
     assert k1["picture_1"] == "keyframe_1.png" and k1["pictures"][0]["picture"] == 2
     assert k1["pictures"][0]["description"].startswith("a man") and k1["people_in_frame"] == 3
