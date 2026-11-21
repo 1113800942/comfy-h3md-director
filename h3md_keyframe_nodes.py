@@ -1204,6 +1204,22 @@ class H3MDKeyframeRecast:
     DESCRIPTION = ("Multi-person swap keyframes, step 1b (0.5.91): one H3 Image edit per keyframe with the prompts "
                    "the AI wrote from H3MD Keyframe 1a: Export. Then H3MD Keyframe 2: Assemble.")
 
+    METHOD = "H3 Image, prompts written by an AI from the Export package"
+
+    def _edit(self, frame, refs, prompt, model, clip, vae, sampler, sigmas, seed, gw, gh):
+        """one edit of a whole keyframe -> (image [1,H,W,3] 0-1, canvas size)"""
+        import nodes
+        from comfy_extras.nodes_minimax_h3 import MiniMaxH3ImageConditioning
+        from comfy_extras.nodes_custom_sampler import BasicGuider, RandomNoise, SamplerCustomAdvanced
+        enc = MiniMaxH3ImageConditioning.execute(clip=clip, prompt=prompt, width=gw, height=gh, vae=vae,
+                                                 images={f"image_{j}": im for j, im in enumerate([frame] + refs)})
+        guider = BasicGuider.execute(model=model, conditioning=enc.result[0]).result[0]
+        noise = RandomNoise.execute(noise_seed=seed).result[0]
+        res = SamplerCustomAdvanced.execute(noise=noise, guider=guider, sampler=sampler, sigmas=sigmas,
+                                            latent_image=enc.result[1])
+        img = nodes.VAEDecode().decode(vae, res.result[0])[0]
+        return img.reshape(-1, img.shape[-3], img.shape[-2], img.shape[-1])[:1].clamp(0, 1), (gw, gh)
+
     def recast(self, job, pictures, model, clip, vae, sampler, sigmas, prompts, megapixels, seed, redo=""):
         import time
         import numpy as np
@@ -1249,14 +1265,7 @@ class H3MDKeyframeRecast:
             frame = to_tensor(np.ascontiguousarray(job["frames"][m["at"]]))
             prompt = given[k]
             t0 = time.time()
-            enc = MiniMaxH3ImageConditioning.execute(clip=clip, prompt=prompt, width=gw, height=gh, vae=vae,
-                                                     images={f"image_{j}": im for j, im in enumerate([frame] + refs)})
-            guider = BasicGuider.execute(model=model, conditioning=enc.result[0]).result[0]
-            noise = RandomNoise.execute(noise_seed=seed).result[0]
-            res = SamplerCustomAdvanced.execute(noise=noise, guider=guider, sampler=sampler, sigmas=sigmas,
-                                                latent_image=enc.result[1])
-            img = nodes.VAEDecode().decode(vae, res.result[0])[0]
-            img = img.reshape(-1, img.shape[-3], img.shape[-2], img.shape[-1])[:1].clamp(0, 1)
+            img, (gw, gh) = self._edit(frame, refs, prompt, model, clip, vae, sampler, sigmas, seed, gw, gh)
             out = to_u8(img)
             out = fit_frame(out, W, H)          # crop H3 Image's 32-px rounding, then scale: no stretching
             lines.append(f"#{k} {m['at']:.2f} s: {time.time() - t0:.1f} s ({gw}x{gh})")
@@ -1279,18 +1288,75 @@ class H3MDKeyframeRecast:
         cmp = compare_sheet(pairs, [f"#{k}  {m['at']:.2f} s" for k, m in enumerate(todo, 1)])
         LOG.info("%s recast report:\n%s", TAG, report)
         job = dict(job, recast_frames=done,
-                   recast={"method": "H3 Image, prompts written by an AI from the Export package", "seed": seed,
-                           "report": report})
+                   recast={"method": self.METHOD, "seed": seed, "report": report})
         return {"ui": {"text": [report], "h3md_kf_count": [len(todo)]},
                 "result": (out_imgs, job, report, to_tensor(cmp))}
 
 
+class H3MDKeyframeRecastQwen(H3MDKeyframeRecast):
+    """0.5.91 test (user 05:13): the same Recast with Qwen Image 2.1 edit (the user's 'Qwen2.1 image editor' chain:
+    qwen_image_2.1 int8 + 2-step LoRA + detailer + low-res slider, AuraFlow shift 1, qwen3-vl-8b-heretic, euler,
+    1.0 / 0.5 / 0) instead of H3 Image - to see whether the H3 Image keyframes bring the grain into the video.
+    The AI's prompts name the pictures 'Picture N'; Qwen Image 2.1 names its references <imageN>, so the names are
+    changed before encoding (nothing else)."""
+
+    METHOD = "Qwen Image 2.1 edit, prompts written by an AI from the Export package (names -> <imageN>)"
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        t = super().INPUT_TYPES()
+        req = dict(t["required"])
+        req["model"] = ("MODEL", {"tooltip": "Qwen Image 2.1 (+ 2-step / detailer / low-res slider LoRAs, AuraFlow 1)"})
+        req["clip"] = ("CLIP", {"tooltip": "qwen3-vl-8b (type qwen_image)"})
+        req["vae"] = ("VAE", {"tooltip": "qwen_image_2.1_vae"})
+        req["sigmas"] = ("SIGMAS", {"tooltip": "1.0, 0.5, 0 (2-step LoRA)"})
+        req["megapixels"] = ("FLOAT", {"default": 2.0, "min": 0.5, "max": 4.0, "step": 0.1,
+                                       "tooltip": "Edit canvas (the first reference's size): Qwen Image 2.1 works at "
+                                                  "1-2 MP"})
+        req["quality"] = ("STRING", {"multiline": True, "default": QWEN_QUALITY, "tooltip": "Appended to every "
+                                     "prompt (the quality line of the user's Qwen workflow, scene-neutral)"})
+        return dict(t, required=req)
+
+    def recast(self, job, pictures, model, clip, vae, sampler, sigmas, prompts, megapixels, seed, quality=None,
+               redo=""):
+        q = quality[0] if isinstance(quality, list) else quality
+        self._quality = str(q or "").strip()
+        return super().recast(job, pictures, model, clip, vae, sampler, sigmas, prompts, megapixels, seed, redo)
+
+    def _edit(self, frame, refs, prompt, model, clip, vae, sampler, sigmas, seed, gw, gh):
+        import math
+        import re
+        import nodes
+        from comfy_extras.nodes_qwen import TextEncodeQwenImage21
+        from comfy_extras.nodes_custom_sampler import SamplerCustom
+        text = re.sub(r"<Picture (\d+)>", r"<image\1>", prompt)
+        text = re.sub(r"Subject Picture 1\b", "<image1>", text)
+        text = re.sub(r"Subject Picture (\d+)", r"the person in <image\1>", text)
+        text = re.sub(r"\bPicture (\d+)", r"<image\1>", text)
+        text = "Edit <image1>. " + text + ((" " + self._quality) if getattr(self, "_quality", "") else "")
+        res = int(round(math.sqrt(gw * gh) / 32) * 32)
+        enc = TextEncodeQwenImage21.execute(clip=clip, prompt=text, negative_prompt="", vae=vae, resolution=res,
+                                            images={f"image_{j + 1}": im for j, im in enumerate([frame] + refs)})
+        pos, neg, lat = enc.result
+        out = SamplerCustom.execute(model=model, add_noise=True, noise_seed=seed, cfg=1.0, positive=pos,
+                                    negative=neg, sampler=sampler, sigmas=sigmas, latent_image=lat)
+        img = nodes.VAEDecode().decode(vae, out.result[0])[0]
+        img = img.reshape(-1, img.shape[-3], img.shape[-2], img.shape[-1])[:1].clamp(0, 1)
+        return img, (int(img.shape[2]), int(img.shape[1]))
+
+
+QWEN_QUALITY = ("Fix damaged pixels, increase texture details, ultra-realistic photo, realistic skin, clearly visible "
+                "hair, natural light.")
+
+
 NODE_CLASS_MAPPINGS = {"H3MDKeyframePrepare": H3MDKeyframePrepare, "H3MDKeyframeExport": H3MDKeyframeExport,
                        "H3MDKeyframeImport": H3MDKeyframeImport, "H3MDKeyframeRecast": H3MDKeyframeRecast,
+                       "H3MDKeyframeRecastQwen": H3MDKeyframeRecastQwen,
                        "H3MDKeyframeRedo": H3MDKeyframeRedo, "H3MDKeyframeAssemble": H3MDKeyframeAssemble}
 NODE_DISPLAY_NAME_MAPPINGS = {"H3MDKeyframePrepare": "H3MD Keyframe Prepare",
                               "H3MDKeyframeExport": "H3MD Keyframe Export",
                               "H3MDKeyframeImport": "H3MD Keyframe Import",
                               "H3MDKeyframeRecast": "H3MD Keyframe Recast",
+                              "H3MDKeyframeRecastQwen": "H3MD Keyframe Recast (Qwen Image, test)",
                               "H3MDKeyframeRedo": "H3MD Keyframe Redo",
                               "H3MDKeyframeAssemble": "H3MD Keyframe Assemble"}

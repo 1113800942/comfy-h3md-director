@@ -11,12 +11,13 @@ import h3md_loop_split as LS  # noqa: E402
 
 
 class FakeCache:
-    def __init__(self, cached, frames=56, content=None):
+    def __init__(self, cached, frames=56, content=None, made_with=None):
         self.cached, self.frames, self.content = set(cached), frames, content or {}
+        self.made_with = made_with or {}
 
     def manifest(self, k):
-        return {"frames": self.frames, "lowres": True, "content": self.content.get(k, f"c{k}")} \
-            if k in self.cached else None
+        return {"frames": self.frames, "lowres": True, "content": self.content.get(k, f"c{k}"),
+                "made_with": self.made_with.get(k, "s")} if k in self.cached else None
 
 
 SEGS = [{"length": 56, "overlapIn": 0 if k == 0 else 8} for k in range(10)]
@@ -103,6 +104,28 @@ def test_trial_ignores_other_plans_cache():
     assert idx == [0] and rerun == [0]           # the trial output is part 1 only
     idx, rerun, _ = L.plan_trial("3", TSEGS, FakeCache([2, 1], content={1: "old plan"}), True, PLAN)
     assert idx == [1, 2] and rerun == [1, 2]     # part 3 continues part 2, which is from another plan: made again
+
+
+# 0.5.91 (user 05:16): segments_to_run "1" with the LMS LoRA off took segments 2-4 (made with LMS 0.2) from the
+# cache and locked segment 1 to their tail - a trial with other settings must give only the tried segment
+def test_segments_to_run_other_settings_not_kept():
+    stop, rerun, _ = L.plan_segments_to_run("1", SEGS, FakeCache(range(10)), True, PLAN, "s2")
+    assert stop == 1 and rerun == [0]            # only segment 1; the old segments are not spliced in
+    stop, rerun, _ = L.plan_segments_to_run("1", SEGS, FakeCache(range(10)), True, PLAN, "s")
+    assert stop == 10 and rerun == [0]           # same settings: repair inside the finished video as before
+
+
+def test_trial_other_settings_not_kept():
+    idx, rerun, _ = L.plan_trial("4", TSEGS, FakeCache(range(5)), True, PLAN, "s2")
+    assert idx == [3] and rerun == [3]           # only part 4 (new settings), the others are not kept
+    idx, rerun, _ = L.plan_trial("3", TSEGS, FakeCache(range(5), made_with={1: "s2"}), True, PLAN, "s")
+    assert idx == [1, 2] and rerun == [1, 2]     # part 2 (needed by part 3) was made with other settings: again
+
+
+def test_made_with_changes_with_loras_and_settings():
+    a = L.made_with_sig({"full": "x"}, {"high": [["lms", 0.2]]})
+    assert a != L.made_with_sig({"full": "x"}, {}) and a != L.made_with_sig({"full": "y"}, {"high": [["lms", 0.2]]})
+    assert a == L.made_with_sig({"full": "x"}, {"high": [["lms", 0.2]]})
 
 
 def test_input_on_main_node_last():
