@@ -13,6 +13,7 @@ sam3.1_multiplex_fp16.safetensors, the same file the depth / pose control uses).
 from __future__ import annotations
 
 import gc
+import io
 import json
 import logging
 import math
@@ -194,6 +195,7 @@ FACE_EVERY = 1            # 0.5.91: faces are read on every tracking frame (6 pe
 FACE_MIN_PX = 20          # ... a face narrower than this (pixels) is too small to compare
 FACE_MIN_SCORE = 0.5
 _FACE_APP = {}
+_TRACK_CACHE = {}         # 0.5.91: last clip's tracking (one entry: small frames + boxes)
 
 
 def face_app():
@@ -389,7 +391,7 @@ def cast_sheet(small, frames, people, chosen, tile_h=360, per_row=6):
     from PIL import Image, ImageDraw
     pic_of = {pid: p for p, _, pid in chosen}
     f = _font(22)
-    tiles = []
+    tiles, crops = [], []
     for k, a in enumerate(people, 1):
         img = Image.fromarray(np.asarray(small[a["best"]])).convert("RGB")
         W, H = img.size
@@ -404,6 +406,7 @@ def cast_sheet(small, frames, people, chosen, tile_h=360, per_row=6):
         ImageDraw.Draw(dim).rectangle(inner, outline=(255, 140, 0) if pic_of.get(a["id"]) else (80, 200, 255),
                                       width=max(3, W // 300))
         crop = dim.crop(box)
+        crops.append(crop)
         tw = max(170, int(round(crop.width * tile_h / max(1, crop.height))))
         crop = crop.resize((min(tw, tile_h), tile_h), Image.LANCZOS)
         tile = Image.new("RGB", (max(170, crop.width), tile_h + 62), (24, 24, 24))
@@ -425,7 +428,25 @@ def cast_sheet(small, frames, people, chosen, tile_h=360, per_row=6):
             sheet.paste(t, (x, y))
             x += t.width + 8
         y += tile_h + 70
-    return np.asarray(sheet)
+    return np.asarray(sheet), crops
+
+
+def thumb_b64(img, h=180):
+    """PIL image -> small JPEG as a data URL (the cast panel on the Prepare node)"""
+    import base64
+    from PIL import Image
+    w = max(1, int(round(img.width * h / max(1, img.height))))
+    buf = io.BytesIO()
+    img.convert("RGB").resize((w, h), Image.LANCZOS).save(buf, "JPEG", quality=82)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def tensor_pil(t):
+    import numpy as np
+    from PIL import Image
+    a = t[0] if getattr(t, "ndim", 3) == 4 else t
+    a = a.detach().cpu().numpy() if hasattr(a, "detach") else np.asarray(a)
+    return Image.fromarray((np.clip(a[..., :3], 0, 1) * 255).astype(np.uint8))
 
 
 def contact_sheet(images, labels, cols=2, width=1664):
@@ -560,8 +581,9 @@ class H3MDKeyframePrepare:
                                        "appears in the clip, picture 2 to the next, and so on; once given, a person "
                                        "keeps his picture wherever he moves, and people after the last picture stay "
                                        "themselves. The cast sheet (people_sheet) shows who got which picture. To "
-                                       "choose yourself: '图1换3号' / 'picture 1 -> 3' with the numbers of the cast "
-                                       "sheet. 留空 = 自动：图1 给最先出现的人，图2 给下一个……"}),
+                                       "choose yourself: after a run click the people on the buttons below (first "
+                                       "click = picture 1 ...) and run again (the tracking is reused: seconds), or "
+                                       "write '图1换3号' / 'picture 1 -> 3'. 留空 = 自动；跑一次后点下面的人来挑。"}),
                 "descriptions": ("STRING", {"multiline": True, "default": "", "tooltip":
                                             "One line per picture, in picture order, head to toe: race, age, face, "
                                             "hair, every garment and the shoes (e.g. 'a Black man in his twenties, short "
@@ -633,46 +655,58 @@ class H3MDKeyframePrepare:
         dur = length / K.FPS
         LOG.info("%s %s: %dx%d %.2f s -> %dx%d, %d frames", TAG, os.path.basename(path), info["width"],
                  info["height"], info["duration"], size[0], size[1], length)
-        times, small = sample_frames(path, dur, size)
-        K.FRAME_ASPECT = size[0] / float(size[1])
-        windows = track_people(small, threshold=threshold, max_people=max_people)
-        per_frame = K.link_windows(windows)[:len(times)]
-        # 0.5.9: join people the tracker split (blackout, cut, spin, out and back in) - elimination, then hair /
-        # clothes colour.  Before, the person a picture is mapped to was "lost" and later keyframes missed her.
-        faces = {}
-        try:   # 0.5.91: faces tell apart people in the same clothes (a cut, a close-up, five men in white).  The
-            # faces are grouped into people first; where a track's face turns into another person's (the tracker
-            # passed the number on at a crossing) the track is cut there, and every piece is named after its person
-            obs = face_observations(path, times, per_frame, size)
-            labels, cents = K.face_clusters([o[2] for o in obs]) if obs else ([], [])
-            per_frame, person_of, split_notes = K.split_by_face(per_frame, obs, labels)
-            faces = {nid: cents[p] for nid, p in person_of.items()}
-            LOG.info("%s faces: %d seen, %d people by face", TAG, len(obs), len(cents))
-            for n_ in split_notes:
-                LOG.info("%s %s", TAG, n_)
-        except Exception as exc:
-            LOG.warning("%s face reading failed (%s): hair / clothes colour only", TAG, exc)
-        try:
-            track_looks = K.add_faces(K.appearance(small, per_frame), faces)
-            per_frame, reid_joins, reid_unsure = K.reid_merge(per_frame, track_looks, times)
-        except Exception as exc:
-            reid_joins, reid_unsure = [], []
-            LOG.warning("%s re-identification failed (%s): tracks used as they are", TAG, exc)
-        try:   # 0.5.9 diagnostics: every track's time span, and why a new track was or was not joined
-            spans = {}
-            for t_, fr in zip(times, per_frame):
-                for q in fr:
-                    a = spans.setdefault(q, [t_, t_, 0])
-                    a[1], a[2] = t_, a[2] + 1
-            LOG.info("%s tracks after re-identification: %s", TAG,
-                     "; ".join(f"{q}: {a[0]:.1f}-{a[1]:.1f} s ({a[2]} frames)" for q, a in sorted(spans.items())))
-            for n_ in getattr(K.reid_merge, "notes", []):
-                LOG.info("%s re-id %s", TAG, n_)
-        except Exception:
-            pass
-        for j in reid_joins:
-            LOG.info("%s person found again at %.1f s (track %s = track %s, %s, look %.2f)", TAG, j["at"], j["new"],
-                     j["into"], j["why"], j["look"])
+        # 0.5.91 (user 02:18): picking people on the cast sheet re-runs Prepare - the tracking (SAM3, faces,
+        # re-identification) of the same clip and settings is reused, so the second run takes seconds
+        tkey = (os.path.abspath(path), os.path.getsize(path), tuple(size), round(float(threshold), 3),
+                int(max_people), round(dur, 3))
+        hit = _TRACK_CACHE.get(tkey)
+        if hit is not None:
+            times, small, per_frame, reid_joins, reid_unsure = hit
+            K.FRAME_ASPECT = size[0] / float(size[1])
+            LOG.info("%s tracking reused from the last run (same clip and settings)", TAG)
+        else:
+            times, small = sample_frames(path, dur, size)
+            K.FRAME_ASPECT = size[0] / float(size[1])
+            windows = track_people(small, threshold=threshold, max_people=max_people)
+            per_frame = K.link_windows(windows)[:len(times)]
+            # 0.5.9: join people the tracker split (blackout, cut, spin, out and back in) - elimination, then hair /
+            # clothes colour.  Before, the person a picture is mapped to was "lost" and later keyframes missed her.
+            faces = {}
+            try:   # 0.5.91: faces tell apart people in the same clothes (a cut, a close-up, five men in white).  The
+                # faces are grouped into people first; where a track's face turns into another person's (the tracker
+                # passed the number on at a crossing) the track is cut there, and every piece is named after its person
+                obs = face_observations(path, times, per_frame, size)
+                labels, cents = K.face_clusters([o[2] for o in obs]) if obs else ([], [])
+                per_frame, person_of, split_notes = K.split_by_face(per_frame, obs, labels)
+                faces = {nid: cents[p] for nid, p in person_of.items()}
+                LOG.info("%s faces: %d seen, %d people by face", TAG, len(obs), len(cents))
+                for n_ in split_notes:
+                    LOG.info("%s %s", TAG, n_)
+            except Exception as exc:
+                LOG.warning("%s face reading failed (%s): hair / clothes colour only", TAG, exc)
+            try:
+                track_looks = K.add_faces(K.appearance(small, per_frame), faces)
+                per_frame, reid_joins, reid_unsure = K.reid_merge(per_frame, track_looks, times)
+            except Exception as exc:
+                reid_joins, reid_unsure = [], []
+                LOG.warning("%s re-identification failed (%s): tracks used as they are", TAG, exc)
+            try:   # 0.5.9 diagnostics: every track's time span, and why a new track was or was not joined
+                spans = {}
+                for t_, fr in zip(times, per_frame):
+                    for q in fr:
+                        a = spans.setdefault(q, [t_, t_, 0])
+                        a[1], a[2] = t_, a[2] + 1
+                LOG.info("%s tracks after re-identification: %s", TAG,
+                         "; ".join(f"{q}: {a[0]:.1f}-{a[1]:.1f} s ({a[2]} frames)" for q, a in sorted(spans.items())))
+                for n_ in getattr(K.reid_merge, "notes", []):
+                    LOG.info("%s re-id %s", TAG, n_)
+            except Exception:
+                pass
+            for j in reid_joins:
+                LOG.info("%s person found again at %.1f s (track %s = track %s, %s, look %.2f)", TAG, j["at"], j["new"],
+                         j["into"], j["why"], j["look"])
+            _TRACK_CACHE.clear()
+            _TRACK_CACHE[tkey] = (times, small, per_frame, reid_joins, reid_unsure)
         frames = K.report(per_frame, times)
         people = K.cast(frames)
         order = [a["id"] for a in people]
@@ -727,7 +761,7 @@ class H3MDKeyframePrepare:
             if seen_last[pid] < dur - max_gap_s:
                 warnings.append(f"picture {p} (person #{k}) is followed only up to {seen_last[pid]:.1f} s: after that "
                                 "the tracker lost them (left the frame or hidden?). Later keyframes miss this person.")
-        sheet = cast_sheet(small, frames, people, chosen)
+        sheet, cast_crops = cast_sheet(small, frames, people, chosen)
         full = read_frames(path, [frames[i]["at"] for i, _ in moments], size)
         W, H = size
         pictures, job_moments = [], []
@@ -792,7 +826,16 @@ class H3MDKeyframePrepare:
         LOG.info("%s %d keyframes, %d people to recast", TAG, len(job_moments), len(pictures))
         if not pictures:
             raise K.KeyframeError(f"{TAG} none of the chosen people was found at any keyframe. 一个要换的人都没找到。")
-        return {"ui": {"text": [info_s]},
+        cast_ui = {"pictures": picset, "people": [
+            {"person": n, "first": round(a["first"], 1), "last": round(a["last"], 1),
+             "picture": next((p for p, k, _ in chosen if k == n), None)} for n, a in enumerate(people, 1)]}
+        try:   # 02:20: thumbnails for the drag-a-line cast panel
+            cast_ui["tiles"] = [thumb_b64(c) for c in cast_crops]
+            cast_ui["thumbs"] = {str(p): thumb_b64(tensor_pil(pics[f"picture_{p}"])) for p in picset}
+            cast_ui["desc"] = {str(p): descs.get(p, "")[:80] for p in picset}
+        except Exception as exc:
+            LOG.warning("%s cast panel pictures failed: %s", TAG, exc)
+        return {"ui": {"text": [info_s], "h3md_cast": [json.dumps(cast_ui)]},
                 "result": (pictures, job, to_tensor(sheet), info_s)}
 
 

@@ -183,3 +183,27 @@ def test_crop_to_aspect():
     assert N.K.crop_to_aspect(2624, 1504, 1664, 960) == (8, 0, 2615, 1504)           # 32-px rounding: crop, no stretch
     assert N.K.crop_to_aspect(1000, 1000, 2, 1) == (0, 250, 1000, 750)
     assert N.K.crop_to_aspect(1000, 500, 1, 1) == (250, 0, 750, 500)
+
+
+def test_prepare_cast_panel_and_reuse(clip, monkeypatch):
+    """0.5.91 (user 02:18-02:23): the cast panel gets the people and pictures; picking someone else and running
+    again reuses the tracking (no second SAM3 run)."""
+    calls = []
+    real = N.track_people
+
+    def counting(frames, **kw):
+        calls.append(1)
+        return real(frames, **kw)
+    monkeypatch.setattr(N, "track_people", counting)
+    pic = torch.rand(1, 600, 500, 3)
+    out = N.H3MDKeyframePrepare().prepare("clips/src.mp4", "", "a man\na woman", "", 5.0, 0.4, 8,
+                                          picture_1=pic, picture_2=pic)
+    cast = json.loads(out["ui"]["h3md_cast"][0])
+    assert [q["picture"] for q in cast["people"]] == [1, 2, None]          # automatic: first to appear
+    assert len(cast["tiles"]) == 3 and set(cast["thumbs"]) == {"1", "2"}
+    assert cast["tiles"][0].startswith("data:image/jpeg;base64,")
+    out2 = N.H3MDKeyframePrepare().prepare("clips/src.mp4", "图1换3号\n图2换1号", "a man\na woman", "", 5.0, 0.4, 8,
+                                           picture_1=pic, picture_2=pic)
+    cast2 = json.loads(out2["ui"]["h3md_cast"][0])
+    assert [q["picture"] for q in cast2["people"]] == [2, None, 1]
+    assert len(calls) == 1

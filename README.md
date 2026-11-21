@@ -179,8 +179,9 @@ pass and its own high-res pass on top.
      recast only that part, cut with its sound), the characters into *Picture 1/2/3*, leave
      *mapping* empty - picture 1 goes to the first person who appears in the clip, picture 2 to the next, and so on (people
      who appear together: left to right); once given, a person keeps his picture wherever he moves, later people stay
-     themselves; the cast sheet (*People*) shows who got which picture, and "图1换3号" / "picture 1 -> 3" picks by its
-     numbers instead - and write one description line per picture, head to toe: race, age, face, hair, every garment, the shoes - **always
+     themselves; the cast sheet (*People*) shows who got which picture; to choose yourself, click the people on the
+     buttons that appear under Prepare after the run (first click = picture 1 ...) and run again - the tracking is
+     reused, so it takes seconds - and write one description line per picture, head to toe: race, age, face, hair, every garment, the shoes - **always
      what the picture does not show** (a half-body picture: trousers and shoes). **H3MD Keyframe Prepare** tracks the
      people (core SAM3.1), finds the cuts and picks the keyframe moments (at least one per shot, at most about 5 s
      apart; a person lost after a blackout, a cut or a spin is found again). **H3MD Keyframe Export** writes
