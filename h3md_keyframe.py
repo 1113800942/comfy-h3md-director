@@ -1,7 +1,7 @@
 """H3MD Keyframe - pure logic for the multi-person swap keyframes (2026-11-17, H3MD 0.5.0).
 
 The nodes in h3md_keyframe_nodes.py wrap this file:
-  1 Prepare: who is who (numbered left to right at the start), which moments become keyframes, where every person to
+  1 Prepare: who is who (numbered in order of first appearance), which moments become keyframes, where every person to
     recast stands at every moment.
   1b Recast (0.5.91): the user's H3 Image AIO chain - one plain sentence (who at which place becomes which
     picture), the official H3 Image prompt enhancer writes the prompt, one H3 Image edit redraws the keyframe.
@@ -19,7 +19,11 @@ MIN_FRAMES = 90           # Remake: 90-345 frames per autosplit part
 MIN_H = 0.06              # a person shorter than this (fraction of the frame height) does not count as seen
 MAX_TOP = 0.85            # ... nor one whose box starts below this (only a head peeking in at the bottom)
 LINK_IOU = 0.3            # same person in two tracking windows: boxes on the shared frame overlap at least this
-LOOK_S = 3.0              # the numbering moment is searched in the first seconds
+CAST_MIN_S = 1.0          # 0.5.91 (user 01:52): a person counts (gets a number, can take a picture) when seen clearly
+                          # this long - a passer-by or a sliver at the edge does not use up a picture
+CAST_TOGETHER_S = 1.0     # 0.5.91: people first seen within this many seconds of each other appear "together"
+SLIVER_W = 0.08           # 0.5.91: a person cut off by a side edge and narrower than this share of the width is not
+                          # recast at that keyframe (2026-11-21 _004: picture 3 was put on a 26 px strip)
 CLEAR_IOU = 0.2
 COVERED = 0.3
 SPACING = 0.7            # keyframes are picked in (prev + 0.7 * max_gap, prev + max_gap]: as few as the gap allows
@@ -27,7 +31,8 @@ EDIT_MP = 4.0             # 0.5.91: H3 Image canvas (megapixels), as the user's 
 
 CN = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
 ORDINAL = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"]
-_PAT = re.compile(r"(?:图片|圖片|图|圖|picture|pic|image|img)\s*(\d+)[^\d\n,，;；。]*?(?:左|left)\s*(?:第|no\.?|#)?\s*"
+# 0.5.91: '图1换3号' / 'picture 1 -> 3' / 'pic 1 -> #3': the person's number on the cast sheet (order of appearance)
+_PAT = re.compile(r"(?:图片|圖片|图|圖|picture|pic|image|img)\s*(\d+)[^\d\n,，;；。一二两三四五六七八九十]*?"
                   r"([0-9]+|[一二两三四五六七八九十]+)", re.I)
 TAG = "[H3MD Keyframe]"
 
@@ -51,23 +56,26 @@ def cn_number(s: str) -> int:
 
 
 def parse_mapping(text: str) -> dict:
-    """'图1换左二，图2换左四' / 'picture 1 -> left 2' -> {1: 2, 2: 4} (picture -> left number)."""
+    """optional override of the automatic cast: '图1换3号，图2换1号' / 'picture 1 -> 3' -> {1: 3, 2: 1} (picture ->
+    person number on the cast sheet = order of first appearance).  Empty -> {} = automatic."""
     out = {}
+    if not (text or "").strip():
+        return out
     for m in _PAT.finditer(text or ""):
         p, k = int(m.group(1)), cn_number(m.group(2))
         if p < 1 or k < 1:
             raise KeyframeError(f"{TAG} '{m.group(0)}': pictures and people are counted from 1")
         if p in out and out[p] != k:
-            raise KeyframeError(f"{TAG} picture {p} is given twice (left {out[p]} and left {k}). 图{p}写了两次。")
+            raise KeyframeError(f"{TAG} picture {p} is given twice (#{out[p]} and #{k}). 图{p}写了两次。")
         out[p] = k
     if not out:
-        raise KeyframeError(f"{TAG} write which picture replaces which person, e.g. 图1换左二，图2换左四 or "
-                            "'picture 1 -> left 2' (people are numbered left to right at the start). "
-                            "请写清楚：图1换左几。")
+        raise KeyframeError(f"{TAG} mapping: leave it empty (automatic: picture 1 = the first person to appear, "
+                            "picture 2 = the next ...) or write e.g. 图1换3号 / 'picture 1 -> 3' with the numbers of "
+                            "the cast sheet. 留空 = 自动；或写 图1换3号（演员表上的编号）。")
     ks = list(out.values())
     dup = sorted({k for k in ks if ks.count(k) > 1})
     if dup:
-        raise KeyframeError(f"{TAG} left {dup} is given to two pictures. 同一个人对了两张图：左{dup}。")
+        raise KeyframeError(f"{TAG} person {dup} is given to two pictures. 同一个人对了两张图：{dup} 号。")
     return dict(sorted(out.items()))
 
 
@@ -350,6 +358,13 @@ def reid_merge(per_frame, looks=None, times=None, keep=None):
         else:
             if lk >= REID_SIM_MIN and lk - scored[1][0] >= REID_MARGIN and lk - rival >= REID_MARGIN:
                 why = "look"
+        def has_face(lk_):
+            return lk_ is not None and len(lk_) > 2 and lk_[2] is not None
+        if not why and has_face(nl) and all(has_face(looks.get(o)) and s_ <= 0.0 for s_, o, _, _ in scored):
+            # 0.5.91 (_004, 3.0 s): every candidate has a face and none is like the new one - a new person walking
+            # in, not someone lost: no warning
+            notes.append(f"track {new}: a new person (the face matches none of {[s[1] for s in scored]})")
+            continue
         if not why:
             unsure.append({"new": new, "at": times[f0], "candidates": [[o, round(s_, 3)] for s_, o, _, _ in scored]})
             notes.append(f"track {new}: not joined (look {lk:.2f}, best other on screen {rival:.2f}, "
@@ -381,35 +396,77 @@ def visible(frame, relaxed=False):
     return sorted(out, key=lambda w: (w[1][0] + w[1][2]) / 2.0)
 
 
-def number_people(frames, look_s=LOOK_S):
-    """-> (frame used, [ids left to right]): the first frame in the first `look_s` seconds that shows the most people,
-    none overlapping much (else the one where the most hidden person is hidden least)."""
-    frames = [f for f in frames if visible(f)]
+def sliver(b, width=SLIVER_W):
+    """0.5.91: only a strip of the person is in the frame (cut off by a side edge and narrow): not recast there"""
+    return (b[0] <= 0.01 or b[2] >= 0.99) and (b[2] - b[0]) < width
+
+
+def side_of(x):
+    return "left" if x < 0.36 else "right" if x > 0.64 else "centre"
+
+
+def cast(frames, min_s=CAST_MIN_S):
+    """0.5.91 (user 01:50/01:52, replaces 'left k in the first clear frame'): everyone in the clip seen clearly for at
+    least min_s, numbered in order of first appearance (same moment: left to right).  A clip cut from the middle,
+    people walking in later, places changing - the number belongs to the person, not to a place.
+    -> [{"id", "first", "last", "side" (where first seen), "seen" s, "presence", "best" (frame index: largest, not
+    at an edge)}]"""
     if not frames:
         raise KeyframeError(f"{TAG} nobody was found in the video. 视频里没找到人。")
-    t0 = frames[0]["at"]
-    look = [f for f in frames if f["at"] - t0 <= look_s] or frames[:1]
-    best = max(len(visible(f)) for f in look)
+    step = (frames[-1]["at"] - frames[0]["at"]) / (len(frames) - 1) if len(frames) > 1 else 1.0
+    acc = {}
+    for i, f in enumerate(frames):
+        for pid, b in visible(f):
+            if sliver(b):
+                continue
+            h = b[3] - b[1]
+            a = acc.get(pid)
+            if a is None:
+                a = acc[pid] = {"id": pid, "first": f["at"], "x": (b[0] + b[2]) / 2, "last": f["at"], "n": 0,
+                                "presence": 0.0, "best": i, "_k": (-1, 0.0)}
+            a["last"], a["n"], a["presence"] = f["at"], a["n"] + 1, a["presence"] + h * step
+            k = (int(b[0] > 0.01 and b[2] < 0.99), round(h, 2))
+            if k > a["_k"]:
+                a["_k"], a["best"] = k, i
+    people = [a for a in acc.values() if a["n"] * step >= min_s - 1e-6]
+    if not people:
+        raise KeyframeError(f"{TAG} nobody is seen clearly for {min_s:.0f} s in the video. 视频里没有清楚出现的人。")
+    # people who show up within CAST_TOGETHER_S of each other count as appearing together: left to right (a viewer
+    # sees one opening shot with two men, not "the one detected 0.7 s earlier")
+    people.sort(key=lambda a: a["first"])
+    groups = []
+    for a in people:
+        if groups and a["first"] - groups[-1][0]["first"] <= CAST_TOGETHER_S:
+            groups[-1].append(a)
+        else:
+            groups.append([a])
+    people = [a for g in groups for a in sorted(g, key=lambda a: a["x"])]
+    for a in people:
+        a["seen"] = round(a["n"] * step, 2)
+        a["side"] = side_of(a.pop("x"))
+        a.pop("_k")
+    return people
 
-    def worst(f):
-        bx = [b for _, b in visible(f)]
-        return max([max(iou(bx[i], bx[j]) / CLEAR_IOU, covered(bx[i], bx[j]) / COVERED)
-                    for i in range(len(bx)) for j in range(i + 1, len(bx))] or [0.0])
 
-    cand = [f for f in look if len(visible(f)) == best]
-    clear = [f for f in cand if worst(f) <= 1.0]
-    pick = clear[0] if clear else min(cand, key=worst)
-    return pick, [pid for pid, _ in visible(pick)]
+def auto_cast(people, pictures):
+    """0.5.91 (user 01:52): picture 1 -> the first person to appear, picture 2 -> the next ...; a person, once given
+    a picture, keeps it (the id follows him through the clip); people after the last picture stay themselves.
+    -> {picture: person number}"""
+    pics = sorted(pictures)
+    if len(pics) > len(people):
+        raise KeyframeError(f"{TAG} {len(pics)} pictures but only {len(people)} people are seen clearly in the clip. "
+                            f"接了 {len(pics)} 张角色图，片子里只清楚出现 {len(people)} 个人。")
+    return {p: n for n, p in enumerate(pics, 1)}
 
 
-def resolve(mapping: dict, order: list) -> list:
-    """{picture: left number} + ids left to right -> [(picture, left number, person id)]."""
+def resolve(mapping: dict, people: list) -> list:
+    """{picture: person number} + cast(...) -> [(picture, person number, person id)]."""
     out = []
     for p, k in mapping.items():
-        if k > len(order):
-            raise KeyframeError(f"{TAG} only {len(order)} people are seen at the start, left {k} does not exist. "
-                                f"开头只看到 {len(order)} 个人，没有左{k}。")
-        out.append((p, k, order[k - 1]))
+        if k > len(people):
+            raise KeyframeError(f"{TAG} only {len(people)} people are on the cast sheet, #{k} does not exist. "
+                                f"演员表里只有 {len(people)} 个人，没有 {k} 号。")
+        out.append((p, k, people[k - 1]["id"]))
     return out
 
 
@@ -663,7 +720,7 @@ def ensure_identity(frames, moments, chosen, duration, min_h=ID_MIN_H, apart=ID_
                 if f["at"] <= last and clear_height(f, pid) > have and score(frames, i, ids) is not None
                 and all(abs(f["at"] - t) >= apart for t in ts)]
         if not cand:
-            warns.append(f"picture {p} (left {k}) is never seen large and clear (best {have:.2f} of the frame height): "
+            warns.append(f"picture {p} (person #{k}) is never seen large and clear (best {have:.2f} of the frame height): "
                          "the video may not look like this character in close-ups. 图{0} 在原片里一直没有大而清楚的"
                          "镜头，近景可能不像。".format(p))
             continue
@@ -671,10 +728,10 @@ def ensure_identity(frames, moments, chosen, duration, min_h=ID_MIN_H, apart=ID_
         out.append((best, "swap"))
         added.add(frames[best]["at"])
         h = clear_height(frames[best], pid)
-        notes.append(f"picture {p} (left {k}): keyframe added at {frames[best]['at']:.2f} s where he/she is large and "
+        notes.append(f"picture {p} (person #{k}): keyframe added at {frames[best]['at']:.2f} s where he/she is large and "
                      f"clear ({h:.2f} of the frame height; the others showed {have:.2f})")
         if h < min_h:
-            warns.append(f"picture {p} (left {k}) is at most {h:.2f} of the frame height in the clip: close-ups may not "
+            warns.append(f"picture {p} (person #{k}) is at most {h:.2f} of the frame height in the clip: close-ups may not "
                          "look like this character. 图{0} 在原片里最大也只有 {1:.2f} 画面高，近景可能不像。".format(p, h))
     return sorted(out, key=lambda m: frames[m[0]]["at"]), added, notes, warns
 
@@ -815,13 +872,13 @@ def fit_size(w, h, mp=EDIT_MP, grid=32):
 
 def frame_rank(own, others):
     """(place from the left, people in the frame) of a person in THIS keyframe, by box centre.  The mapping number
-    (left k at the start) is the person's ID; where she stands at a later keyframe can differ."""
+    (person #k, order of first appearance) is the person's ID; where she stands at a keyframe can differ."""
     cx = (own[0] + own[2]) / 2.0
     return 1 + sum(1 for b in others if (b[0] + b[2]) / 2.0 < cx), 1 + len(others)
 
 
 def parse_people(text: str) -> list:
-    """optional: one line per person at the start, left to right (what they look like now) -> [str]"""
+    """optional: one line per person of the cast sheet, #1 #2 ... (what they look like now) -> [str]"""
     lines = [l.strip() for l in (text or "").splitlines() if l.strip()]
     return [re.sub(r"^(?:左|left|L)?\s*\d+\s*[:：.、)]\s*", "", l, flags=re.I).rstrip("。.") for l in lines]
 
@@ -1012,10 +1069,18 @@ def ordinal(k: int) -> str:
     return ORDINAL[k - 1] if 1 <= k <= len(ORDINAL) else f"number {k}"
 
 
-def swap_prompt(length, chosen, descs, n_people, changes, names, looks=None):
-    """skill 12d step 6 (Remake wording).  chosen [(picture, left, id)], descs {picture: text}, names {id: label} in
-    left-to-right order, looks {left number: what that person looks like at the start} (optional)."""
+def swap_prompt(length, chosen, descs, n_people, changes, names, looks=None, people=None):
+    """skill 12d step 6 (Remake wording).  chosen [(picture, person number, id)], descs {picture: text}, names
+    {id: label} in cast order, looks {person number: what that person looks like} (optional), people = cast(...)
+    (0.5.91: people are named by when and where they first appear, not by a place at the start)."""
     looks = looks or {}
+    people = people or []
+
+    def first_seen(k):
+        if 1 <= k <= len(people):
+            a = people[k - 1]
+            return f"performer #{k}, who first appears at {a['first']:.1f} s on the {a['side']} of the frame"
+        return f"performer #{k}"
     sub = {pid: f"<Subject {n}>" for n, (_, _, pid) in enumerate(chosen, 1)}
 
     def who(pid):
@@ -1030,8 +1095,7 @@ def swap_prompt(length, chosen, descs, n_people, changes, names, looks=None):
              "performers change places."]
     for n, (p, k, pid) in enumerate(chosen, 1):
         orig = f", {looks[k]}" if looks.get(k) else ""
-        lines.append(f"<Subject {n}> is {descs[p].rstrip('.')}; this subject replaces the {ordinal(k)} performer "
-                     f"counted from the left at the start{orig}.")
+        lines.append(f"<Subject {n}> is {descs[p].rstrip('.')}; this subject replaces {first_seen(k)}{orig}.")
     lines.append("In every frame each Subject has the face, hair and clothes described here, never those of the "
                  "performer they replace.")
     rest = n_people - len(chosen)
@@ -1039,11 +1103,11 @@ def swap_prompt(length, chosen, descs, n_people, changes, names, looks=None):
     kept_s = (", " + " and ".join(kept) + "," if kept and len(kept) == rest else "")
     keep = (f" The other {rest} performer{'s' if rest != 1 else ''}{kept_s} stay themselves, with their own faces, "
             "hair and outfits from <Video 1> in every frame.") if rest > 0 else ""
-    mp = ", ".join(f"the {ordinal(k)} becomes <Subject {n}>" for n, (_, k, _) in enumerate(chosen, 1))
+    mp = ", ".join(f"#{k} becomes <Subject {n}>" for n, (_, k, _) in enumerate(chosen, 1))
     lines += ["", "summary:",
               f"The target video is an edited version of <Video 1>. [video editing + reference generation + audio "
-              f"reuse] Recast {len(chosen)} of the {n_people} performers with a fixed mapping the whole time, counted "
-              f"from left to right at the start: {mp}.{keep} Every recast person keeps the same replacement through "
+              f"reuse] Recast {len(chosen)} of the {n_people} performers with a fixed mapping the whole time, numbered "
+              f"in order of first appearance: {mp}.{keep} Every recast person keeps the same replacement through "
               "place changes, in the same position, blocking and occlusion order as their performer in every frame; "
               "the motion, timing, performance, singing and lip and jaw movement stay as in <Video 1>.",
               "", "retention_analysis:",
@@ -1063,7 +1127,7 @@ def swap_prompt(length, chosen, descs, n_people, changes, names, looks=None):
     lines += ["", "detailed_description:",
               "A natural, clean look. [Shot 1] One continuous take matching the framing and camera of <Video 1>. "
               "The setting is the one in <Video 1>, unchanged. Each recast person moves exactly like their performer "
-              f"in <Video 1>, with the same lip movement. At the start, from left to right: {order}.{moves} Each "
+              f"in <Video 1>, with the same lip movement. The performers, in order of first appearance: {order}.{moves} Each "
               "recast subject keeps their own face, hair and clothes the whole time, as in the redrawn frames. Their "
               "hands have five natural fingers each.",
               "", "overall_soundscape:", "Keep the source soundtrack; do not invent dialogue.",

@@ -1,1155 +1,1155 @@
 {
- "last_node_id": 70,
- "last_link_id": 23,
- "nodes": [
-  {
-   "id": 1,
-   "type": "LoadVideo",
-   "pos": [
-    20,
-    60
-   ],
-   "size": [
-    300,
-    330
-   ],
-   "flags": {},
-   "order": 0,
-   "mode": 0,
-   "inputs": [],
-   "outputs": [
+  "last_node_id": 70,
+  "last_link_id": 23,
+  "nodes": [
     {
-     "name": "VIDEO",
-     "type": "VIDEO",
-     "links": [
-      4
-     ]
-    }
-   ],
-   "properties": {
-    "Node name for S&R": "LoadVideo"
-   },
-   "widgets_values": [
-    "H3MD_00154_.mp4",
-    "image"
-   ],
-   "title": "Source video"
-  },
-  {
-   "id": 2,
-   "type": "LoadImage",
-   "pos": [
-    20,
-    410
-   ],
-   "size": [
-    300,
-    310
-   ],
-   "flags": {},
-   "order": 1,
-   "mode": 0,
-   "inputs": [],
-   "outputs": [
-    {
-     "name": "IMAGE",
-     "type": "IMAGE",
-     "links": [
-      1
-     ]
+      "id": 1,
+      "type": "LoadVideo",
+      "pos": [
+        20,
+        60
+      ],
+      "size": [
+        300,
+        330
+      ],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "links": [
+            4
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadVideo"
+      },
+      "widgets_values": [
+        "H3MD_00154_.mp4",
+        "image"
+      ],
+      "title": "Source video"
     },
     {
-     "name": "MASK",
-     "type": "MASK",
-     "links": []
-    }
-   ],
-   "properties": {
-    "Node name for S&R": "LoadImage"
-   },
-   "widgets_values": [
-    "Eva_final.png",
-    "image"
-   ],
-   "title": "Picture 1"
-  },
-  {
-   "id": 3,
-   "type": "LoadImage",
-   "pos": [
-    20,
-    740
-   ],
-   "size": [
-    300,
-    310
-   ],
-   "flags": {},
-   "order": 2,
-   "mode": 0,
-   "inputs": [],
-   "outputs": [
-    {
-     "name": "IMAGE",
-     "type": "IMAGE",
-     "links": [
-      2
-     ]
+      "id": 2,
+      "type": "LoadImage",
+      "pos": [
+        20,
+        410
+      ],
+      "size": [
+        300,
+        310
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            1
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "Eva_final.png",
+        "image"
+      ],
+      "title": "Picture 1"
     },
     {
-     "name": "MASK",
-     "type": "MASK",
-     "links": []
-    }
-   ],
-   "properties": {
-    "Node name for S&R": "LoadImage"
-   },
-   "widgets_values": [
-    "Peter_final.png",
-    "image"
-   ],
-   "title": "Picture 2"
-  },
-  {
-   "id": 4,
-   "type": "LoadImage",
-   "pos": [
-    20,
-    1070
-   ],
-   "size": [
-    300,
-    310
-   ],
-   "flags": {},
-   "order": 3,
-   "mode": 0,
-   "inputs": [],
-   "outputs": [
-    {
-     "name": "IMAGE",
-     "type": "IMAGE",
-     "links": [
-      3
-     ]
+      "id": 3,
+      "type": "LoadImage",
+      "pos": [
+        20,
+        740
+      ],
+      "size": [
+        300,
+        310
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            2
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "Peter_final.png",
+        "image"
+      ],
+      "title": "Picture 2"
     },
     {
-     "name": "MASK",
-     "type": "MASK",
-     "links": []
-    }
-   ],
-   "properties": {
-    "Node name for S&R": "LoadImage"
-   },
-   "widgets_values": [
-    "David_final.png",
-    "image"
-   ],
-   "title": "Picture 3"
-  },
-  {
-   "id": 10,
-   "type": "H3MDKeyframePrepare",
-   "pos": [
-    350,
-    60
-   ],
-   "size": [
-    420,
-    520
-   ],
-   "flags": {},
-   "order": 4,
-   "mode": 0,
-   "inputs": [
-    {
-     "name": "picture_1",
-     "type": "IMAGE",
-     "link": 1
+      "id": 4,
+      "type": "LoadImage",
+      "pos": [
+        20,
+        1070
+      ],
+      "size": [
+        300,
+        310
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            3
+          ]
+        },
+        {
+          "name": "MASK",
+          "type": "MASK",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "LoadImage"
+      },
+      "widgets_values": [
+        "David_final.png",
+        "image"
+      ],
+      "title": "Picture 3"
     },
     {
-     "name": "picture_2",
-     "type": "IMAGE",
-     "link": 2
+      "id": 10,
+      "type": "H3MDKeyframePrepare",
+      "pos": [
+        350,
+        60
+      ],
+      "size": [
+        420,
+        520
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "picture_1",
+          "type": "IMAGE",
+          "link": 1
+        },
+        {
+          "name": "picture_2",
+          "type": "IMAGE",
+          "link": 2
+        },
+        {
+          "name": "picture_3",
+          "type": "IMAGE",
+          "link": 3
+        },
+        {
+          "name": "picture_4",
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "picture_5",
+          "type": "IMAGE",
+          "link": null
+        },
+        {
+          "name": "source_video",
+          "type": "VIDEO",
+          "link": 4
+        }
+      ],
+      "outputs": [
+        {
+          "name": "pictures",
+          "type": "IMAGE",
+          "links": [
+            7
+          ]
+        },
+        {
+          "name": "job",
+          "type": "H3MD_KEYFRAME_JOB",
+          "links": [
+            6
+          ]
+        },
+        {
+          "name": "people_sheet",
+          "type": "IMAGE",
+          "links": [
+            5
+          ]
+        },
+        {
+          "name": "info",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "H3MDKeyframePrepare"
+      },
+      "widgets_values": [
+        "",
+        "",
+        "a young European woman in her mid twenties with a fair oval face, grey-blue eyes and long wavy blonde hair, in a white ribbed tank top, long black jeans and white sneakers, bare arms and bare hands\na European man around thirty with a strong square jaw, hazel eyes, a well-trimmed short beard and short dark brown hair, in a beige trench coat over a white shirt, dark grey trousers and brown leather shoes, bare hands\nan East Asian man in his mid twenties with a clean-shaven face, dark almond-shaped eyes and short black hair trimmed close at the sides, a muscular build, in a fitted black T-shirt, long dark blue jeans and black sneakers, bare arms and bare hands",
+        "",
+        5.0,
+        0.4,
+        8,
+        0.0,
+        17.0
+      ]
     },
     {
-     "name": "picture_3",
-     "type": "IMAGE",
-     "link": 3
+      "id": 11,
+      "type": "PreviewImage",
+      "pos": [
+        350,
+        600
+      ],
+      "size": [
+        420,
+        300
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 5
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "PreviewImage"
+      },
+      "widgets_values": [],
+      "title": "People (check the numbers)"
     },
     {
-     "name": "picture_4",
-     "type": "IMAGE",
-     "link": null
+      "id": 20,
+      "type": "H3MDKeyframeExport",
+      "pos": [
+        800,
+        60
+      ],
+      "size": [
+        420,
+        110
+      ],
+      "flags": {},
+      "order": 6,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "job",
+          "type": "H3MD_KEYFRAME_JOB",
+          "link": 6
+        },
+        {
+          "name": "pictures",
+          "type": "IMAGE",
+          "link": 7
+        }
+      ],
+      "outputs": [
+        {
+          "name": "package",
+          "type": "STRING",
+          "links": [
+            9
+          ]
+        },
+        {
+          "name": "keyframes",
+          "type": "IMAGE",
+          "links": [
+            8
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "H3MDKeyframeExport"
+      },
+      "widgets_values": [
+        "multiswap"
+      ]
     },
     {
-     "name": "picture_5",
-     "type": "IMAGE",
-     "link": null
+      "id": 21,
+      "type": "PreviewImage",
+      "pos": [
+        800,
+        190
+      ],
+      "size": [
+        420,
+        420
+      ],
+      "flags": {},
+      "order": 7,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 8
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "PreviewImage"
+      },
+      "widgets_values": [],
+      "title": "Keyframes in the package"
     },
     {
-     "name": "source_video",
-     "type": "VIDEO",
-     "link": 4
-    }
-   ],
-   "outputs": [
-    {
-     "name": "pictures",
-     "type": "IMAGE",
-     "links": [
-      7
-     ]
+      "id": 22,
+      "type": "PreviewAny",
+      "pos": [
+        800,
+        630
+      ],
+      "size": [
+        420,
+        110
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "source",
+          "type": "*",
+          "link": 9
+        }
+      ],
+      "outputs": [
+        {
+          "name": "STRING",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PreviewAny"
+      },
+      "widgets_values": [],
+      "title": "Export package (give it to the AI)"
     },
     {
-     "name": "job",
-     "type": "H3MD_KEYFRAME_JOB",
-     "links": [
-      6
-     ]
+      "id": 30,
+      "type": "H3MDKeyframeImport",
+      "pos": [
+        1300,
+        60
+      ],
+      "size": [
+        380,
+        130
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "job",
+          "type": "H3MD_KEYFRAME_JOB",
+          "links": [
+            11
+          ]
+        },
+        {
+          "name": "pictures",
+          "type": "IMAGE",
+          "links": [
+            12
+          ]
+        },
+        {
+          "name": "prompts",
+          "type": "STRING",
+          "links": [
+            18
+          ]
+        },
+        {
+          "name": "keyframes",
+          "type": "IMAGE",
+          "links": []
+        },
+        {
+          "name": "info",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "H3MDKeyframeImport"
+      },
+      "widgets_values": [
+        ""
+      ]
     },
     {
-     "name": "people_sheet",
-     "type": "IMAGE",
-     "links": [
-      5
-     ]
+      "id": 31,
+      "type": "H3MDKeyframeRedo",
+      "pos": [
+        1300,
+        220
+      ],
+      "size": [
+        380,
+        260
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "redo",
+          "type": "STRING",
+          "links": [
+            19
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "H3MDKeyframeRedo"
+      },
+      "widgets_values": [
+        "",
+        0
+      ],
+      "title": "Redo (click keyframes)"
     },
     {
-     "name": "info",
-     "type": "STRING",
-     "links": []
-    }
-   ],
-   "properties": {
-    "Node name for S&R": "H3MDKeyframePrepare"
-   },
-   "widgets_values": [
-    "",
-    "picture 1 -> left 1\npicture 2 -> left 2\npicture 3 -> left 3",
-    "a young European woman in her mid twenties with a fair oval face, grey-blue eyes and long wavy blonde hair, in a white ribbed tank top, long black jeans and white sneakers, bare arms and bare hands\na European man around thirty with a strong square jaw, hazel eyes, a well-trimmed short beard and short dark brown hair, in a beige trench coat over a white shirt, dark grey trousers and brown leather shoes, bare hands\nan East Asian man in his mid twenties with a clean-shaven face, dark almond-shaped eyes and short black hair trimmed close at the sides, a muscular build, in a fitted black T-shirt, long dark blue jeans and black sneakers, bare arms and bare hands",
-    "",
-    5.0,
-    0.4,
-    8,
-    0.0,
-    17.0
-   ]
-  },
-  {
-   "id": 11,
-   "type": "PreviewImage",
-   "pos": [
-    350,
-    600
-   ],
-   "size": [
-    420,
-    300
-   ],
-   "flags": {},
-   "order": 5,
-   "mode": 0,
-   "inputs": [
-    {
-     "name": "images",
-     "type": "IMAGE",
-     "link": 5
-    }
-   ],
-   "outputs": [],
-   "properties": {
-    "Node name for S&R": "PreviewImage"
-   },
-   "widgets_values": [],
-   "title": "People (check the numbers)"
-  },
-  {
-   "id": 20,
-   "type": "H3MDKeyframeExport",
-   "pos": [
-    800,
-    60
-   ],
-   "size": [
-    420,
-    110
-   ],
-   "flags": {},
-   "order": 6,
-   "mode": 0,
-   "inputs": [
-    {
-     "name": "job",
-     "type": "H3MD_KEYFRAME_JOB",
-     "link": 6
+      "id": 40,
+      "type": "UNETLoader",
+      "pos": [
+        1300,
+        520
+      ],
+      "size": [
+        380,
+        82
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            10
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "UNETLoader"
+      },
+      "widgets_values": [
+        "minimax_h3_image_pruned_int8_convrot.safetensors",
+        "default"
+      ],
+      "title": "MiniMax H3 Image (int8)"
     },
     {
-     "name": "pictures",
-     "type": "IMAGE",
-     "link": 7
-    }
-   ],
-   "outputs": [
-    {
-     "name": "package",
-     "type": "STRING",
-     "links": [
-      9
-     ]
+      "id": 41,
+      "type": "PathchSageAttentionKJ",
+      "pos": [
+        1300,
+        630
+      ],
+      "size": [
+        380,
+        82
+      ],
+      "flags": {},
+      "order": 12,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 10
+        }
+      ],
+      "outputs": [
+        {
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            13
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PathchSageAttentionKJ"
+      },
+      "widgets_values": [
+        "auto",
+        false
+      ]
     },
     {
-     "name": "keyframes",
-     "type": "IMAGE",
-     "links": [
-      8
-     ]
-    }
-   ],
-   "properties": {
-    "Node name for S&R": "H3MDKeyframeExport"
-   },
-   "widgets_values": [
-    "multiswap"
-   ]
-  },
-  {
-   "id": 21,
-   "type": "PreviewImage",
-   "pos": [
-    800,
-    190
-   ],
-   "size": [
-    420,
-    420
-   ],
-   "flags": {},
-   "order": 7,
-   "mode": 0,
-   "inputs": [
-    {
-     "name": "images",
-     "type": "IMAGE",
-     "link": 8
-    }
-   ],
-   "outputs": [],
-   "properties": {
-    "Node name for S&R": "PreviewImage"
-   },
-   "widgets_values": [],
-   "title": "Keyframes in the package"
-  },
-  {
-   "id": 22,
-   "type": "PreviewAny",
-   "pos": [
-    800,
-    630
-   ],
-   "size": [
-    420,
-    110
-   ],
-   "flags": {},
-   "order": 8,
-   "mode": 0,
-   "inputs": [
-    {
-     "name": "source",
-     "type": "*",
-     "link": 9
-    }
-   ],
-   "outputs": [
-    {
-     "name": "STRING",
-     "type": "STRING",
-     "links": []
-    }
-   ],
-   "properties": {
-    "Node name for S&R": "PreviewAny"
-   },
-   "widgets_values": [],
-   "title": "Export package (give it to the AI)"
-  },
-  {
-   "id": 30,
-   "type": "H3MDKeyframeImport",
-   "pos": [
-    1300,
-    60
-   ],
-   "size": [
-    380,
-    130
-   ],
-   "flags": {},
-   "order": 9,
-   "mode": 0,
-   "inputs": [],
-   "outputs": [
-    {
-     "name": "job",
-     "type": "H3MD_KEYFRAME_JOB",
-     "links": [
-      11
-     ]
+      "id": 43,
+      "type": "CLIPLoader",
+      "pos": [
+        1300,
+        850
+      ],
+      "size": [
+        380,
+        106
+      ],
+      "flags": {},
+      "order": 13,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "CLIP",
+          "type": "CLIP",
+          "links": [
+            14
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "CLIPLoader"
+      },
+      "widgets_values": [
+        "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
+        "minimax",
+        "default"
+      ],
+      "title": "H3 Image text encoder"
     },
     {
-     "name": "pictures",
-     "type": "IMAGE",
-     "links": [
-      12
-     ]
+      "id": 44,
+      "type": "VAELoader",
+      "pos": [
+        1300,
+        980
+      ],
+      "size": [
+        380,
+        58
+      ],
+      "flags": {},
+      "order": 14,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "VAE",
+          "type": "VAE",
+          "links": [
+            15
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VAELoader"
+      },
+      "widgets_values": [
+        "minimax_h3_image_vae_fp16.safetensors"
+      ]
     },
     {
-     "name": "prompts",
-     "type": "STRING",
-     "links": [
-      18
-     ]
+      "id": 45,
+      "type": "KSamplerSelect",
+      "pos": [
+        1300,
+        1060
+      ],
+      "size": [
+        380,
+        58
+      ],
+      "flags": {},
+      "order": 15,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "SAMPLER",
+          "type": "SAMPLER",
+          "links": [
+            16
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "KSamplerSelect"
+      },
+      "widgets_values": [
+        "euler"
+      ]
     },
     {
-     "name": "keyframes",
-     "type": "IMAGE",
-     "links": []
+      "id": 46,
+      "type": "ManualSigmas",
+      "pos": [
+        1300,
+        1140
+      ],
+      "size": [
+        380,
+        80
+      ],
+      "flags": {},
+      "order": 16,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "SIGMAS",
+          "type": "SIGMAS",
+          "links": [
+            17
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "ManualSigmas"
+      },
+      "widgets_values": [
+        "1.0, 0.9675236940383911, 0.8875485062599182, 0.75, 0.5327739119529724, 0.23200887441635132, 0.0"
+      ],
+      "title": "Exact 6-step PDD Sigmas"
     },
     {
-     "name": "info",
-     "type": "STRING",
-     "links": []
-    }
-   ],
-   "properties": {
-    "Node name for S&R": "H3MDKeyframeImport"
-   },
-   "widgets_values": [
-    ""
-   ]
-  },
-  {
-   "id": 31,
-   "type": "H3MDKeyframeRedo",
-   "pos": [
-    1300,
-    220
-   ],
-   "size": [
-    380,
-    260
-   ],
-   "flags": {},
-   "order": 10,
-   "mode": 0,
-   "inputs": [],
-   "outputs": [
-    {
-     "name": "redo",
-     "type": "STRING",
-     "links": [
-      19
-     ]
-    }
-   ],
-   "properties": {
-    "Node name for S&R": "H3MDKeyframeRedo"
-   },
-   "widgets_values": [
-    "",
-    0
-   ],
-   "title": "Redo (click keyframes)"
-  },
-  {
-   "id": 40,
-   "type": "UNETLoader",
-   "pos": [
-    1300,
-    520
-   ],
-   "size": [
-    380,
-    82
-   ],
-   "flags": {},
-   "order": 11,
-   "mode": 0,
-   "inputs": [],
-   "outputs": [
-    {
-     "name": "MODEL",
-     "type": "MODEL",
-     "links": [
-      10
-     ]
-    }
-   ],
-   "properties": {
-    "Node name for S&R": "UNETLoader"
-   },
-   "widgets_values": [
-    "minimax_h3_image_pruned_int8_convrot.safetensors",
-    "default"
-   ],
-   "title": "MiniMax H3 Image (int8)"
-  },
-  {
-   "id": 41,
-   "type": "PathchSageAttentionKJ",
-   "pos": [
-    1300,
-    630
-   ],
-   "size": [
-    380,
-    82
-   ],
-   "flags": {},
-   "order": 12,
-   "mode": 0,
-   "inputs": [
-    {
-     "name": "model",
-     "type": "MODEL",
-     "link": 10
-    }
-   ],
-   "outputs": [
-    {
-     "name": "MODEL",
-     "type": "MODEL",
-     "links": [
-      13
-     ]
-    }
-   ],
-   "properties": {
-    "Node name for S&R": "PathchSageAttentionKJ"
-   },
-   "widgets_values": [
-    "auto",
-    false
-   ]
-  },
-  {
-   "id": 43,
-   "type": "CLIPLoader",
-   "pos": [
-    1300,
-    850
-   ],
-   "size": [
-    380,
-    106
-   ],
-   "flags": {},
-   "order": 13,
-   "mode": 0,
-   "inputs": [],
-   "outputs": [
-    {
-     "name": "CLIP",
-     "type": "CLIP",
-     "links": [
-      14
-     ]
-    }
-   ],
-   "properties": {
-    "Node name for S&R": "CLIPLoader"
-   },
-   "widgets_values": [
-    "qwen3vl_32b_minimax_h3_int8_convrot.safetensors",
-    "minimax",
-    "default"
-   ],
-   "title": "H3 Image text encoder"
-  },
-  {
-   "id": 44,
-   "type": "VAELoader",
-   "pos": [
-    1300,
-    980
-   ],
-   "size": [
-    380,
-    58
-   ],
-   "flags": {},
-   "order": 14,
-   "mode": 0,
-   "inputs": [],
-   "outputs": [
-    {
-     "name": "VAE",
-     "type": "VAE",
-     "links": [
-      15
-     ]
-    }
-   ],
-   "properties": {
-    "Node name for S&R": "VAELoader"
-   },
-   "widgets_values": [
-    "minimax_h3_image_vae_fp16.safetensors"
-   ]
-  },
-  {
-   "id": 45,
-   "type": "KSamplerSelect",
-   "pos": [
-    1300,
-    1060
-   ],
-   "size": [
-    380,
-    58
-   ],
-   "flags": {},
-   "order": 15,
-   "mode": 0,
-   "inputs": [],
-   "outputs": [
-    {
-     "name": "SAMPLER",
-     "type": "SAMPLER",
-     "links": [
-      16
-     ]
-    }
-   ],
-   "properties": {
-    "Node name for S&R": "KSamplerSelect"
-   },
-   "widgets_values": [
-    "euler"
-   ]
-  },
-  {
-   "id": 46,
-   "type": "ManualSigmas",
-   "pos": [
-    1300,
-    1140
-   ],
-   "size": [
-    380,
-    80
-   ],
-   "flags": {},
-   "order": 16,
-   "mode": 0,
-   "inputs": [],
-   "outputs": [
-    {
-     "name": "SIGMAS",
-     "type": "SIGMAS",
-     "links": [
-      17
-     ]
-    }
-   ],
-   "properties": {
-    "Node name for S&R": "ManualSigmas"
-   },
-   "widgets_values": [
-    "1.0, 0.9675236940383911, 0.8875485062599182, 0.75, 0.5327739119529724, 0.23200887441635132, 0.0"
-   ],
-   "title": "Exact 6-step PDD Sigmas"
-  },
-  {
-   "id": 50,
-   "type": "H3MDKeyframeRecast",
-   "pos": [
-    1720,
-    60
-   ],
-   "size": [
-    420,
-    300
-   ],
-   "flags": {},
-   "order": 17,
-   "mode": 0,
-   "inputs": [
-    {
-     "name": "job",
-     "type": "H3MD_KEYFRAME_JOB",
-     "link": 11
+      "id": 50,
+      "type": "H3MDKeyframeRecast",
+      "pos": [
+        1720,
+        60
+      ],
+      "size": [
+        420,
+        300
+      ],
+      "flags": {},
+      "order": 17,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "job",
+          "type": "H3MD_KEYFRAME_JOB",
+          "link": 11
+        },
+        {
+          "name": "pictures",
+          "type": "IMAGE",
+          "link": 12
+        },
+        {
+          "name": "model",
+          "type": "MODEL",
+          "link": 13
+        },
+        {
+          "name": "clip",
+          "type": "CLIP",
+          "link": 14
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": 15
+        },
+        {
+          "name": "sampler",
+          "type": "SAMPLER",
+          "link": 16
+        },
+        {
+          "name": "sigmas",
+          "type": "SIGMAS",
+          "link": 17
+        },
+        {
+          "name": "prompts",
+          "type": "STRING",
+          "link": 18
+        },
+        {
+          "name": "redo",
+          "type": "STRING",
+          "link": 19
+        }
+      ],
+      "outputs": [
+        {
+          "name": "keyframes",
+          "type": "IMAGE",
+          "links": []
+        },
+        {
+          "name": "job",
+          "type": "H3MD_KEYFRAME_JOB",
+          "links": [
+            22
+          ]
+        },
+        {
+          "name": "report",
+          "type": "STRING",
+          "links": [
+            21
+          ]
+        },
+        {
+          "name": "compare",
+          "type": "IMAGE",
+          "links": [
+            20
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "H3MDKeyframeRecast"
+      },
+      "widgets_values": [
+        4.0,
+        20261120,
+        "randomize"
+      ]
     },
     {
-     "name": "pictures",
-     "type": "IMAGE",
-     "link": 12
+      "id": 51,
+      "type": "PreviewImage",
+      "pos": [
+        1720,
+        380
+      ],
+      "size": [
+        520,
+        760
+      ],
+      "flags": {},
+      "order": 18,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 20
+        }
+      ],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "PreviewImage"
+      },
+      "widgets_values": [],
+      "title": "Compare: original | new (#1, #2 ...)"
     },
     {
-     "name": "model",
-     "type": "MODEL",
-     "link": 13
+      "id": 52,
+      "type": "PreviewAny",
+      "pos": [
+        1720,
+        1160
+      ],
+      "size": [
+        520,
+        200
+      ],
+      "flags": {},
+      "order": 19,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "source",
+          "type": "*",
+          "link": 21
+        }
+      ],
+      "outputs": [
+        {
+          "name": "STRING",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PreviewAny"
+      },
+      "widgets_values": [],
+      "title": "Report"
     },
     {
-     "name": "clip",
-     "type": "CLIP",
-     "link": 14
+      "id": 60,
+      "type": "H3MDKeyframeAssemble",
+      "pos": [
+        2280,
+        60
+      ],
+      "size": [
+        380,
+        110
+      ],
+      "flags": {},
+      "order": 20,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "job",
+          "type": "H3MD_KEYFRAME_JOB",
+          "link": 22
+        }
+      ],
+      "outputs": [
+        {
+          "name": "keyframes_sheet",
+          "type": "IMAGE",
+          "links": []
+        },
+        {
+          "name": "plan_json",
+          "type": "STRING",
+          "links": []
+        },
+        {
+          "name": "zip_path",
+          "type": "STRING",
+          "links": [
+            23
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "H3MDKeyframeAssemble"
+      },
+      "widgets_values": [
+        "multiswap",
+        true
+      ]
     },
     {
-     "name": "vae",
-     "type": "VAE",
-     "link": 15
+      "id": 61,
+      "type": "PreviewAny",
+      "pos": [
+        2280,
+        190
+      ],
+      "size": [
+        380,
+        110
+      ],
+      "flags": {},
+      "order": 21,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "source",
+          "type": "*",
+          "link": 23
+        }
+      ],
+      "outputs": [
+        {
+          "name": "STRING",
+          "type": "STRING",
+          "links": []
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "PreviewAny"
+      },
+      "widgets_values": [],
+      "title": "H3MD Multi-Swap Plan (Director: Import plan)"
     },
     {
-     "name": "sampler",
-     "type": "SAMPLER",
-     "link": 16
-    },
-    {
-     "name": "sigmas",
-     "type": "SIGMAS",
-     "link": 17
-    },
-    {
-     "name": "prompts",
-     "type": "STRING",
-     "link": 18
-    },
-    {
-     "name": "redo",
-     "type": "STRING",
-     "link": 19
+      "id": 70,
+      "type": "MarkdownNote",
+      "pos": [
+        2280,
+        330
+      ],
+      "size": [
+        380,
+        520
+      ],
+      "flags": {},
+      "order": 22,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [],
+      "properties": {
+        "Node name for S&R": "MarkdownNote"
+      },
+      "widgets_values": [
+        "## H3MD multi-person swap keyframes\n\n**1. Keyframe Export** (left group)\n- Drop the source video into *Source video*, the new people into *Picture 1/2/3*.\n- *mapping*: leave empty - picture 1 goes to the first person who appears, picture 2 to the next ... (together: left to right). Once given, a person keeps his picture; later people stay themselves. *People* shows the cast; `图1换3号` / `picture 1 -> 3` picks by its numbers.\n- *descriptions*: one line per picture, head to toe (also what the picture does not show).\n- Run. The package is in output/H3MD_keyframes/<name>_keyframe_export_<date>_<no>.zip. Give it to the AI (with the H3MD keyframe skill, or the README inside the package).\n\n**2. Keyframe Import** (right group) - bypass the left group (Ctrl+B)\n- *Import package*: pick the AI's answer (<name>_keyframe_import_<date>_<no>.h3kf or .json).\n- Run: about 25 s per keyframe. Check *Compare* (original | new).\n- A keyframe is clearly wrong: tell the AI which one and what is wrong, import its new answer, click that keyframe on *Redo* and run - only that one is made again.\n- The plan (<name>_multiswap_plan_<date>_<no>.zip) goes to the Director: Import plan."
+      ],
+      "title": "How to use"
     }
-   ],
-   "outputs": [
-    {
-     "name": "keyframes",
-     "type": "IMAGE",
-     "links": []
-    },
-    {
-     "name": "job",
-     "type": "H3MD_KEYFRAME_JOB",
-     "links": [
-      22
-     ]
-    },
-    {
-     "name": "report",
-     "type": "STRING",
-     "links": [
-      21
-     ]
-    },
-    {
-     "name": "compare",
-     "type": "IMAGE",
-     "links": [
-      20
-     ]
-    }
-   ],
-   "properties": {
-    "Node name for S&R": "H3MDKeyframeRecast"
-   },
-   "widgets_values": [
-    4.0,
-    20261120,
-    "randomize"
-   ]
-  },
-  {
-   "id": 51,
-   "type": "PreviewImage",
-   "pos": [
-    1720,
-    380
-   ],
-   "size": [
-    520,
-    760
-   ],
-   "flags": {},
-   "order": 18,
-   "mode": 0,
-   "inputs": [
-    {
-     "name": "images",
-     "type": "IMAGE",
-     "link": 20
-    }
-   ],
-   "outputs": [],
-   "properties": {
-    "Node name for S&R": "PreviewImage"
-   },
-   "widgets_values": [],
-   "title": "Compare: original | new (#1, #2 ...)"
-  },
-  {
-   "id": 52,
-   "type": "PreviewAny",
-   "pos": [
-    1720,
-    1160
-   ],
-   "size": [
-    520,
-    200
-   ],
-   "flags": {},
-   "order": 19,
-   "mode": 0,
-   "inputs": [
-    {
-     "name": "source",
-     "type": "*",
-     "link": 21
-    }
-   ],
-   "outputs": [
-    {
-     "name": "STRING",
-     "type": "STRING",
-     "links": []
-    }
-   ],
-   "properties": {
-    "Node name for S&R": "PreviewAny"
-   },
-   "widgets_values": [],
-   "title": "Report"
-  },
-  {
-   "id": 60,
-   "type": "H3MDKeyframeAssemble",
-   "pos": [
-    2280,
-    60
-   ],
-   "size": [
-    380,
-    110
-   ],
-   "flags": {},
-   "order": 20,
-   "mode": 0,
-   "inputs": [
-    {
-     "name": "job",
-     "type": "H3MD_KEYFRAME_JOB",
-     "link": 22
-    }
-   ],
-   "outputs": [
-    {
-     "name": "keyframes_sheet",
-     "type": "IMAGE",
-     "links": []
-    },
-    {
-     "name": "plan_json",
-     "type": "STRING",
-     "links": []
-    },
-    {
-     "name": "zip_path",
-     "type": "STRING",
-     "links": [
-      23
-     ]
-    }
-   ],
-   "properties": {
-    "Node name for S&R": "H3MDKeyframeAssemble"
-   },
-   "widgets_values": [
-    "multiswap",
-    true
-   ]
-  },
-  {
-   "id": 61,
-   "type": "PreviewAny",
-   "pos": [
-    2280,
-    190
-   ],
-   "size": [
-    380,
-    110
-   ],
-   "flags": {},
-   "order": 21,
-   "mode": 0,
-   "inputs": [
-    {
-     "name": "source",
-     "type": "*",
-     "link": 23
-    }
-   ],
-   "outputs": [
-    {
-     "name": "STRING",
-     "type": "STRING",
-     "links": []
-    }
-   ],
-   "properties": {
-    "Node name for S&R": "PreviewAny"
-   },
-   "widgets_values": [],
-   "title": "H3MD Multi-Swap Plan (Director: Import plan)"
-  },
-  {
-   "id": 70,
-   "type": "MarkdownNote",
-   "pos": [
-    2280,
-    330
-   ],
-   "size": [
-    380,
-    520
-   ],
-   "flags": {},
-   "order": 22,
-   "mode": 0,
-   "inputs": [],
-   "outputs": [],
-   "properties": {
-    "Node name for S&R": "MarkdownNote"
-   },
-   "widgets_values": [
-    "## H3MD multi-person swap keyframes\n\n**1. Keyframe Export** (left group)\n- Drop the source video into *Source video*, the new people into *Picture 1/2/3*.\n- *mapping*: `picture 1 -> left 1` ... (people numbered left to right in the first clear frame - check *People*).\n- *descriptions*: one line per picture, head to toe (also what the picture does not show).\n- Run. The package is in output/H3MD_keyframes/<name>_keyframe_export_<date>_<no>.zip. Give it to the AI (with the H3MD keyframe skill, or the README inside the package).\n\n**2. Keyframe Import** (right group) - bypass the left group (Ctrl+B)\n- *Import package*: pick the AI's answer (<name>_keyframe_import_<date>_<no>.h3kf or .json).\n- Run: about 25 s per keyframe. Check *Compare* (original | new).\n- A keyframe is clearly wrong: tell the AI which one and what is wrong, import its new answer, click that keyframe on *Redo* and run - only that one is made again.\n- The plan (<name>_multiswap_plan_<date>_<no>.zip) goes to the Director: Import plan."
-   ],
-   "title": "How to use"
-  }
- ],
- "links": [
-  [
-   1,
-   2,
-   0,
-   10,
-   0,
-   "IMAGE"
   ],
-  [
-   2,
-   3,
-   0,
-   10,
-   1,
-   "IMAGE"
+  "links": [
+    [
+      1,
+      2,
+      0,
+      10,
+      0,
+      "IMAGE"
+    ],
+    [
+      2,
+      3,
+      0,
+      10,
+      1,
+      "IMAGE"
+    ],
+    [
+      3,
+      4,
+      0,
+      10,
+      2,
+      "IMAGE"
+    ],
+    [
+      4,
+      1,
+      0,
+      10,
+      5,
+      "VIDEO"
+    ],
+    [
+      5,
+      10,
+      2,
+      11,
+      0,
+      "IMAGE"
+    ],
+    [
+      6,
+      10,
+      1,
+      20,
+      0,
+      "H3MD_KEYFRAME_JOB"
+    ],
+    [
+      7,
+      10,
+      0,
+      20,
+      1,
+      "IMAGE"
+    ],
+    [
+      8,
+      20,
+      1,
+      21,
+      0,
+      "IMAGE"
+    ],
+    [
+      9,
+      20,
+      0,
+      22,
+      0,
+      "STRING"
+    ],
+    [
+      10,
+      40,
+      0,
+      41,
+      0,
+      "MODEL"
+    ],
+    [
+      11,
+      30,
+      0,
+      50,
+      0,
+      "H3MD_KEYFRAME_JOB"
+    ],
+    [
+      12,
+      30,
+      1,
+      50,
+      1,
+      "IMAGE"
+    ],
+    [
+      13,
+      41,
+      0,
+      50,
+      2,
+      "MODEL"
+    ],
+    [
+      14,
+      43,
+      0,
+      50,
+      3,
+      "CLIP"
+    ],
+    [
+      15,
+      44,
+      0,
+      50,
+      4,
+      "VAE"
+    ],
+    [
+      16,
+      45,
+      0,
+      50,
+      5,
+      "SAMPLER"
+    ],
+    [
+      17,
+      46,
+      0,
+      50,
+      6,
+      "SIGMAS"
+    ],
+    [
+      18,
+      30,
+      2,
+      50,
+      7,
+      "STRING"
+    ],
+    [
+      19,
+      31,
+      0,
+      50,
+      8,
+      "STRING"
+    ],
+    [
+      20,
+      50,
+      3,
+      51,
+      0,
+      "IMAGE"
+    ],
+    [
+      21,
+      50,
+      2,
+      52,
+      0,
+      "STRING"
+    ],
+    [
+      22,
+      50,
+      1,
+      60,
+      0,
+      "H3MD_KEYFRAME_JOB"
+    ],
+    [
+      23,
+      60,
+      2,
+      61,
+      0,
+      "STRING"
+    ]
   ],
-  [
-   3,
-   4,
-   0,
-   10,
-   2,
-   "IMAGE"
+  "groups": [
+    {
+      "title": "1. Keyframe Export",
+      "bounding": [
+        0,
+        0,
+        1250,
+        1420
+      ],
+      "color": "#3f789e",
+      "font_size": 24
+    },
+    {
+      "title": "2. Keyframe Import",
+      "bounding": [
+        1280,
+        0,
+        1420,
+        1420
+      ],
+      "color": "#8A8",
+      "font_size": 24
+    }
   ],
-  [
-   4,
-   1,
-   0,
-   10,
-   5,
-   "VIDEO"
-  ],
-  [
-   5,
-   10,
-   2,
-   11,
-   0,
-   "IMAGE"
-  ],
-  [
-   6,
-   10,
-   1,
-   20,
-   0,
-   "H3MD_KEYFRAME_JOB"
-  ],
-  [
-   7,
-   10,
-   0,
-   20,
-   1,
-   "IMAGE"
-  ],
-  [
-   8,
-   20,
-   1,
-   21,
-   0,
-   "IMAGE"
-  ],
-  [
-   9,
-   20,
-   0,
-   22,
-   0,
-   "STRING"
-  ],
-  [
-   10,
-   40,
-   0,
-   41,
-   0,
-   "MODEL"
-  ],
-  [
-   11,
-   30,
-   0,
-   50,
-   0,
-   "H3MD_KEYFRAME_JOB"
-  ],
-  [
-   12,
-   30,
-   1,
-   50,
-   1,
-   "IMAGE"
-  ],
-  [
-   13,
-   41,
-   0,
-   50,
-   2,
-   "MODEL"
-  ],
-  [
-   14,
-   43,
-   0,
-   50,
-   3,
-   "CLIP"
-  ],
-  [
-   15,
-   44,
-   0,
-   50,
-   4,
-   "VAE"
-  ],
-  [
-   16,
-   45,
-   0,
-   50,
-   5,
-   "SAMPLER"
-  ],
-  [
-   17,
-   46,
-   0,
-   50,
-   6,
-   "SIGMAS"
-  ],
-  [
-   18,
-   30,
-   2,
-   50,
-   7,
-   "STRING"
-  ],
-  [
-   19,
-   31,
-   0,
-   50,
-   8,
-   "STRING"
-  ],
-  [
-   20,
-   50,
-   3,
-   51,
-   0,
-   "IMAGE"
-  ],
-  [
-   21,
-   50,
-   2,
-   52,
-   0,
-   "STRING"
-  ],
-  [
-   22,
-   50,
-   1,
-   60,
-   0,
-   "H3MD_KEYFRAME_JOB"
-  ],
-  [
-   23,
-   60,
-   2,
-   61,
-   0,
-   "STRING"
-  ]
- ],
- "groups": [
-  {
-   "title": "1. Keyframe Export",
-   "bounding": [
-    0,
-    0,
-    1250,
-    1420
-   ],
-   "color": "#3f789e",
-   "font_size": 24
+  "config": {},
+  "extra": {
+    "ds": {
+      "scale": 0.55,
+      "offset": [
+        40,
+        40
+      ]
+    }
   },
-  {
-   "title": "2. Keyframe Import",
-   "bounding": [
-    1280,
-    0,
-    1420,
-    1420
-   ],
-   "color": "#8A8",
-   "font_size": 24
-  }
- ],
- "config": {},
- "extra": {
-  "ds": {
-   "scale": 0.55,
-   "offset": [
-    40,
-    40
-   ]
-  }
- },
- "version": 0.4
+  "version": 0.4
 }

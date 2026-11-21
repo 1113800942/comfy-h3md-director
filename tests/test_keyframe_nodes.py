@@ -60,7 +60,8 @@ def test_prepare_assemble(clip):
         "clips/src.mp4", "图1换左二", "a man with short red hair, yellow coat", "伊娃：金发\n阿比：红发\n义父：黑发",
         5.0, 0.4, 8, picture_1=pic)["result"]
     i = json.loads(info)
-    assert i["people_at_start"] == 3 and i["mapping"] == [{"picture": 1, "left": 2}]
+    assert i["people"] == 3 and i["mapping"] == [{"picture": 1, "person": 2}]
+    assert [c["picture"] for c in i["cast"]] == [None, 1, None]
     assert len(pics) == i["recasts"] == sum(len(m["items"]) for m in job["moments"]) >= 2
     assert job["size"] == [1664, 960] and job["length"] <= SEC * FPS
     assert not any(5.0 < m["at"] < 6.0 for m in job["moments"])

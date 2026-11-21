@@ -1,6 +1,6 @@
 """H3MD Keyframe nodes (2026-11-17, H3MD 0.5.0): keyframes + plan package for the multi-person swap (Remake).
 
-  H3MD Keyframe 1: Prepare  - source video + character pictures + "图1换左二" -> who is who, keyframe moments, where
+  H3MD Keyframe 1: Prepare  - source video + character pictures (picture 1 = first person to appear ...) -> who is who, keyframe moments, where
                               every person to recast stands then.
   H3MD Keyframe 1b: Recast  - 0.5.91: in layers, one person at a time, with Qwen Image 2.1: (1) erase the people
                               to recast -> clean background, (2) make every new character alone in her pose,
@@ -385,26 +385,44 @@ def _font(size):
         return ImageFont.load_default()
 
 
-def people_sheet(frame_u8, who, chosen, t):
-    """numbering frame with every person's box: L1, L2 ... (left to right); recast people in orange with 'pic N'"""
-    from PIL import Image, ImageDraw
-    img = Image.fromarray(frame_u8).convert("RGB")
-    W, H = img.size
-    d = ImageDraw.Draw(img)
-    f = _font(max(18, H // 28))
-    pic_of = {pid: p for p, _, pid in chosen}
-    for k, (pid, b) in enumerate(who, 1):
-        col = (255, 140, 0) if pid in pic_of else (80, 200, 255)
-        box = [b[0] * W, b[1] * H, b[2] * W, b[3] * H]
-        d.rectangle(box, outline=col, width=max(3, W // 400))
-        label = f"L{k}" + (f" <- pic {pic_of[pid]}" if pid in pic_of else "")
-        tb = d.textbbox((box[0] + 6, box[1] + 6), label, font=f)
-        d.rectangle([tb[0] - 4, tb[1] - 3, tb[2] + 4, tb[3] + 3], fill=(0, 0, 0))
-        d.text((box[0] + 6, box[1] + 6), label, fill=col, font=f)
-    d.text((10, H - max(18, H // 28) - 12), f"{t:.2f} s  numbered left to right", fill=(255, 255, 255),
-           font=f, stroke_width=2, stroke_fill=(0, 0, 0))
+def cast_sheet(small, frames, people, chosen, tile_h=360, per_row=6):
+    """0.5.91 (user 01:52): the cast - every person seen clearly, numbered in order of first appearance, cut from the
+    frame where he is largest.  '#k  a-b s' and '<- picture N' (orange, recast) or 'kept' (blue)."""
     import numpy as np
-    return np.asarray(img)
+    from PIL import Image, ImageDraw
+    pic_of = {pid: p for p, _, pid in chosen}
+    f = _font(22)
+    tiles = []
+    for k, a in enumerate(people, 1):
+        img = Image.fromarray(np.asarray(small[a["best"]])).convert("RGB")
+        W, H = img.size
+        b = next((w[1] for w in frames[a["best"]]["who"] if w[0] == a["id"]), [0, 0, 1, 1])
+        px, py = 0.08 * (b[2] - b[0]), 0.04 * (b[3] - b[1])
+        box = [max(0, int((b[0] - px) * W)), max(0, int((b[1] - py) * H)),
+               min(W, int(math.ceil((b[2] + px) * W))), min(H, int(math.ceil((b[3] + py) * H)))]
+        crop = img.crop(box)
+        tw = max(170, int(round(crop.width * tile_h / max(1, crop.height))))
+        crop = crop.resize((min(tw, tile_h), tile_h), Image.LANCZOS)
+        tile = Image.new("RGB", (max(170, crop.width), tile_h + 62), (24, 24, 24))
+        tile.paste(crop, ((tile.width - crop.width) // 2, 0))
+        d = ImageDraw.Draw(tile)
+        p = pic_of.get(a["id"])
+        col = (255, 140, 0) if p else (80, 200, 255)
+        d.rectangle([0, 0, tile.width - 1, tile_h + 61], outline=col, width=4)
+        d.text((8, tile_h + 4), f"#{k}  {a['first']:.1f}-{a['last']:.1f} s", fill=(255, 255, 255), font=f)
+        d.text((8, tile_h + 32), f"<- picture {p}" if p else "kept", fill=col, font=f)
+        tiles.append(tile)
+    rows = [tiles[i:i + per_row] for i in range(0, len(tiles), per_row)] or [[]]
+    width = max(sum(t.width for t in r) + 8 * (len(r) + 1) for r in rows)
+    sheet = Image.new("RGB", (max(width, 64), len(rows) * (tile_h + 70) + 8), (12, 12, 12))
+    y = 8
+    for r in rows:
+        x = 8
+        for t in r:
+            sheet.paste(t, (x, y))
+            x += t.width + 8
+        y += tile_h + 70
+    return np.asarray(sheet)
 
 
 def contact_sheet(images, labels, cols=2, width=1664):
@@ -534,10 +552,13 @@ class H3MDKeyframePrepare:
                                      "Only when no Load Video node is connected to source_video: the source video's "
                                      "path inside ComfyUI's input folder (older workflows). 没接加载视频时才用：原片在 "
                                      "input 里的路径。"}),
-                "mapping": ("STRING", {"multiline": True, "default": "图1换左二\n图2换左四", "tooltip":
-                                       "Which picture replaces which person; people are numbered left to right in the "
-                                       "first clear frame (see people_sheet). '图1换左二' = picture 1 replaces the "
-                                       "second from the left; English: 'picture 1 -> left 2'."}),
+                "mapping": ("STRING", {"multiline": True, "default": "", "tooltip":
+                                       "Empty = automatic (recommended): picture 1 goes to the first person who "
+                                       "appears in the clip, picture 2 to the next, and so on; once given, a person "
+                                       "keeps his picture wherever he moves, and people after the last picture stay "
+                                       "themselves. The cast sheet (people_sheet) shows who got which picture. To "
+                                       "choose yourself: '图1换3号' / 'picture 1 -> 3' with the numbers of the cast "
+                                       "sheet. 留空 = 自动：图1 给最先出现的人，图2 给下一个……"}),
                 "descriptions": ("STRING", {"multiline": True, "default": "", "tooltip":
                                             "One line per picture, in picture order, head to toe: race, age, face, "
                                             "hair, every garment and the shoes (e.g. 'a Black man in his twenties, short "
@@ -546,7 +567,7 @@ class H3MDKeyframePrepare:
                                             "picture: trousers and shoes) - nobody else can know it. Used by the AI and "
                                             "in the Remake prompt; English."}),
                 "people_at_start": ("STRING", {"multiline": True, "default": "", "tooltip":
-                                    "Optional: one line per person in the source, left to right at the start, what "
+                                    "Optional: one line per person of the cast sheet (#1, #2 ... = order of first appearance), what "
                                     "they look like now (e.g. 'the woman with wavy dark-brown hair in a red crop top'). "
                                     "Helps the Remake prompt keep the others. 可选：原片里从左到右每人一行，现在的样子。"}),
                 "max_gap_s": ("FLOAT", {"default": 5.0, "min": 2.0, "max": 8.0, "step": 0.5, "tooltip":
@@ -573,13 +594,13 @@ class H3MDKeyframePrepare:
     OUTPUT_IS_LIST = (True, False, False, False)
     OUTPUT_TOOLTIPS = ("The character picture of every recast person at every keyframe, in order (connect to Recast).",
                        "Everything Recast and Assemble need (connect it there).",
-                       "First clear frame with every person numbered left to right: check the numbers match "
-                       "your mapping.",
+                       "The cast: every person seen clearly, numbered in order of first appearance, with the "
+                       "picture each one gets (or 'kept').",
                        "Moments, people, warnings (JSON).")
     FUNCTION = "prepare"
     CATEGORY = CATEGORY
-    DESCRIPTION = ("Multi-person swap keyframes, step 1. Finds and numbers the people in the source (left to right "
-                   "at the start), picks keyframe moments at most max_gap_s apart (people standing apart, little "
+    DESCRIPTION = ("Multi-person swap keyframes, step 1. Finds and numbers the people in the source (in order of first "
+                   "appearance), gives the pictures to them, picks keyframe moments at most max_gap_s apart (people standing apart, little "
                    "motion) and notes where every person to recast stands then. Then H3MD Keyframe 1b: Recast "
                    "(H3 Image AIO chain: plain sentence, official enhancer, one edit per keyframe) and H3MD "
                    "Keyframe 2: Assemble.")
@@ -592,7 +613,11 @@ class H3MDKeyframePrepare:
             if pics.get(f"picture_{p}") is None:
                 raise K.KeyframeError(f"{TAG} picture {p} is used in the mapping but picture_{p} is not connected. "
                                       f"图{p} 没接。")
-        descs = K.parse_descriptions(descriptions, mp.keys())
+        # 0.5.91 (user 01:52): no mapping = every connected picture, given out in order of first appearance
+        picset = sorted(mp) if mp else sorted(i for i in range(1, 6) if pics.get(f"picture_{i}") is not None)
+        if not picset:
+            raise K.KeyframeError(f"{TAG} connect at least one character picture (picture_1 ...). 至少接一张角色图。")
+        descs = K.parse_descriptions(descriptions, picset)
         looks = {k: s for k, s in enumerate(K.parse_people(people_at_start), 1)}
         import folder_paths
         typed = resolve_video(video) if source_video is None else None
@@ -639,8 +664,14 @@ class H3MDKeyframePrepare:
             LOG.info("%s person found again at %.1f s (track %s = track %s, %s, look %.2f)", TAG, j["at"], j["new"],
                      j["into"], j["why"], j["look"])
         frames = K.report(per_frame, times)
-        nf, order = K.number_people(frames)
-        chosen = K.resolve(mp, order)
+        people = K.cast(frames)
+        order = [a["id"] for a in people]
+        if not mp:
+            mp = K.auto_cast(people, picset)
+        chosen = K.resolve(mp, people)
+        LOG.info("%s cast (order of first appearance): %s", TAG, "; ".join(
+            f"#{n} {a['first']:.1f}-{a['last']:.1f} s {a['side']}"
+            + next((f" <- picture {p}" for p, k, _ in chosen if k == n), " kept") for n, a in enumerate(people, 1)))
         ids = {pid for _, _, pid in chosen}
         moments = K.pick_moments(frames, ids, dur, max_gap_s)
         try:   # 0.5.8: one keyframe in every shot
@@ -684,13 +715,14 @@ class H3MDKeyframePrepare:
                      for pid in ids}
         for p, k, pid in chosen:
             if seen_last[pid] < dur - max_gap_s:
-                warnings.append(f"picture {p} (left {k}) is followed only up to {seen_last[pid]:.1f} s: after that "
+                warnings.append(f"picture {p} (person #{k}) is followed only up to {seen_last[pid]:.1f} s: after that "
                                 "the tracker lost them (left the frame or hidden?). Later keyframes miss this person.")
-        sheet = people_sheet(small[frames.index(nf)], K.visible(nf), chosen, nf["at"])
+        sheet = cast_sheet(small, frames, people, chosen)
         full = read_frames(path, [frames[i]["at"] for i, _ in moments], size)
         W, H = size
         pictures, job_moments = [], []
         pic_t = {p: fit_picture(pics[f"picture_{p}"]) for p in mp}
+        slivers = []
         pbar = comfy.utils.ProgressBar(len(moments))
         for i, kind in moments:
             f = frames[i]
@@ -701,6 +733,9 @@ class H3MDKeyframePrepare:
             for p, k, pid in chosen:
                 own = next((b for q, b in vis if q == pid), None)
                 if own is None:
+                    continue
+                if K.sliver(own):          # 0.5.91: only a strip at the edge - left as it is, not recast
+                    slivers.append(f"{t:.2f} s picture {p}")
                     continue
                 ob = [own[0] * W, own[1] * H, own[2] * W, own[3] * H]
                 others = [[b[0] * W, b[1] * H, b[2] * W, b[3] * H] for q, b in allb if q != pid]
@@ -714,13 +749,16 @@ class H3MDKeyframePrepare:
             job_moments.append({"at": t, "kind": "swap" if items else "plain", "items": items,
                                 "boxes": [list(b) for q, b in allb]})
             pbar.update(1)
+        if slivers:
+            LOG.info("%s only a strip at the frame edge, not recast there: %s", TAG, ", ".join(slivers))
         names = {pid: (None if pid in ids else (looks.get(n) or
-                                                f"the unchanged performer who starts {K.ordinal(n)} from the left"))
+                                                f"the unchanged performer #{n} (first seen at "
+                                                f"{people[n - 1]['first']:.1f} s on the {people[n - 1]['side']})"))
                  for n, pid in enumerate(order, 1)}
         if looks and len(looks) != len(order):
-            warnings.append(f"people_at_start has {len(looks)} line(s) but {len(order)} people were found at the start; "
-                            "check the people sheet.")
-        prompt = K.swap_prompt(length, chosen, descs, len(order), changes, names, looks)
+            warnings.append(f"people_at_start has {len(looks)} line(s) but the cast has {len(order)} people; "
+                            "check the cast sheet.")
+        prompt = K.swap_prompt(length, chosen, descs, len(order), changes, names, looks, people=people)
         job = {"video": plan_path(video, path), "video_abs": path, "duration": info["duration"],
                "has_audio": info["audio"], "size": list(size), "length": length, "moments": job_moments,
                "frames": full, "prompt": prompt, "chosen": chosen, "order": order}
@@ -729,8 +767,11 @@ class H3MDKeyframePrepare:
             st = round(max(0.0, float(start_s or 0.0)), 3)
             job["source_trim"] = {"start": st, "end": round(st + float(info["duration"]), 3)}
         text = {"video": job["video"], "size": list(size), "frames": length, "seconds": round(dur, 2),
-                "people_at_start": len(order), "numbered_at": nf["at"],
-                "mapping": [{"picture": p, "left": k} for p, k, _ in chosen],
+                "people": len(order),
+                "cast": [{"person": n, "first_s": a["first"], "last_s": a["last"], "side": a["side"],
+                          "picture": next((p for p, k, _ in chosen if k == n), None)}
+                         for n, a in enumerate(people, 1)],
+                "mapping": [{"picture": p, "person": k} for p, k, _ in chosen],
                 "keyframes": [{"at": m["at"], "recast": [it["picture"] for it in m["items"]]} for m in job_moments],
                 "place_changes": [{"from": a, "to": b} for a, b, pr in changes if pr],
                 "cuts": cuts,

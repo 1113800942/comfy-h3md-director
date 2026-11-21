@@ -15,6 +15,8 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   示例:三人舞蹈换人(17 秒)的导出包、AI 回包、计划包和成片。
 
 ### Changed / 变更
+- Keyframe Prepare: who gets which picture no longer depends on places in one frame. Everyone seen clearly for at least 1 s is numbered in order of first appearance (people who appear together: left to right); with *mapping* left empty, picture 1 goes to person #1, picture 2 to #2 and so on, a person keeps his picture wherever he moves, and people after the last picture stay themselves. *People* is now a cast sheet (each person large, the seconds he is seen, the picture he gets or "kept"); "图1换3号" / "picture 1 -> 3" picks by its numbers. Clips cut from the middle, with people walking in later, work the same way.
+- Keyframe Prepare: people are told apart by their faces too (InsightFace ArcFace, models/insightface antelopev2 / buffalo_l, as ReActor / PuLID use; optional): when both tracks were seen with a face, the face decides who comes back after a cut, else hair / clothes colour as before.
 - H3MD Keyframe Recast no longer reads the keyframes itself (the local prompt enhancer took 55-83 s a keyframe and sometimes answered empty). Its result is cut to the video's aspect before scaling (no stretch).
   Recast 不再自己看图写提示词(本地反推每张 55-83 秒,偶尔回空);出图先按视频比例裁齐再缩放,不拉伸。
 - Control Panel style 多人互换 switches on only the LMS LoRA (high-res 0.2, nothing on low-res) instead of keeping the previous style's LoRAs; a multi-swap plan's global prompt is the LMS trigger words.
@@ -23,6 +25,7 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   关键帧节点名改为英文;旧的关键帧工作流和旧的单文件 skill 删除。
 
 ### Fixed / 修复
+- Keyframe Prepare: a new person walking in (a face unlike everyone missing) no longer warns "a person came back who could be any of ..."; a person showing only as a narrow strip at the frame edge is not recast at that keyframe (a 26 px strip got a character picture).
 - Loop: a trial (试镜) or `segments_to_run` took segments it did not run from the cache even when they had been made for **another plan** (the cache folder is shared by every plan with the same settings; only the frame count was checked). The old take was spliced into the video and used as the tail lock of the re-made segment. Every cached segment now records what it was made from; a segment is kept from the cache only when it matches this plan. Caches written before 0.5.91 are made again once when repairing.
   Loop:试镜 / 只跑某几段时,没跑的段会从缓存拿,哪怕是**别的计划**做的(缓存文件夹按设置共用,只查了帧数):旧视频被接进成片,还被当成重做那段的锁尾。现在每段缓存记下它是用哪份计划内容做的,对得上才沿用。0.5.91 以前的缓存修补时会重做一次。
 - Director Import plan keeps the global prompt already in the Director when the imported plan has none (it was wiped).

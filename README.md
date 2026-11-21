@@ -176,9 +176,11 @@ pass and its own high-res pass on top.
 1. **Keyframes + plan** (0.5.91): open `example_workflows/H3MD_Keyframe_MultiSwap_0.5.91.json` - one workflow, two
    groups, everything by buttons.
    - **Group 1 - Keyframe Export.** Drag the source video into *Source video* (optional `start_s` / `end_s` on Prepare:
-     recast only that part, cut with its sound), the characters into *Picture 1/2/3*, write the mapping
-     ("图1换左二" / "picture 1 -> left 2"; people are numbered left to right in the first clear frame - check *People*)
-     and one description line per picture, head to toe: race, age, face, hair, every garment, the shoes - **always
+     recast only that part, cut with its sound), the characters into *Picture 1/2/3*, leave
+     *mapping* empty - picture 1 goes to the first person who appears in the clip, picture 2 to the next, and so on (people
+     who appear together: left to right); once given, a person keeps his picture wherever he moves, later people stay
+     themselves; the cast sheet (*People*) shows who got which picture, and "图1换3号" / "picture 1 -> 3" picks by its
+     numbers instead - and write one description line per picture, head to toe: race, age, face, hair, every garment, the shoes - **always
      what the picture does not show** (a half-body picture: trousers and shoes). **H3MD Keyframe Prepare** tracks the
      people (core SAM3.1), finds the cuts and picks the keyframe moments (at least one per shot, at most about 5 s
      apart; a person lost after a blackout, a cut or a spin is found again). **H3MD Keyframe Export** writes

@@ -522,17 +522,16 @@ Picture number**. Define each Subject by look and by the performer it replaces; 
   soundtrack.` / `The <Picture> images are redrawn frames of this same run: each shows the people at that moment with
   their final look, in the positions and poses they hold then; together they fix who is who as the performers change
   places, leave and come back, and in close-ups.` / `<Subject 1> is a woman with long wavy blonde hair in a white ribbed
-  tank top, black jeans and white sneakers; this subject replaces the second performer counted from the left at the
-  start.` (one line per character). **Give every Subject an ethnicity, a rough age and a face** (face shape, eyes, skin, beard or not), not only hair and clothes, e.g. `<Subject 3> is an East Asian man in his late twenties with a clean-shaven face, dark almond-shaped eyes and short black hair ...` (measured: with only "short black hair, black T-shirt" the East Asian character came out European)
+  tank top, black jeans and white sneakers; this subject replaces performer #2, who first appears at 0.0 s on the left of the frame.` (one line per character). **Give every Subject an ethnicity, a rough age and a face** (face shape, eyes, skin, beard or not), not only hair and clothes, e.g. `<Subject 3> is an East Asian man in his late twenties with a clean-shaven face, dark almond-shaped eyes and short black hair ...` (measured: with only "short black hair, black T-shirt" the East Asian character came out European)
 - `summary`: `The target video is an edited version of <Video 1>. [video editing + reference generation + audio reuse]
-  Recast 3 of the 5 performers with a fixed mapping the whole time, counted from left to right at the start: ...; the
+  Recast 3 of the 5 performers with a fixed mapping the whole time, numbered in order of first appearance: ...; the
   other performers stay themselves, with their own faces, hair and outfits.`
 - `retention_analysis`: `<Video 1>: partially_preserved - motion, posture, lip and jaw movement, timing, camera,
   framing, scene, lighting and colour grade are retained; the face, hair and outfit of the recast performers are not
   carried over.`; per Subject `fully_preserved - ..., identical in every moment, including close-ups and group shots.`;
   `Source audio: fully_copy - the original soundtrack and its synchronisation are kept.`
 - `detailed_description`: one continuous take matching `<Video 1>` (source cuts written as `[Ns cut]` at the source's
-  times), who stands where from left to right at the start, each recast person moves exactly like their performer and
+  times), the performers in order of first appearance, each recast person moves exactly like their performer and
   keeps their own face, hair and clothes in every frame; five fingers per hand.
 - `overall_soundscape`: `Keep the source soundtrack; do not invent dialogue.`; `non_diegetic_music`: the music of
   `<Video 1>` unchanged.

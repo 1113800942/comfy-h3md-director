@@ -271,9 +271,10 @@ non_diegetic_music:
 **修图模型**:本地用 MiniMax H3 Image(关键帧工作流)或其他修图模型(A 线);只能聊天出图就用 ChatGPT(B 线)。要求是:能同时看两张以上
 的图(原帧 + 角色图),输出尺寸可以指定或保持原图大小。
 
-### 1. 认人:按位置编号,编号一直不变
-- 用户按位置指定,例如"图1换左二,图2换左三,图3换左五"。在**所有人第一次都清楚出现的那一帧**,从左到右编号:左一、左二……
-  这个编号就是这个人在整条视频里的身份,后面换了位置也不变。
+### 1. 认人:按出场先后编号,编号一直不变(0.5.91)
+- 按**出场先后**编号:第一个清楚出现(至少 1 秒)的人是 1 号,下一个是 2 号……同时出场的从左往右。一闪而过的、只在画面边上
+  露一小条的不编号。默认图1 换 1 号、图2 换 2 号……用户也可以写"图1换3号"。
+- 这个编号就是这个人在整条视频里的身份:后面换了位置、出画再回来都不变;图用完以后出场的人保持原样。
 - 给每个人记一句外貌(帽子、发型、衣服颜色和款式),后面每一帧都靠它认人。两个人长得很像、或分不清谁是谁时,停下来问用户。
 - 角色图:每个角色一张清楚的全身或半身图;记下角色的外貌(发型、上衣、裤子、鞋、袜子 / 光腿),原角色穿了而新角色没有的写明
   "no socks, no boots"。
@@ -338,10 +339,9 @@ Remake 里 `<Picture N>` 是本段第 N 张关键帧,不是角色图,所以**不
   soundtrack.` / `The <Picture> images are redrawn frames of this same run: each shows the people at that moment with
   their final look, in the positions and poses they hold then; together they fix who is who as the performers change
   places, leave and come back, and in close-ups.` / `<Subject 1> is a woman with long wavy blonde hair in a white
-  ribbed tank top, black jeans and white sneakers; this subject replaces the second performer counted from the left
-  at the start.`(每个角色一行)。**每个 Subject 都要写人种、大概年龄和长相**（脸型、眼睛、肤色、有没有胡子），不能只写发型和衣服，例如 `<Subject 3> is an East Asian man in his late twenties with a clean-shaven face, dark almond-shaped eyes and short black hair ...`（实测：只写"黑色短发、黑 T 恤"时，东亚角色被画成了欧洲人）
+  ribbed tank top, black jeans and white sneakers; this subject replaces performer #2, who first appears at 0.0 s on the left of the frame.`(每个角色一行)。**每个 Subject 都要写人种、大概年龄和长相**（脸型、眼睛、肤色、有没有胡子），不能只写发型和衣服，例如 `<Subject 3> is an East Asian man in his late twenties with a clean-shaven face, dark almond-shaped eyes and short black hair ...`（实测：只写"黑色短发、黑 T 恤"时，东亚角色被画成了欧洲人）
 - `summary`:`The target video is an edited version of <Video 1>. [video editing + reference generation + audio reuse]
-  Recast 3 of the 5 performers with a fixed mapping the whole time, counted from left to right at the start: ...; the
+  Recast 3 of the 5 performers with a fixed mapping the whole time, numbered in order of first appearance: ...; the
   other performers stay themselves, with their own faces, hair and outfits.`
 - `retention_analysis`:`<Video 1>: partially_preserved - motion, posture, lip and jaw movement, timing, camera, framing,
   scene, lighting and colour grade are retained; the face, hair and outfit of the recast performers are not carried
