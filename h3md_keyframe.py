@@ -272,6 +272,122 @@ def assign_face(face_box, boxes):
     return min(cand)[1] if cand else None
 
 
+FACE_SAME = 0.35          # 0.5.91: ArcFace cosine at which two faces are one person (same person ~0.5-0.8,
+                          # different ~0.0-0.2)
+FACE_MIN_COUNT = 3        # a face cluster needs this many faces to be a person (else: a stray detection)
+FACE_KEEP_RUN = 2         # a track changes its face only after this many faces in a row of the other person
+
+
+def face_clusters(embs, same=FACE_SAME, min_count=FACE_MIN_COUNT, rounds=3):
+    """0.5.91 (2026-11-21 _004: five men in white, the tracker passed numbers between them when they crossed): group
+    L2-normalised face embeddings into people.  Centroid clustering: each face joins the nearest person if the
+    cosine reaches `same`, else starts a new one; centroids closer than `same` merge; then every face is assigned
+    again.  -> (labels per face, -1 = none; centroids)"""
+    import numpy as np
+    if not len(embs):
+        return [], []
+    X = np.asarray(embs, np.float32)
+    X /= np.maximum(np.linalg.norm(X, axis=1, keepdims=True), 1e-6)
+    cents = []
+    for x in X:
+        if cents:
+            sims = np.asarray(cents) @ x
+            j = int(np.argmax(sims))
+            if sims[j] >= same:
+                c = cents[j] + x
+                cents[j] = c / max(float(np.linalg.norm(c)), 1e-6)
+                continue
+        cents.append(x.copy())
+    for _ in range(rounds):
+        C = np.asarray(cents)
+        lab = np.argmax(X @ C.T, 1)
+        cents = []
+        for j in range(len(C)):
+            m = X[lab == j]
+            if len(m):
+                c = m.mean(0)
+                cents.append(c / max(float(np.linalg.norm(c)), 1e-6))
+        merged = []
+        for c in cents:                                   # people closer than `same` are one
+            for k, d in enumerate(merged):
+                if float(c @ d) >= same:
+                    e = c + d
+                    merged[k] = e / max(float(np.linalg.norm(e)), 1e-6)
+                    break
+            else:
+                merged.append(c)
+        cents = merged
+    C = np.asarray(cents)
+    S = X @ C.T
+    lab = np.argmax(S, 1)
+    counts = np.bincount(lab, minlength=len(C))
+    out = [int(l) if S[i, l] >= same and counts[l] >= min_count else -1 for i, l in enumerate(lab)]
+    keep = sorted({l for l in out if l >= 0})
+    remap = {l: n for n, l in enumerate(keep)}
+    return [remap.get(l, -1) for l in out], [C[l] for l in keep]
+
+
+def split_by_face(per_frame, obs, labels, keep_run=FACE_KEEP_RUN):
+    """0.5.91: a track is one person only while his face stays the same.  obs [(frame index, id, embedding)],
+    labels from face_clusters.  Where a track's face changes to another person (for keep_run faces in a row) the
+    track is cut half-way between the two faces; every piece with a face is renamed after that person (FACE_ID +
+    person), so pieces of one person anywhere in the clip are one id; pieces without a face keep their id.  Two
+    boxes of one person in one frame: the second keeps a separate id.  -> (new per_frame, {new id: person}, notes)"""
+    by_id = {}
+    for (i, pid, _), lab in zip(obs, labels):
+        if lab >= 0:
+            by_id.setdefault(pid, []).append((i, lab))
+    pieces = {}                                           # id -> [(from frame, to frame, person)]
+    notes = []
+    for pid, seq in by_id.items():
+        seq.sort()
+        runs = []                                         # [person, first i, last i, faces]
+        for i, lab in seq:
+            if runs and runs[-1][0] == lab:
+                runs[-1][2], runs[-1][3] = i, runs[-1][3] + 1
+            else:
+                runs.append([lab, i, i, 1])
+        clean = []                                        # a short run between two runs is a stray face
+        for r in runs:
+            if clean and r[3] < keep_run and r is not runs[-1]:
+                continue
+            if clean and clean[-1][0] == r[0]:
+                clean[-1][2], clean[-1][3] = r[2], clean[-1][3] + r[3]
+            else:
+                clean.append(list(r))
+        if len(clean) > 1 and clean[-1][3] < keep_run:    # a stray face at the very end
+            clean[-2][2] = clean[-1][2]
+            clean.pop()
+        span = []
+        for n, r in enumerate(clean):
+            a = -10 ** 9 if n == 0 else (clean[n - 1][2] + r[1] + 1) // 2
+            b = 10 ** 9 if n == len(clean) - 1 else (r[2] + clean[n + 1][1] + 1) // 2 - 1
+            span.append((a, b, r[0]))
+        pieces[pid] = span
+        if len(span) > 1:
+            notes.append(f"track {pid} changes person at frame(s) {[s_[0] for s_ in span[1:]]}: "
+                         f"persons {[s_[2] for s_ in span]}")
+    out, person_of = [], {}
+    for i, fr in enumerate(per_frame):
+        row = {}
+        for pid, b in fr.items():
+            nid = pid
+            for a, z, lab in pieces.get(pid, ()):
+                if a <= i <= z:
+                    nid = FACE_ID + lab
+                    break
+            if nid in row:                                # one person twice in a frame: keep them apart
+                nid = SPLIT_ID + pid
+            row[nid] = b
+            if nid >= FACE_ID and nid < SPLIT_ID:
+                person_of[nid] = nid - FACE_ID
+        out.append(row)
+    return out, person_of, notes
+
+
+FACE_ID, SPLIT_ID = 1000, 5000   # ids given by split_by_face (tracker ids are small numbers)
+
+
 def reid_merge(per_frame, looks=None, times=None, keep=None):
     """join ids the tracker split.  per_frame: [{id: box}]; looks: appearance() or None (elimination only).
     keep: ids that must stay roots (the people numbered at the start).  -> (new per_frame, joins, unsure) where
@@ -425,7 +541,9 @@ def cast(frames, min_s=CAST_MIN_S):
                 a = acc[pid] = {"id": pid, "first": f["at"], "x": (b[0] + b[2]) / 2, "last": f["at"], "n": 0,
                                 "presence": 0.0, "best": i, "_k": (-1, 0.0)}
             a["last"], a["n"], a["presence"] = f["at"], a["n"] + 1, a["presence"] + h * step
-            k = (int(b[0] > 0.01 and b[2] < 0.99), round(h, 2))
+            alone = all(iou(b, c) <= CLEAR_IOU and covered(b, c) <= COVERED and covered(c, b) <= COVERED
+                        for q, c in visible(f, relaxed=True) if q != pid)
+            k = (int(b[0] > 0.01 and b[2] < 0.99), int(alone), round(h, 2))
             if k > a["_k"]:
                 a["_k"], a["best"] = k, i
     people = [a for a in acc.values() if a["n"] * step >= min_s - 1e-6]

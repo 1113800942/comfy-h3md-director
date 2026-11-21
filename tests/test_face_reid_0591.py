@@ -53,3 +53,46 @@ def test_new_person_walking_in_is_not_a_warning():
     looks2 = {q: (white, white, None) for q in looks}
     _, joins2, unsure2 = K.reid_merge(per_frame, looks2, list(range(20)))
     assert joins2 or unsure2
+
+
+def _emb(person, rng, noise=0.25):
+    import numpy as np
+    base = np.zeros(32, np.float32)
+    base[person] = 1.0
+    v = base + noise * rng.standard_normal(32).astype(np.float32) / np.sqrt(32)
+    return v / np.linalg.norm(v)
+
+
+def test_face_clusters_people():
+    import numpy as np
+    rng = np.random.default_rng(0)
+    embs = [_emb(p, rng) for p in (0, 1, 2) for _ in range(10)] + [_emb(7, rng)]     # one stray face
+    labels, cents = K.face_clusters(embs)
+    assert len(cents) == 3
+    assert len({labels[i] for i in range(10)}) == 1 and labels[0] != labels[10] != labels[20]
+    assert labels[-1] == -1
+
+
+def test_split_by_face_number_passed_on_at_a_crossing():
+    """2026-11-21 _004: at a crossing the tracker swapped the numbers of two men (track 3: Howie, Nick, Howie; track 4:
+    Nick, Howie, Nick).  After the split each man is one id the whole time; a single stray face does not cut."""
+    import numpy as np
+    rng = np.random.default_rng(1)
+    L, R = [0.1, 0.1, 0.3, 0.9], [0.5, 0.1, 0.7, 0.9]
+    per_frame = []
+    obs = []
+    for i in range(30):
+        swapped = 10 <= i < 20
+        per_frame.append({3: L, 4: R})
+        obs.append((i, 3, _emb(1 if swapped else 0, rng)))      # 0 = Howie, 1 = Nick
+        obs.append((i, 4, _emb(0 if swapped else 1, rng)))
+    obs.append((25, 4, _emb(2, rng)))                           # stray face, a third man, once
+    labels, cents = K.face_clusters([o[2] for o in obs])
+    new, person_of, notes = K.split_by_face(per_frame, obs, labels)
+    howie = [q for q, v in new[0].items() if v == L][0]
+    nick = [q for q, v in new[0].items() if v == R][0]
+    assert howie != nick and howie >= K.FACE_ID and nick >= K.FACE_ID
+    assert new[15][nick] == L and new[15][howie] == R            # the numbers follow the faces, not the track
+    assert new[29][nick] == R and new[25][nick] == R             # the stray face did not cut track 4
+    assert all(set(fr) == {howie, nick} for fr in new)
+    assert len(notes) == 2

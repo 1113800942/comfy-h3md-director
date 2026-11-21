@@ -189,7 +189,8 @@ def sample_frames(path, duration, size, fps=SAMPLE_FPS):
 
 
 
-FACE_EVERY = 3            # 0.5.91: faces are read on every 3rd tracking frame (2 per second), at the full size
+FACE_EVERY = 1            # 0.5.91: faces are read on every tracking frame (6 per second), at the full size - a
+                          # person swap at a crossing must be caught where it happens (~3 s per 20 s of video)
 FACE_MIN_PX = 20          # ... a face narrower than this (pixels) is too small to compare
 FACE_MIN_SCORE = 0.5
 _FACE_APP = {}
@@ -230,17 +231,17 @@ def face_app():
     return app
 
 
-def face_signatures(path, times, per_frame, size, every=FACE_EVERY):
-    """{id: mean L2-normalised ArcFace embedding} of every tracked id, from full-size frames (every `every`-th tracking
-    frame); each face goes to the person whose box holds it in its upper part.  {} without InsightFace."""
+def face_observations(path, times, per_frame, size, every=FACE_EVERY):
+    """[(frame index, id, L2-normalised ArcFace embedding)] of every face in the full-size frames (every `every`-th
+    tracking frame); each face goes to the person whose box holds it in its upper part.  [] without InsightFace."""
     import numpy as np
     app = face_app()
     if app is None:
-        return {}
+        return []
     idx = list(range(0, len(times), max(1, int(every))))
     frames = read_frames(path, [times[i] for i in idx], size)
     W, H = size
-    acc = {}
+    obs = []
     for i in idx:
         img = frames[times[i]]
         try:
@@ -256,12 +257,8 @@ def face_signatures(path, times, per_frame, size, every=FACE_EVERY):
                 continue
             pid = K.assign_face((x0 / W, y0 / H, x1 / W, y1 / H), per_frame[i])
             if pid is not None:
-                acc.setdefault(pid, []).append(np.asarray(emb, np.float32))
-    out = {}
-    for pid, es in acc.items():
-        m = np.mean(es, 0)
-        out[pid] = m / max(float(np.linalg.norm(m)), 1e-6)
-    return out
+                obs.append((i, pid, np.asarray(emb, np.float32)))
+    return obs
 
 
 def detect_cuts(path, w=96, h=54):
@@ -400,7 +397,13 @@ def cast_sheet(small, frames, people, chosen, tile_h=360, per_row=6):
         px, py = 0.08 * (b[2] - b[0]), 0.04 * (b[3] - b[1])
         box = [max(0, int((b[0] - px) * W)), max(0, int((b[1] - py) * H)),
                min(W, int(math.ceil((b[2] + px) * W))), min(H, int(math.ceil((b[3] + py) * H)))]
-        crop = img.crop(box)
+        # this person bright and framed, everybody else dimmed (02:06: neighbours in the crop made '#4' unreadable)
+        inner = [int(b[0] * W), int(b[1] * H), int(math.ceil(b[2] * W)), int(math.ceil(b[3] * H))]
+        dim = Image.blend(img, Image.new("RGB", img.size, (0, 0, 0)), 0.6)
+        dim.paste(img.crop(inner), inner[:2])
+        ImageDraw.Draw(dim).rectangle(inner, outline=(255, 140, 0) if pic_of.get(a["id"]) else (80, 200, 255),
+                                      width=max(3, W // 300))
+        crop = dim.crop(box)
         tw = max(170, int(round(crop.width * tile_h / max(1, crop.height))))
         crop = crop.resize((min(tw, tile_h), tile_h), Image.LANCZOS)
         tile = Image.new("RGB", (max(170, crop.width), tile_h + 62), (24, 24, 24))
@@ -637,9 +640,16 @@ class H3MDKeyframePrepare:
         # 0.5.9: join people the tracker split (blackout, cut, spin, out and back in) - elimination, then hair /
         # clothes colour.  Before, the person a picture is mapped to was "lost" and later keyframes missed her.
         faces = {}
-        try:   # 0.5.91: faces tell apart people in the same clothes (a cut, a close-up, five men in white)
-            faces = face_signatures(path, times, per_frame, size)
-            LOG.info("%s faces seen for %d of %d tracks", TAG, len(faces), len({q for fr in per_frame for q in fr}))
+        try:   # 0.5.91: faces tell apart people in the same clothes (a cut, a close-up, five men in white).  The
+            # faces are grouped into people first; where a track's face turns into another person's (the tracker
+            # passed the number on at a crossing) the track is cut there, and every piece is named after its person
+            obs = face_observations(path, times, per_frame, size)
+            labels, cents = K.face_clusters([o[2] for o in obs]) if obs else ([], [])
+            per_frame, person_of, split_notes = K.split_by_face(per_frame, obs, labels)
+            faces = {nid: cents[p] for nid, p in person_of.items()}
+            LOG.info("%s faces: %d seen, %d people by face", TAG, len(obs), len(cents))
+            for n_ in split_notes:
+                LOG.info("%s %s", TAG, n_)
         except Exception as exc:
             LOG.warning("%s face reading failed (%s): hair / clothes colour only", TAG, exc)
         try:
