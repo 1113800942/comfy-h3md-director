@@ -63,6 +63,6 @@ def test_place_character():
 def test_prompts():
     p = K.person_prompt("a man in a beige trench coat, dark grey trousers.")
     assert "图2" in p and "图1正中间那个人" in p and "beige trench coat" in p and "纯白色背景" in p
-    assert "红框" in K.ERASE_PROMPT and "一切" in K.ERASE_PROMPT
+    assert "模糊" in K.ERASE_PROMPT and "没有任何人" in K.ERASE_PROMPT
     for w in ("手套", "袖", "丝袜", "裙"):                       # user rule: removal in one general phrase
         assert w not in K.ERASE_PROMPT

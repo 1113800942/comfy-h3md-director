@@ -700,17 +700,26 @@ def cut_character(sam, picture, cond_person, cond_face, cond_head, threshold):
     return rgb, m, box, K.pick_head(box, faces), K.pick_head(box, heads)
 
 
-def _qwen_edit(model, clip, vae, sampler, sigmas, seed, prompt, images, latent=None):
-    """one Qwen Image 2.1 edit (as the user's 'Qwen2.1 image editor' chain): images = [tensor, ...] -> uint8 image.
-    The canvas is image 1's unless a latent is given."""
+def _qwen_edit(model, clip, vae, sampler, sigmas, seed, prompt, images, mask=None):
+    """one Qwen Image 2.1 edit (as the user's 'Qwen2.1 image editor' chain): images = [tensor, ...] -> uint8 image on
+    image 1's canvas.  mask (bool, image 1's size): only there is redrawn - image 1's own latent with a noise mask,
+    as ComfyUI-Qwen-Region-Editor's QwenRegionMaskedLatent does."""
+    import torch
+    import torch.nn.functional as F
     import nodes
     from comfy_extras.nodes_qwen import TextEncodeQwenImage21
     from comfy_extras.nodes_custom_sampler import SamplerCustom
     enc = TextEncodeQwenImage21.execute(clip=clip, prompt=prompt, negative_prompt="", vae=vae, resolution=0,
                                         images={f"image_{i + 1}": im for i, im in enumerate(images)})
     pos, neg, lat = enc.result[0], enc.result[1], enc.result[2]
+    if mask is not None:
+        ref = next(e[1]["reference_latents"][0] for e in pos if e[1].get("reference_latents"))
+        lh, lw = ref.shape[-2:]
+        mt = torch.from_numpy(mask.astype("float32"))[None, None]
+        cells = (F.interpolate(mt, size=(lh, lw), mode="area") > 0.02).float()
+        lat = {"samples": ref.clone(), "noise_mask": cells}
     out = SamplerCustom.execute(model=model, add_noise=True, noise_seed=seed, cfg=1.0, positive=pos, negative=neg,
-                                sampler=sampler, sigmas=sigmas, latent_image=latent or lat)
+                                sampler=sampler, sigmas=sigmas, latent_image=lat)
     img = nodes.VAEDecode().decode(vae, out.result[0])[0]
     img = img.reshape(-1, img.shape[-3], img.shape[-2], img.shape[-1])[:1].clamp(0, 1)
     return to_u8(img)
@@ -723,14 +732,47 @@ def _resized(u8, w, h):
     return to_tensor(np.asarray(Image.fromarray(u8).resize((w, h), Image.LANCZOS)))
 
 
-def _soft(mask, radius):
-    """bool mask -> float alpha 0..1 with a soft edge"""
+def _soft(mask, radius, inside=False):
+    """bool mask -> float alpha 0..1 with a soft edge (inside=True: the edge fades inside the mask only)"""
     import numpy as np
     from PIL import Image, ImageFilter
     im = Image.fromarray(mask.astype(np.uint8) * 255)
     if radius >= 0.5:
         im = im.filter(ImageFilter.GaussianBlur(radius))
-    return np.asarray(im, np.float32)[..., None] / 255.0
+    a = np.asarray(im, np.float32)[..., None] / 255.0
+    if inside:
+        a = np.clip((a - 0.5) * 2.0, 0.0, 1.0) * mask[..., None]
+    return a
+
+
+def _fill_hole(u8, mask):
+    """fill the masked area of an image from its surroundings (normalised blur, coarse to fine), so an edit model
+    never sees what was there"""
+    import numpy as np
+    from scipy import ndimage
+    img = u8.astype(np.float32)
+    keep = (~mask).astype(np.float32)[..., None]
+    out = img.copy()
+    h, w = mask.shape
+    for k, r in enumerate((max(h, w) / 6.0, max(h, w) / 20.0, max(h, w) / 60.0)):
+        num = np.stack([ndimage.gaussian_filter(img[..., c] * keep[..., 0], r, mode="nearest") for c in range(3)], -1)
+        den = ndimage.gaussian_filter(keep[..., 0], r, mode="nearest")[..., None]
+        fill = num / np.maximum(den, 1e-4)
+        ok = mask[..., None] & ((den > 0.05) if k else (den > 0))      # finer passes only where they reach
+        out = np.where(ok, fill, out)
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
+def _main_piece(mask, erode=2):
+    """the largest connected piece of a bool mask, eroded by `erode` px (cut-outs from a white background: no
+    specks, no white rim)"""
+    import numpy as np
+    from scipy import ndimage
+    lab, n = ndimage.label(mask)
+    if n > 1:
+        sizes = ndimage.sum(mask, lab, range(1, n + 1))
+        mask = lab == (1 + int(np.argmax(sizes)))
+    return ~K.grow_mask(~mask, erode) if erode else mask
 
 
 def _put(dst, src, alpha, x0, y0):
@@ -750,9 +792,10 @@ def _put(dst, src, alpha, x0, y0):
 class H3MDKeyframeRecast:
     """0.5.91: the new characters are put into the keyframe in layers, one person at a time, every layer doing one
     thing only (user 2026-11-20 16:37), with the user's Qwen Image 2.1 edit chain:
-      1 clean background - each person to recast (her SAM3 mask, grown) is boxed in red and erased, the background
-        filled in from around it; only her area is pasted back, so nothing else in the frame changes and nothing of
-        the original (props, tails, wide skirts) is left for the new character to fail to cover;
+      1 clean background - each person to recast (her SAM3 mask, grown) is erased: her area is first filled from
+        around it (so the model never sees her), then redrawn by masked sampling (the crop's own latent + noise mask,
+        as ComfyUI-Qwen-Region-Editor does); only her area is pasted back, so nothing else in the frame changes and
+        nothing of the original (props, tails, wide skirts) is left for the new character to fail to cover;
       2 the new character alone - her picture + the crop of the person she replaces (pose, expression, build) -> the
         character in that pose on white, the whole outfit from her description; SAM3 cuts her out;
       3 together - far to near, each new character face on face (whole figure on box when no face) where the person
@@ -796,7 +839,7 @@ class H3MDKeyframeRecast:
         import numpy as np
         import comfy.utils
         import nodes
-        from PIL import Image, ImageDraw
+        from PIL import Image
         one = lambda v: v[0] if isinstance(v, list) else v
         job, model, clip, vae, sampler, sigmas = (one(job), one(model), one(clip), one(vae), one(sampler),
                                                   one(sigmas))
@@ -855,16 +898,15 @@ class H3MDKeyframeRecast:
                     ab = K.mask_box(area)
                     cx0, cy0, cx1, cy1 = K.grow_box(ab, K.ERASE_CONTEXT, K.ERASE_CONTEXT * 0.5, W, H)
                     cw, ch = K.fit_size(cx1 - cx0, cy1 - cy0)
-                    crop = Image.fromarray(bg[cy0:cy1, cx0:cx1]).resize((cw, ch), Image.LANCZOS)
-                    sx, sy = cw / float(cx1 - cx0), ch / float(cy1 - cy0)
-                    lw = max(3, int(round(0.006 * max(cw, ch))))
-                    ImageDraw.Draw(crop).rectangle([(ab[0] - cx0) * sx - lw, (ab[1] - cy0) * sy - lw,
-                                                    (ab[2] - cx0) * sx + lw, (ab[3] - cy0) * sy + lw],
-                                                   outline=(255, 0, 0), width=lw)
-                    er = _qwen_edit(model, clip, vae, sampler, sigmas, seed, K.ERASE_PROMPT,
-                                    [to_tensor(np.asarray(crop))])
+                    hole = area[cy0:cy1, cx0:cx1]
+                    filled = _fill_hole(bg[cy0:cy1, cx0:cx1], hole)
+                    crop = np.asarray(Image.fromarray(filled).resize((cw, ch), Image.LANCZOS))
+                    hole_s = np.asarray(Image.fromarray(hole.astype(np.uint8) * 255).resize((cw, ch),
+                                                                                         Image.BILINEAR)) > 0
+                    er = _qwen_edit(model, clip, vae, sampler, sigmas, seed, K.ERASE_PROMPT, [to_tensor(crop)],
+                                    mask=hole_s)
                     er = np.asarray(Image.fromarray(er).resize((cx1 - cx0, cy1 - cy0), Image.LANCZOS))
-                    _put(bg, er, _soft(area[cy0:cy1, cx0:cx1], feather), cx0, cy0)
+                    _put(bg, er, _soft(hole, feather), cx0, cy0)
                     p["t_erase"] = time.time() - t0
                     pbar.update(1)
                 # 2 every new character alone, in the pose of the person she replaces
@@ -879,6 +921,7 @@ class H3MDKeyframeRecast:
                     gen_t = to_tensor(gen)
                     g_rgb, g_m, g_box, g_face, g_head = cut_character(sam, gen_t, cond_person, cond_face, cond_head,
                                                                      self.THRESHOLD)
+                    g_m = _main_piece(g_m)
                     # generated-image px -> frame px (the crop it was made for), then face on face
                     gsx, gsy = (px1 - px0) / float(gen.shape[1]), (py1 - py0) / float(gen.shape[0])
                     to_f = lambda b: None if b is None else [px0 + b[0] * gsx, py0 + b[1] * gsy, px0 + b[2] * gsx,
@@ -905,7 +948,7 @@ class H3MDKeyframeRecast:
                                                                         resample=Image.BICUBIC))
                     mk = np.asarray(Image.fromarray(p["gen_mask"].astype(np.uint8) * 255).transform(
                         (W, H), Image.AFFINE, aff, resample=Image.BILINEAR)) > 127
-                    _put(out, im, _soft(mk, feather), 0, 0)
+                    _put(out, im, _soft(mk, feather, inside=True), 0, 0)
                     it = p["it"]
                     lines.append(f"  picture {it['picture']} (left {it['left']}, now {K.ordinal(it['rank'])} from the "
                                  f"left): erased {p['t_erase']:.1f} s, made {p['t_make']:.1f} s, placed {p['how']}")
