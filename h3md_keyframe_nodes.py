@@ -551,6 +551,73 @@ def fit_frame(out, W, H):
     return np.asarray(im.resize((W, H), Image.LANCZOS))
 
 
+def compare_pages(pairs, labels, people=None, page=(1920, 1080), per_page=1):
+    """0.5.91 (user 06:06: one long strip cannot be shown large enough to check): the Compare output as pages of one
+    size - one keyframe per page (original | new side by side, as large as the page allows), then one page per
+    keyframe with every replaced person cut out large (original above, new below: face, clothes, shoes).
+    `people`: per keyframe a list of (label, box 0-1) of the replaced persons.  -> list of HxWx3 uint8 pages"""
+    import numpy as np
+    from PIL import Image, ImageDraw
+    PW, PH = page
+    f = _font(28)
+    out = []
+
+    def fit(im, w, h):
+        im = Image.fromarray(im) if not isinstance(im, Image.Image) else im
+        r = min(w / im.width, h / im.height)
+        return im.resize((max(1, int(im.width * r)), max(1, int(im.height * r))), Image.LANCZOS)
+
+    cols = 2 if per_page > 1 else 1
+    rows = (per_page + cols - 1) // cols
+    for p0 in range(0, len(pairs), per_page):
+        sheet = Image.new("RGB", (PW, PH), (20, 20, 20))
+        d = ImageDraw.Draw(sheet)
+        cw, ch = PW // cols, PH // rows
+        for j, ((a, b), lab) in enumerate(zip(pairs[p0:p0 + per_page], labels[p0:p0 + per_page])):
+            x0, y0 = (j % cols) * cw, (j // cols) * ch
+            for c, im in enumerate((a, b)):
+                t = fit(im, cw // 2 - 6, ch - 40)
+                sheet.paste(t, (x0 + c * (cw // 2) + (cw // 2 - t.width) // 2, y0 + 36))
+            d.text((x0 + 8, y0 + 4), f"{lab}   original | new", fill=(255, 255, 255), font=f)
+        out.append(np.asarray(sheet))
+    for (a, b), lab, who in zip(pairs, labels, people or [None] * len(pairs)):
+        if not who:
+            continue
+        sheet = Image.new("RGB", (PW, PH), (20, 20, 20))
+        d = ImageDraw.Draw(sheet)
+        cw = PW // len(who)
+        for j, (name, box) in enumerate(who):
+            crops = []
+            for im in (a, b):
+                h, w = im.shape[:2]
+                x0, y0, x1, y1 = box
+                bw, bh = x1 - x0, y1 - y0
+                X0, X1 = max(0, int((x0 - 0.12 * bw) * w)), min(w, int((x1 + 0.12 * bw) * w))
+                Y0, Y1 = max(0, int((y0 - 0.08 * bh) * h)), min(h, int((y1 + 0.03 * bh) * h))
+                crops.append(Image.fromarray(np.ascontiguousarray(im[Y0:max(Y0 + 2, Y1), X0:max(X0 + 2, X1)])))
+            hh = (PH - 80) // 2
+            for r, cimg in enumerate(crops):
+                t = fit(cimg, cw - 12, hh - 6)
+                sheet.paste(t, (j * cw + (cw - t.width) // 2, 40 + r * hh))
+            d.text((j * cw + 8, 6), name, fill=(255, 255, 255), font=f)
+        d.text((8, PH - 34), f"{lab}   each person: original above, new below", fill=(200, 200, 200), font=f)
+        out.append(np.asarray(sheet))
+    return out or [np.zeros((64, 64, 3), np.uint8)]
+
+
+def pages_tensor(pages):
+    import torch
+    return torch.cat([to_tensor(p) for p in pages])
+
+
+def _read_json(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
+
+
 def compare_sheet(pairs, labels, width=1664):
     """one row per keyframe: the original | the new picture, numbered (what to check before the Director)"""
     import numpy as np
@@ -1265,15 +1332,26 @@ class H3MDKeyframeRecast:
                 continue
             frame = to_tensor(np.ascontiguousarray(job["frames"][m["at"]]))
             prompt = given[k]
+            stem = os.path.join(cache, f"kf_{int(round(m['at'] * K.FPS)):04d}")
+            # 0.5.91 (user 06:06): a redo with the same prompt and the same (fixed) seed made the same picture again -
+            # a keyframe made again with an unchanged prompt gets the next seed after the one it was made with
+            k_seed = seed
+            last = _read_json(stem + ".json")
+            if sel and k in sel and last and last.get("prompt") == prompt and int(last.get("seed", -1)) >= seed:
+                k_seed = int(last["seed"]) + 1
             t0 = time.time()
-            img, (gw, gh) = self._edit(frame, refs, prompt, model, clip, vae, sampler, sigmas, seed, gw, gh)
+            img, (gw, gh) = self._edit(frame, refs, prompt, model, clip, vae, sampler, sigmas, k_seed, gw, gh)
             out = to_u8(img)
             out = fit_frame(out, W, H)          # crop H3 Image's 32-px rounding, then scale: no stretching
-            lines.append(f"#{k} {m['at']:.2f} s: {time.time() - t0:.1f} s ({gw}x{gh})")
+            lines.append(f"#{k} {m['at']:.2f} s: {time.time() - t0:.1f} s ({gw}x{gh}), seed {k_seed}"
+                         + (" (same prompt as last time: next seed)" if k_seed != seed else
+                            (" (new prompt)" if last and last.get("prompt") != prompt else "")))
             lines.append("  prompt: " + prompt)
             made[k] = out
             os.makedirs(cache, exist_ok=True)
-            Image.fromarray(out).save(os.path.join(cache, f"kf_{int(round(m['at'] * K.FPS)):04d}.png"))
+            Image.fromarray(out).save(stem + ".png")
+            with open(stem + ".json", "w", encoding="utf-8") as fh:
+                json.dump({"prompt": prompt, "seed": k_seed}, fh, ensure_ascii=False)
             pbar.update(1)
         for k, m in enumerate(todo, 1):
             out = made.get(k)
@@ -1286,22 +1364,30 @@ class H3MDKeyframeRecast:
                      + (f" (redo {sel})" if sel else ""))
         report = "\n".join(lines)
         pairs = [(np.ascontiguousarray(job["frames"][m["at"]]), done[m["at"]]) for m in todo]
-        cmp = compare_sheet(pairs, [f"#{k}  {m['at']:.2f} s" for k, m in enumerate(todo, 1)])
+        who = []
+        for m in todo:
+            boxes = sorted((list(b) for b in m.get("boxes") or ()), key=lambda b: (b[0] + b[2]) / 2)
+            # the Prepare picture number (the user's picture_1 .. picture_N), not the number inside the prompt
+            who.append([(f"place {it['rank']} from left: picture_{it['picture']}", boxes[int(it["rank"]) - 1])
+                        for it in sorted(m["items"], key=lambda x: int(x["rank"]))
+                        if 0 < int(it["rank"]) <= len(boxes)])
+        cmp = compare_pages(pairs, [f"#{k}  {m['at']:.2f} s" for k, m in enumerate(todo, 1)], who)
         LOG.info("%s recast report:\n%s", TAG, report)
         job = dict(job, recast_frames=done,
                    recast={"method": self.METHOD, "seed": seed, "report": report})
         return {"ui": {"text": [report], "h3md_kf_count": [len(todo)]},
-                "result": (out_imgs, job, report, to_tensor(cmp))}
+                "result": (out_imgs, job, report, pages_tensor(cmp))}
 
 
 class H3MDKeyframeRecastQwen(H3MDKeyframeRecast):
-    """0.5.91 test (user 05:13): the same Recast with Qwen Image 2.1 edit (the user's 'Qwen2.1 image editor' chain:
-    qwen_image_2.1 int8 + 2-step LoRA + detailer + low-res slider, AuraFlow shift 1, qwen3-vl-8b-heretic, euler,
-    1.0 / 0.5 / 0) instead of H3 Image - to see whether the H3 Image keyframes bring the grain into the video.
-    The AI's prompts name the pictures 'Picture N'; Qwen Image 2.1 names its references <imageN>, so the names are
-    changed before encoding (nothing else)."""
+    """0.5.91 test (user 05:13 / 06:15): the same Recast with Qwen Image 2.1 edit (the user's 'Qwen2.1 image editor'
+    chain: qwen_image_2.1 int8 + 2-step LoRA + detailer + low-res slider, AuraFlow shift 1, qwen3-vl-8b, euler,
+    1.0 / 0.5 / 0) instead of H3 Image.  The prompts are written for Qwen Image by the AI with the skill
+    qwen-image-21-prompt (the rules of the official prompt enhancer): <image1> = the keyframe (canvas), <image2>... =
+    the new people, identity taken from the pictures, not described.  H3 Image prompts are refused (the first test
+    converted them and Qwen re-framed the shots)."""
 
-    METHOD = "Qwen Image 2.1 edit, prompts written by an AI from the Export package (names -> <imageN>)"
+    METHOD = "Qwen Image 2.1 edit, prompts written by an AI for Qwen Image (official prompt-enhancer rules)"
     CACHE_TAG = "_qwen"  # own folder: a redo never mixes in (or overwrites) the H3 Image keyframes
 
     @classmethod
@@ -1313,31 +1399,19 @@ class H3MDKeyframeRecastQwen(H3MDKeyframeRecast):
         req["vae"] = ("VAE", {"tooltip": "qwen_image_2.1_vae"})
         req["sigmas"] = ("SIGMAS", {"tooltip": "1.0, 0.5, 0 (2-step LoRA)"})
         req["megapixels"] = ("FLOAT", {"default": 2.0, "min": 0.5, "max": 4.0, "step": 0.1,
-                                       "tooltip": "Edit canvas (the first reference's size): Qwen Image 2.1 works at "
-                                                  "1-2 MP"})
-        req["quality"] = ("STRING", {"multiline": True, "default": QWEN_QUALITY, "tooltip": "Appended to every "
-                                     "prompt (the quality line of the user's Qwen workflow, scene-neutral)"})
+                                       "tooltip": "Edit canvas (the keyframe's size): Qwen Image 2.1 works at 1-2 MP"})
         return dict(t, required=req)
-
-    def recast(self, job, pictures, model, clip, vae, sampler, sigmas, prompts, megapixels, seed, quality=None,
-               redo=""):
-        q = quality[0] if isinstance(quality, list) else quality
-        self._quality = str(q or "").strip()
-        return super().recast(job, pictures, model, clip, vae, sampler, sigmas, prompts, megapixels, seed, redo)
 
     def _edit(self, frame, refs, prompt, model, clip, vae, sampler, sigmas, seed, gw, gh):
         import math
-        import re
         import nodes
         from comfy_extras.nodes_qwen import TextEncodeQwenImage21
         from comfy_extras.nodes_custom_sampler import SamplerCustom
-        text = re.sub(r"<Picture (\d+)>", r"<image\1>", prompt)
-        text = re.sub(r"Subject Picture 1\b", "<image1>", text)
-        text = re.sub(r"Subject Picture (\d+)", r"the person in <image\1>", text)
-        text = re.sub(r"\bPicture (\d+)", r"<image\1>", text)
-        text = "Edit <image1>. " + text + ((" " + self._quality) if getattr(self, "_quality", "") else "")
+        if "<image1>" not in prompt:
+            raise K.KeyframeError(f"{TAG} this prompt is not written for Qwen Image (no <image1>): the answer must be "
+                                  "written with the skill qwen-image-21-prompt. 这条提示词不是给 Qwen 写的。")
         res = int(round(math.sqrt(gw * gh) / 32) * 32)
-        enc = TextEncodeQwenImage21.execute(clip=clip, prompt=text, negative_prompt="", vae=vae, resolution=res,
+        enc = TextEncodeQwenImage21.execute(clip=clip, prompt=prompt, negative_prompt="", vae=vae, resolution=res,
                                             images={f"image_{j + 1}": im for j, im in enumerate([frame] + refs)})
         pos, neg, lat = enc.result
         out = SamplerCustom.execute(model=model, add_noise=True, noise_seed=seed, cfg=1.0, positive=pos,
@@ -1345,10 +1419,6 @@ class H3MDKeyframeRecastQwen(H3MDKeyframeRecast):
         img = nodes.VAEDecode().decode(vae, out.result[0])[0]
         img = img.reshape(-1, img.shape[-3], img.shape[-2], img.shape[-1])[:1].clamp(0, 1)
         return img, (int(img.shape[2]), int(img.shape[1]))
-
-
-QWEN_QUALITY = ("Fix damaged pixels, increase texture details, ultra-realistic photo, realistic skin, clearly visible "
-                "hair, natural light.")
 
 
 NODE_CLASS_MAPPINGS = {"H3MDKeyframePrepare": H3MDKeyframePrepare, "H3MDKeyframeExport": H3MDKeyframeExport,

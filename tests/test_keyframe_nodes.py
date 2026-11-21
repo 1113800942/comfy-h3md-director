@@ -169,7 +169,7 @@ def test_export_import_recast(clip, monkeypatch):
     assert [s["prompt"] for s in seen] == [f"P{k}" for k in range(1, len(todo) + 1)]
     assert list(seen[0]["images"]) == ["image_0", "image_1"] and (seen[0]["width"], seen[0]["height"]) == (2624, 1504)
     assert len(imgs) == len(todo) and imgs[0].shape[1:3] == (960, 1664) and "#1 " in report
-    assert cmp.shape[1] == 480 * len(todo) and cmp.shape[2] == 1664                  # original | new per row
+    assert tuple(cmp.shape[1:3]) == (1080, 1920) and cmp.shape[0] == 2 * len(todo)  # pages: keyframe, then its people (user 06:06)
     (redo,) = N.H3MDKeyframeRedo().pick("2", len(todo))
     seen = _fake_h3(monkeypatch, 0.8)
     imgs2, job3, report2, _ = N.H3MDKeyframeRecast().recast(*args, ['{"2": "P2b"}'], [4.0], [9], [redo])["result"]
