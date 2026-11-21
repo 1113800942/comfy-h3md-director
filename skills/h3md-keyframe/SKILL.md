@@ -76,6 +76,12 @@ a. **Define every character picture as a Subject.** Describe the person positive
    `description` and must not change from keyframe to keyframe.
 b. **Define `<Picture 1>` as a Subject that is partially preserved.** The background, floor, lighting, camera angle,
    framing and crop, and the places, spacing, sizes, front-to-back order and overlaps of the people are retained.
+   **Never name anything in the background** (no walls, windows, doors, buildings, vehicles, signs, furniture, not
+   even "the hangar" or "the street"): write only that everything that is not a replaced person stays exactly as it
+   is, with nothing added, removed or moved. A named object is painted in where the original has none - one
+   sentence "the hangar, its open door and its tall window wall" used for several keyframes put a window wall into
+   open sky; the video then flickers there because the keyframe and the original disagree. Never reuse one scene
+   sentence for several keyframes.
 c. **Body parts the frame cuts off are not mentioned.** When the feet are outside the picture, do not mention shoes
    for that person, or the model pulls the camera back. Say plainly where the frame cuts each person ("cut off at
    mid-thigh", "the right side of his body cut off by the right edge", "only a narrow strip of him is seen").
@@ -139,6 +145,12 @@ original. Typical misses:
 - a character's clothes written differently from one keyframe to the next;
 - a kept person left undescribed (the model turns them into one of the new characters), including a narrow strip at
   the frame edge that stays.
+- anything in the background named (a wall, a window, a building): the model paints it in where the original shows
+  something else - say only that the background stays exactly as it is.
+
+After the run, look at the Compare sheet for the background too, not only the people: anything that is not in the
+original (a new wall, window, building, sign) means a redo with the background left unnamed. Recast's report names
+the keyframes whose background differs from the original.
 
 If you are not sure about something, say so to the user instead of guessing.
 
