@@ -431,6 +431,46 @@ def cast_sheet(small, frames, people, chosen, tile_h=360, per_row=6):
     return np.asarray(sheet), crops
 
 
+def people_places(m):
+    """0.5.91: every person of a keyframe moment, left to right: place, box in % of the frame (left, top, right,
+    bottom), cut by which edges, and who takes the place ("picture N") or "stays"."""
+    boxes = sorted((list(b) for b in m.get("boxes") or ()), key=lambda b: (b[0] + b[2]) / 2)
+    role = {int(it["rank"]): f"picture {j + 2}" for j, it in enumerate(m.get("items") or ())}
+    out = []
+    for r, b in enumerate(boxes, 1):
+        edges = [e for e, hit in (("left", b[0] <= 0.01), ("top", b[1] <= 0.01), ("right", b[2] >= 0.99),
+                                  ("bottom", b[3] >= 0.99)) if hit]
+        out.append({"place": r, "box_percent": [int(round(v * 100)) for v in b], "cut_by_edges": edges,
+                    "role": role.get(r, "stays")})
+    return out
+
+
+def director_parts(video_file, info, size, length, overlap=None):
+    """0.5.91: [(start s, end s)] of the new frames of each part the Director will make of this clip (its own parse and
+    token budget, h3md_autosplit.preview).  None when it cannot tell (then the old estimate is used)."""
+    try:
+        try:
+            from . import h3md_autosplit as AS
+        except ImportError:
+            import h3md_autosplit as AS
+        plan = K.build_plan(video_file, info["duration"], info["audio"], size, length, [], "x", "probe")
+        res = AS.preview(plan, size[0], size[1])
+        if not res.get("ok"):
+            return None
+        shot = (res.get("shots") or [{}])[0]
+        parts = [int(p) for p in (shot.get("parts") or [length])]
+        ov = int(shot.get("overlap") or (overlap if overlap is not None else getattr(AS, "AUTO_OVERLAP", 39)))
+        out, s = [], 0
+        for j, n in enumerate(parts):
+            a = s + (ov if j else 0)
+            out.append((a / K.FPS, (s + n) / K.FPS))
+            s += n - ov
+        return out
+    except Exception as exc:
+        LOG.warning("%s Director parts unknown (%s): estimated", TAG, exc)
+        return None
+
+
 def thumb_b64(img, h=180):
     """PIL image -> small JPEG as a data URL (the cast panel on the Prepare node)"""
     import base64
@@ -643,6 +683,11 @@ class H3MDKeyframePrepare:
         if not picset:
             raise K.KeyframeError(f"{TAG} connect at least one character picture (picture_1 ...). 至少接一张角色图。")
         descs = K.parse_descriptions(descriptions, picset)
+        # 0.5.91 (02:49): an old mapping text left in the box silently dropped pictures 4 and 5
+        unused = [i for i in range(1, 6) if mp and pics.get(f"picture_{i}") is not None and i not in mp]
+        pre_warns = ([f"picture(s) {unused} are connected but not in 'mapping', so they are not used. Clear 'mapping' "
+                      "for automatic, or drag them to people on the cast panel. 有接上但没写进 mapping 的图："
+                      f"{unused}，没有用上。"] if unused else [])
         looks = {k: s for k, s in enumerate(K.parse_people(people_at_start), 1)}
         import folder_paths
         typed = resolve_video(video) if source_video is None else None
@@ -730,8 +775,17 @@ class H3MDKeyframePrepare:
         moments, full_notes = K.prefer_full(frames, moments, ids, cuts, dur, max_gap_s)
         # 0.5.91: every replaced person gets one large, clear keyframe (else Remake has no face for the close-ups)
         moments, id_keep, id_notes, id_warns = K.ensure_identity(frames, moments, chosen, dur)
-        moments, fin_notes = K.finish_moments(frames, moments, ids, dur, max_gap_s, cuts=cuts, keep=id_keep)
-        fin_notes = full_notes + id_notes + fin_notes
+        # 0.5.91 (_009 trial 03:10): the parts are the Director's own autosplit of this clip at this size (token
+        # budget of this GPU) - the 10.8 s estimate was wrong, the run used 7.3 s parts
+        bounds = director_parts(plan_path(video, path), info, size, length)
+        span = min(b - a for a, b in bounds) if bounds else None
+        if bounds:
+            LOG.info("%s Director parts: %s", TAG, ", ".join(f"{a:.2f}-{b:.2f} s" for a, b in bounds))
+        moments, fin_notes = K.finish_moments(frames, moments, ids, dur, max_gap_s, cuts=cuts, keep=id_keep, span=span)
+        # 0.5.91: every replaced person seen in a Remake part has a keyframe in that part
+        moments, cov_notes, cov_warns = K.ensure_part_cover(frames, moments, ids, dur, keep=id_keep, bounds=bounds)
+        id_warns = list(id_warns) + cov_warns
+        fin_notes = full_notes + id_notes + fin_notes + cov_notes
         for n_ in fin_notes:
             LOG.info("%s %s", TAG, n_)
         LOG.info("%s keyframes at %s s (close-ups skipped)", TAG, [round(frames[i]["at"], 2) for i, _ in moments])
@@ -745,7 +799,7 @@ class H3MDKeyframePrepare:
         except Exception:
             pass
         changes = K.place_changes(frames, order)
-        warnings = list(id_warns)
+        warnings = pre_warns + list(id_warns)
         if reid_unsure and face_app() is None:
             warnings.append("people were lost after cuts and InsightFace is not installed: with it (models/insightface/"
                             "models/antelopev2 or buffalo_l, as for ReActor / PuLID) people are told apart by their "
@@ -982,6 +1036,8 @@ class H3MDKeyframeExport:
                             # 0.5.91 (user 00:54): who stays, counted from the left in THIS keyframe - write them too
                             "keeps_people_from_left": [r for r in range(1, n_people + 1)
                                                        if r not in {it["rank"] for it in m["items"]}],
+                            # 0.5.91 (03:15): where each person stands, to check left / right / in front by numbers
+                            "people_from_left": people_places(m),
                             "sentence": K.swap_sentence([(it["rank"], j + 2) for j, it in enumerate(m["items"])],
                                                         n_people)})
             z.writestr("request.json", json.dumps({"package": stem, "answer_file": imp + ".h3kf",

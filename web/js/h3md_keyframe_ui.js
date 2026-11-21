@@ -112,13 +112,13 @@ function buildCast(node) {
   if (!w) {
     const el = document.createElement("div");
     w = node.addDOMWidget("cast_panel", "h3md_cast", el, { serialize: false, hideOnZoom: false,
-      getMinHeight: () => 430, getMaxHeight: () => 430 });
+      getMinHeight: () => 470, getMaxHeight: () => 470 });
     w.__h3mdCastPanel = true;
     w.__el = el;
   }
   const el = w.__el;
   el.innerHTML = "";
-  Object.assign(el.style, { position: "relative", height: "430px", background: "#141414", borderRadius: "6px",
+  Object.assign(el.style, { position: "relative", height: "470px", background: "#141414", borderRadius: "6px",
     overflow: "hidden", userSelect: "none", fontFamily: "sans-serif", color: "#ddd", fontSize: "12px" });
   const head = document.createElement("div");
   head.textContent = (auto ? "Automatic: picture 1 = first to appear. " : "Your cast. ")
@@ -128,7 +128,7 @@ function buildCast(node) {
   const row = (top) => { const r = document.createElement("div");
     Object.assign(r.style, { position: "absolute", left: "8px", right: "8px", top: top + "px", display: "flex", gap: "8px",
       overflowX: "auto" }); el.append(r); return r; };
-  const picRow = row(26), castRow = row(220);
+  const picRow = row(44), castRow = row(250);
   const card = (src, label, sub, col) => {
     const c = document.createElement("div");
     Object.assign(c.style, { flex: "0 0 auto", border: `3px solid ${col}`, borderRadius: "4px", background: "#222",
@@ -185,16 +185,24 @@ function buildCast(node) {
   requestAnimationFrame(drawLines);
   picRow.onscroll = castRow.onscroll = drawLines;
   // drag a line from a picture
+  // 02:49: the canvas took the pointer away from window listeners (the line never landed) - the picture card
+  // captures the pointer itself, so move / up always come back to it
   for (const p of pics) {
-    picCard[p].onpointerdown = (ev) => {
+    const pc = picCard[p];
+    pc.style.touchAction = "none";
+    pc.onpointerdown = (ev) => {
       ev.preventDefault(); ev.stopPropagation();
-      const [x1, y1] = centre(picCard[p], true);
+      try { pc.setPointerCapture(ev.pointerId); } catch { /* ignore */ }
+      const [x1, y1] = centre(pc, true);
       const k = el.getBoundingClientRect().width / el.offsetWidth || 1;
       const tmp = line(x1, y1, x1, y1, "#ffd27f");
-      const move = (e) => { const b = el.getBoundingClientRect();
+      const move = (e) => { e.stopPropagation(); const b = el.getBoundingClientRect();
         tmp.setAttribute("x2", (e.clientX - b.left) / k); tmp.setAttribute("y2", (e.clientY - b.top) / k); };
       const up = (e) => {
-        window.removeEventListener("pointermove", move, true); window.removeEventListener("pointerup", up, true);
+        e.stopPropagation();
+        pc.removeEventListener("pointermove", move); pc.removeEventListener("pointerup", up);
+        pc.removeEventListener("pointercancel", up);
+        try { pc.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
         tmp.remove();
         const hit = Object.entries(personCard).find(([, c]) => { const a = c.getBoundingClientRect();
           return e.clientX >= a.left && e.clientX <= a.right && e.clientY >= a.top && e.clientY <= a.bottom; });
@@ -203,7 +211,8 @@ function buildCast(node) {
         for (const [pp, kk] of Object.entries(m)) if (kk === Number(hit[0])) delete m[pp];   // one picture per person
         m[p] = Number(hit[0]); write(m);
       };
-      window.addEventListener("pointermove", move, true); window.addEventListener("pointerup", up, true);
+      pc.addEventListener("pointermove", move); pc.addEventListener("pointerup", up);
+      pc.addEventListener("pointercancel", up);
     };
   }
   // buttons under the panel

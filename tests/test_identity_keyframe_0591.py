@@ -40,3 +40,26 @@ def test_finish_keeps_the_identity_keyframe():
     moments = [(i, "swap") for i in (0, 12, 24, 36, 48)]          # 5 keyframes in 8 s: one must go
     out, notes = K.finish_moments(fr, moments, {1}, 20.0, keep={fr[24]["at"]}, part_frames=345)
     assert fr[24]["at"] in [fr[i]["at"] for i, _ in out] and len(out) == 4
+
+
+def test_every_part_shows_every_replaced_person():
+    """2026-11-21 _009 trial: part 1 (0-7.3 s) had keyframes at 1.0, 3.17, 7.0 s, none with the man who walked in at
+    3.3 s - Remake gave him another character's look.  ensure_part_cover adds a keyframe with him in that part."""
+    fr = []
+    for i in range(120):                      # 20 s at 6 fps
+        t = i / 6.0
+        who = [[1, [0.1, 0.1, 0.3, 0.95]]]
+        if 3.3 <= t < 12:
+            who.append([2, [0.5, 0.1, 0.7, 0.95]])
+        fr.append({"at": round(t, 4), "who": who})
+    ids = {1, 2}
+    idx = {round(f["at"], 2): i for i, f in enumerate(fr)}
+    moments = [(idx[1.0], "swap"), (idx[3.0], "swap"), (idx[7.0], "swap"), (idx[14.83], "swap")]
+    bounds = [(0.0, 7.29), (7.29, 12.25), (12.25, 19.33)]
+    out, notes, warns = K.ensure_part_cover(fr, moments, ids, 19.33, bounds=bounds)
+    for a, b in bounds:
+        shown = set().union(*[K.kf_people(fr, i, ids) for i, _ in out if a <= fr[i]["at"] < b] or [set()])
+        need = {pid for pid in ids if any(a <= f["at"] < b and pid in K.kf_people(fr, j, ids) for j, f in enumerate(fr))}
+        assert need <= shown, (a, b, need, shown)
+        assert sum(1 for i, _ in out if a <= fr[i]["at"] < b) <= K.PART_MAX_KF
+    assert notes and not warns

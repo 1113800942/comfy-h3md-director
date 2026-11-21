@@ -65,9 +65,8 @@ def parse_mapping(text: str) -> dict:
         p, k = int(m.group(1)), cn_number(m.group(2))
         if p < 1 or k < 1:
             raise KeyframeError(f"{TAG} '{m.group(0)}': pictures and people are counted from 1")
-        if p in out and out[p] != k:
-            raise KeyframeError(f"{TAG} picture {p} is given twice (#{out[p]} and #{k}). 图{p}写了两次。")
-        out[p] = k
+        out[p] = k                          # 0.5.91 (02:49): a picture written twice - the last line wins
+                                            # (old text + a new choice below it must not stop the run)
     if not out:
         raise KeyframeError(f"{TAG} mapping: leave it empty (automatic: picture 1 = the first person to appear, "
                             "picture 2 = the next ...) or write e.g. 图1换3号 / 'picture 1 -> 3' with the numbers of "
@@ -877,7 +876,7 @@ def part_span(duration, part_frames=PART_FRAMES):
 
 
 def finish_moments(frames, moments, chosen_ids, duration, max_gap=5.0, part_frames=PART_FRAMES,
-                   part_max=PART_MAX_KF, cuts=(), keep=()):
+                   part_max=PART_MAX_KF, cuts=(), keep=(), span=None):
     """0.5.9 cross-check of the moment rules (picks every <= max_gap s, one per shot, none on close-ups):
     (1) no keyframe at all (only close-ups found) -> the best frame anyway, close-ups allowed - a part without any
         keyframe is an error;
@@ -894,7 +893,7 @@ def finish_moments(frames, moments, chosen_ids, duration, max_gap=5.0, part_fram
                                              -_motion(frames, i, frames[i]["who"][0][0])))
             out = [(best, "swap")]
             notes.append(f"only close-ups found: one keyframe at {frames[best]['at']:.2f} s anyway")
-    span = part_span(duration, part_frames)
+    span = span or part_span(duration, part_frames)   # 0.5.91: the Director's real part length when known
     changed = True
     while changed:
         changed = False
@@ -913,6 +912,11 @@ def finish_moments(frames, moments, chosen_ids, duration, max_gap=5.0, part_fram
             kept = {j for j in win if ts[j] in set(keep)}         # 0.5.91: a person's only large, clear keyframe
             pool = ([j for j in win if j not in alone and j not in kept] or [j for j in win if j not in kept]
                     or win)                                       # the only keyframe of a shot stays if possible
+            # 0.5.91 (_009 trial: the 5.83 s keyframe was dropped - the only one of part 1 with the sunglasses man,
+            # who then got another man's look): drop a keyframe whose people the others in the window also show
+            have = {j: kf_people(frames, out[j][0], chosen_ids) for j in win}
+            spare = [j for j in pool if have[j] <= set().union(*[have[x] for x in win if x != j])]
+            pool = spare or pool
             drop = min(pool, key=lambda j: (gap_without(j), -abs(ts[j] - ts[j - 1]) if j else 0))
             notes.append(f"{len(win)} keyframes within {span:.1f} s: dropped the one at {ts[drop]:.2f} s "
                          f"(Remake keeps {part_max} per part)")
@@ -920,6 +924,87 @@ def finish_moments(frames, moments, chosen_ids, duration, max_gap=5.0, part_fram
             changed = True
             break
     return out, notes
+
+
+def kf_people(frames, i, chosen_ids):
+    """the chosen people a keyframe really shows (seen, not only a strip at the edge)"""
+    return {pid for pid, b in visible(frames[i]) if pid in chosen_ids and not sliver(b)}
+
+
+def part_bounds(duration, part_frames=PART_FRAMES):
+    """[(start s, end s)] of the Director's autosplit parts (new frames of each part, h3md_autosplit.plan_parts)"""
+    n = int(round(duration * FPS))
+    parts = None
+    try:
+        try:
+            from . import h3md_autosplit as A
+        except ImportError:
+            import h3md_autosplit as A
+        parts = A.plan_parts(n, 0, int(part_frames))
+    except Exception:
+        parts = None
+    if not parts:
+        k = max(1, int(math.ceil(n / float(part_frames))))
+        parts = [n // k + (1 if j < n % k else 0) for j in range(k)]
+    out, t = [], 0
+    for c in parts:
+        out.append((t / FPS, (t + c) / FPS))
+        t += c
+    return out
+
+
+def ensure_part_cover(frames, moments, chosen_ids, duration, part_frames=PART_FRAMES, part_max=PART_MAX_KF,
+                      min_s=CAST_MIN_S, keep=(), bounds=None):
+    """0.5.91 (_009 trial, user 03:10): Remake takes the look of every replaced person in a part only from that part's
+    keyframes.  A replaced person seen clearly for min_s or more in a part but in none of its keyframes got the look
+    of another character (the sunglasses man came out as a second striped-polo man).  For every part and every such
+    person: add the frame of that part where he is seen best (most chosen people, then tallest, no close-up); a part
+    with more than part_max keyframes then loses one whose people the others also show (never a kept one).
+    -> (moments sorted by time, notes, warnings)"""
+    out = sorted(moments, key=lambda m: frames[m[0]]["at"])
+    notes, warns = [], []
+    step = (frames[-1]["at"] - frames[0]["at"]) / (len(frames) - 1) if len(frames) > 1 else 1.0
+    last = duration - 2.0 / FPS
+    for p0, p1 in (bounds or part_bounds(duration, part_frames)):
+        inpart = lambda: [m for m in out if p0 <= frames[m[0]]["at"] < p1]
+        covered = set().union(*[kf_people(frames, i, chosen_ids) for i, _ in inpart()]) if inpart() else set()
+        for pid in sorted(chosen_ids):
+            if pid in covered:
+                continue
+            seen = [i for i, f in enumerate(frames) if p0 <= f["at"] < min(p1, last) and pid in kf_people(frames, i,
+                                                                                                         chosen_ids)]
+            if len(seen) * step < min_s - 1e-6:
+                continue
+            cand = [i for i in seen if score(frames, i, chosen_ids) is not None
+                    and all(abs(frames[i]["at"] - frames[m[0]]["at"]) >= 0.25 for m in out)]
+            if not cand:
+                warns.append(f"a replaced person is seen in {p0:.1f}-{p1:.1f} s but never clearly enough for a "
+                             "keyframe there: Remake may give him another character's look in that part. "
+                             f"{p0:.1f}-{p1:.1f} 秒里有一个要换的人没有合适的关键帧，这一段他可能换错。")
+                continue
+            best = max(cand, key=lambda i: (len(kf_people(frames, i, chosen_ids)),
+                                            round(clear_height(frames[i], pid), 2)))
+            out.append((best, "swap"))
+            out.sort(key=lambda m: frames[m[0]]["at"])
+            covered |= kf_people(frames, best, chosen_ids)
+            notes.append(f"part {p0:.1f}-{p1:.1f} s: keyframe added at {frames[best]['at']:.2f} s so every replaced "
+                         "person seen in this part has a keyframe there")
+            while len(inpart()) > part_max:
+                ms = inpart()
+                have = {m: kf_people(frames, m[0], chosen_ids) for m in ms}
+                spare = [m for m in ms if frames[m[0]]["at"] not in set(keep) and m[0] != best
+                         and have[m] <= set().union(*[have[x] for x in ms if x != m])]
+                if not spare:
+                    warns.append(f"part {p0:.1f}-{p1:.1f} s needs more than {part_max} keyframes to show every "
+                                 "replaced person; the last ones are dropped by Remake. 这一段要换的人太多，"
+                                 f"{part_max} 张关键帧放不下。")
+                    break
+                drop = min(spare, key=lambda m: (len(have[m]), clear_height(frames[m[0]], next(iter(have[m]), -1))
+                                                 if have[m] else 0))
+                out.remove(drop)
+                notes.append(f"part {p0:.1f}-{p1:.1f} s: dropped the keyframe at {frames[drop[0]]['at']:.2f} s "
+                             "(its people are in the other keyframes of this part)")
+    return sorted(out, key=lambda m: frames[m[0]]["at"]), notes, warns
 
 
 def place_changes(frames, ids, min_hold=0.5):
@@ -1094,19 +1179,26 @@ there), stop and tell the user exactly what is missing and how to fix it (run Ex
 For keyframe k: <Picture 1> = keyframe_k.png (the original video frame), <Picture 2>, <Picture 3>, ... = the
 character pictures listed for that keyframe in "pictures", in that order. People are counted from the left as they
 stand in THIS keyframe (after a place change the order differs from the start - use replaces_person_from_left).
+The picture numbers change from keyframe to keyframe - take them from that keyframe's "pictures".
+"people_from_left" gives every person's box in % of the frame (left, top, right, bottom), the edges that cut them
+and their role ("picture N" or "stays"): confirm every left/right, front/back and "peeks out on which side" by these
+numbers before you write it.
 H3 Image draws what the text says: the prompt decides the result. Read the keyframe carefully.
 
 ## 3. Write each prompt (English, the structure of the official H3 Image prompt enhancer)
   a. Define every character picture as a Subject and describe the person positively and completely, head to toe,
      from the picture and its "description": face, hair, every garment, shoes - and what they do NOT have (bare
      hands, no gloves). Never describe or mention the clothes of the people in <Picture 1>; never write what to
-     remove.
+     remove. Use the same sentence for a character in every keyframe.
   b. Define <Picture 1> as a Subject that is partially preserved: background, floor, lighting, camera angle,
      framing and crop, the places, spacing and sizes of the people, who is in front, the overlaps.
   c. Body parts the frame cuts off are not mentioned (feet outside the picture: no shoes for that person) - else
-     the model pulls the camera back. Say where the frame cuts each person.
+     the model pulls the camera back. Say where the frame cuts each person. A person mostly outside the frame or
+     almost hidden behind someone: write only the part that shows and that the rest is outside / hidden by whom,
+     else the model draws all of him.
   d. For every replaced person, which Subject takes which place, and every one of these, read from <Picture 1>:
      - body orientation and how far it is turned; head turn and tilt (towards which side of the image), up/down;
+       a clear tilt or lean must be written plainly, else it comes out straight;
      - EACH hand separately: where (above the head, beside the head, shoulder, chest, waist, thigh, behind the
        back, on someone), shape (fist, open, fingers spread or together, pointing, palms together, on the hip,
        hidden), which way the palm faces, the arm (straight or bent, up, forward, sideways);

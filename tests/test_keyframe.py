@@ -18,7 +18,12 @@ def test_parse_mapping_cast_numbers():
     assert K.parse_mapping("picture 1 -> #3") == {1: 3}
 
 
-@pytest.mark.parametrize("bad", ["换人", "图1换左二，图2换左二", "图1换左二，图1换左三"])
+def test_parse_mapping_last_line_wins():
+    """02:49: old text plus a new choice below it ('picture 3 -> left 3' ... '图3换4号'): the last one wins"""
+    assert K.parse_mapping("picture 3 -> left 3\n图3换4号") == {3: 4}
+
+
+@pytest.mark.parametrize("bad", ["换人", "图1换左二，图2换左二"])
 def test_parse_mapping_errors(bad):
     with pytest.raises(K.KeyframeError):
         K.parse_mapping(bad)

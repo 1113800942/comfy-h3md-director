@@ -21,7 +21,7 @@ be pulled back.
 
 | file | what it is |
 |---|---|
-| `request.json` | `package` (this package's name), `answer_file`, and per keyframe: `keyframe` (number), `at_seconds`, `picture_1` (the keyframe file), `pictures` (the character pictures for this keyframe, in order, each with `picture` = its number in the prompt, `file`, `description`, `replaces_person_from_left`), `people_in_frame`, `keeps_people_from_left` (the people who stay, counted from the left in this keyframe), `sentence` (what the keyframe must become, in the user's words) |
+| `request.json` | `package` (this package's name), `answer_file`, and per keyframe: `keyframe` (number), `at_seconds`, `picture_1` (the keyframe file), `pictures` (the character pictures for this keyframe, in order, each with `picture` = its number in the prompt, `file`, `description`, `replaces_person_from_left`), `people_in_frame`, `keeps_people_from_left` (the people who stay, counted from the left in this keyframe), `people_from_left` (every person of this keyframe left to right: `place`, `box_percent` = left, top, right, bottom in % of the frame, `cut_by_edges`, `role` = "picture N" or "stays"), `sentence` (what the keyframe must become, in the user's words) |
 | `keyframe_1.png` ... | the original video frames |
 | `character_picture_N.png` | the new people |
 | `README_for_AI.md` | a short version of this skill (for AIs without it) |
@@ -51,6 +51,15 @@ keyframe's `pictures`, in their order. People are counted **from the left as the
 place change the order differs from the start, so always use `replaces_person_from_left`, never the order of the
 first keyframe.
 
+**Check every position with `people_from_left` before you write it.** The boxes tell, by numbers, who is further
+left or right (compare the box centres), who is closer to the camera (a lower box bottom and a taller box), who is cut
+by which edge, and on which side of the person in front a half-hidden person shows (his box centre left or right of
+the front person's). Read the picture, then confirm with the numbers; when they disagree, look again. (Measured: a
+man peeking out from behind the lead singer was written "to the right of his head" although his box was to the left.)
+
+The picture numbers change from keyframe to keyframe: `<Picture 2>` can be one character in keyframe 1 and another in
+keyframe 3. Always take them from that keyframe's `pictures`.
+
 The people who stay are listed in `keeps_people_from_left` for every keyframe: any positions can stay (replace the
 2nd and the 4th, keep the 1st, 3rd and 5th), and they change from keyframe to keyframe. Take them from that list, never
 assume they are the ones at the end, and check each one in the picture before you describe them.
@@ -62,16 +71,29 @@ Write in English, in the structure of the official H3 Image prompt enhancer:
 a. **Define every character picture as a Subject.** Describe the person positively and completely, head to toe, from
    the picture plus its `description`: face, hair, every garment, the shoes, and what they do not have ("bare hands",
    "no hat", "nothing on his head"). Never describe or mention the clothes of the people in `<Picture 1>`, and never
-   write what to remove.
+   write what to remove. **Use the same sentence for a character in every keyframe** (only the parts the frame cuts
+   off are left out, see c): when the picture is half-body, the trousers / skirt and shoes come from the
+   `description` and must not change from keyframe to keyframe.
 b. **Define `<Picture 1>` as a Subject that is partially preserved.** The background, floor, lighting, camera angle,
    framing and crop, and the places, spacing, sizes, front-to-back order and overlaps of the people are retained.
 c. **Body parts the frame cuts off are not mentioned.** When the feet are outside the picture, do not mention shoes
    for that person, or the model pulls the camera back. Say plainly where the frame cuts each person ("cut off at
    mid-thigh", "the right side of his body cut off by the right edge", "only a narrow strip of him is seen").
+   - **A person mostly outside the frame** (`cut_by_edges`, a narrow box): write only what shows - "only his shoulder
+     and one bare arm come in from the right edge, the hand open, palm down; his head is outside the top right
+     corner". Written like this the model does not pull the whole person into the frame (measured).
+   - **A person almost hidden behind another**: write exactly which part shows (the top of the head and the eyes
+     beside the front man's head, on the left side of it) and that everything else is hidden by whom. The model tends
+     to show more of a hidden person than the original does; the clearer the text, the less it adds.
+   - **A different body or garment** (a woman in a dress for a man in a long coat): write the character's own clothes
+     only as far as the frame shows them - dress length, bare legs, shoes only when the feet are in the frame.
 d. **For every replaced person**, say which Subject takes which place, then write each item below as you read it
    from `<Picture 1>`. Never skip an item.
    - **Body:** orientation and how far it is turned; leaning, toward whom.
    - **Head:** turn and tilt (toward which side of the image), up or down; where the eyes look.
+   - **Small angles too:** a clear head tilt or a forward lean is easily straightened by the model - write it
+     plainly and say it is clear ("the head clearly tilted toward the right side of the image", "the upper body
+     leaning forward toward the camera").
    - **Each hand, separately:**
      - where it is (above the head, beside the head, at the shoulder, chest, waist or thigh, behind the back, on someone);
      - its shape (fist, open, fingers spread or together, pointing, palms together, on the hip, hidden);
@@ -111,8 +133,12 @@ original. Typical misses:
 - the wrong body turn;
 - the wrong overlap;
 - a squat written as a walk;
-- a head tilt to the wrong side;
-- a kept person left undescribed (the model turns them into one of the new characters).
+- a head tilt to the wrong side, or a clear tilt / lean not written at all (it comes out straight);
+- a half-hidden person put on the wrong side of the person in front (check `people_from_left`);
+- a person mostly outside the frame or almost hidden written as a whole person (the model then shows all of him);
+- a character's clothes written differently from one keyframe to the next;
+- a kept person left undescribed (the model turns them into one of the new characters), including a narrow strip at
+  the frame edge that stays.
 
 If you are not sure about something, say so to the user instead of guessing.
 
