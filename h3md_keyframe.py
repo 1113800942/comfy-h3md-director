@@ -415,7 +415,7 @@ TALL_RATIO = 6.0                 # 0.5.91 (_017 #2): a box taller than this x it
                                  # no person (a box from the ceiling to the floor) - the frame is never a keyframe
 TINY_REL = 0.2                   # 0.5.91 (_017 #15): a box lower than this x the others' median height, not at an
                                  # edge, is a stray detection (a spot on a truck), not a person - dropped
-GAP_S = 0.5                      # 0.5.91 (_017 #1): a person seen within this before AND after a frame but missing in
+GAP_S = 1.5                      # 0.5.91 (_017 #1): a person seen within this before AND after a frame but missing in
                                  # it was missed by the tracker there (five men walking, one not boxed) - never a
                                  # keyframe (he would be neither replaced nor described)
 
@@ -490,6 +490,15 @@ def clean_frames(frames, face_boxes=None):
             n_odd += 1
         if bad or odd:
             f["bad"] = sorted(set(bad) | set(odd))
+    # a face that sits in nobody's box is a person the tracker did not box (_018 #1, #15: one of five walking men,
+    # a head peeking out behind the man in front) - he would be neither replaced nor described
+    n_face_only = 0
+    for fi, f in enumerate(frames):
+        faces = (face_boxes or {}).get(fi) or []
+        boxes = {pid: b for pid, b in f.get("who") or ()}
+        if faces and any(assign_face(fb, boxes) is None for fb in faces):
+            f["bad"] = sorted(set(f.get("bad") or []) | {-1})
+            n_face_only += 1
     # a person seen shortly before and after a frame but not in it: the tracker missed him there
     for fi, f in enumerate(frames):
         here = {pid for pid, _ in f.get("who") or ()}
@@ -507,7 +516,8 @@ def clean_frames(frames, face_boxes=None):
             f["bad"] = sorted(set(f.get("bad") or []) | missed)
             n_gap += 1
     return frames, [f"{n_wide} frame(s) with a box spanning two people, {n_odd} with an impossible box (too tall), "
-                    f"{n_gap} with a person the tracker missed (never keyframes); {n_hidden} hidden person box(es) "
+                    f"{n_gap} with a person the tracker missed, {n_face_only} with a face in nobody's box (never "
+                    f"keyframes); {n_hidden} hidden person box(es) "
                     f"not counted as seen, {n_face} half-hidden with the face showing kept, {n_stray} stray small "
                     "box(es) dropped"]
 

@@ -30,3 +30,15 @@ def test_pins_for_segment_uses_the_pick():
            {"image": "e", "frame": 150, "people": [2]}]
     got = RE._pins_for_segment(kfs, 175, 0)
     assert len(got) == 4 and any(k["image"] == "e" for k in got)
+
+
+
+def test_continued_part_keeps_the_first_keyframe_after_the_overlap():
+    """00164 (user 08:15): part 2 had keyframes at local frames 46, 70, 110, 138, 186 and took 70..186 - nothing
+    pinned the 3 s after the seam; the video drifted and jumped at the next pin.  The first one after the 39-frame
+    overlap is always kept."""
+    import h3md_remake_engine as E
+    kfs = [{"frame": 46, "people": [1, 2, 3, 4]}, {"frame": 70, "people": [1, 2, 3, 4, 5]},
+           {"frame": 110, "people": [1, 2, 3]}, {"frame": 138, "people": [1, 4, 5]}, {"frame": 186, "people": [1]}]
+    picked, missing = E.pick_keyframes(kfs, 4, start=39)
+    assert int(picked[0]["frame"]) == 46 and len(picked) == 4 and missing == []

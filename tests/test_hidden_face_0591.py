@@ -62,3 +62,12 @@ def test_only_the_front_face_does_not_keep_him():
     # the one face in the frame is the front man's (it also lies inside the small box): no second face -> dropped
     fr, _ = K.clean_frames(frames(), {0: [(0.40, 0.25, 0.48, 0.33)]})
     assert [w[0] for w in fr[0]["who"]] == [1]
+
+
+def test_face_in_nobodys_box_is_bad():
+    fr = [_five(0.0)]
+    out, notes = K.clean_frames(fr, {0: [(0.86, 0.30, 0.90, 0.34)]})   # a head peeking out where no box is
+    assert out[0].get("bad") == [-1] and "1 with a face in nobody's box" in notes[0]
+    fr = [_five(0.0)]
+    out, _ = K.clean_frames(fr, {0: [(0.12, 0.40, 0.18, 0.44)]})        # the face of person 0: fine
+    assert not out[0].get("bad")
