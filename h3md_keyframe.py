@@ -3,9 +3,8 @@
 The nodes in h3md_keyframe_nodes.py wrap this file:
   1 Prepare: who is who (numbered left to right at the start), which moments become keyframes, where every person to
     recast stands at every moment.
-  1b Recast (0.5.91): the Qwen Image 2.1 prompt enhancer only tells who is who in the keyframe (by look, wherever
-    they stand) and how each one stands; this file writes the edit prompt (who becomes which picture, the whole
-    outfit changed); one Qwen Image 2.1 edit redraws the whole keyframe.
+  1b Recast (0.5.91): the user's H3 Image AIO chain - one plain sentence (who at which place becomes which
+    picture), the official H3 Image prompt enhancer writes the prompt, one H3 Image edit redraws the keyframe.
   2 Assemble: the keyframes are saved and the Remake plan is written.
 
 Method = skill 12d, line A, measured in demo5 (2026-11-16: our own 26 s five-person clip, 4 keyframes, Remake swapped
@@ -24,7 +23,7 @@ LOOK_S = 3.0              # the numbering moment is searched in the first second
 CLEAR_IOU = 0.2
 COVERED = 0.3
 SPACING = 0.7            # keyframes are picked in (prev + 0.7 * max_gap, prev + max_gap]: as few as the gap allows
-EDIT_MP = 1.0             # 0.5.91: Qwen Image 2.1 edit canvas (megapixels) for the whole keyframe
+EDIT_MP = 4.0             # 0.5.91: H3 Image canvas (megapixels), as the user's AIO v1.01 (4.0, multiple 32)
 
 CN = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
 ORDINAL = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"]
@@ -733,110 +732,51 @@ def parse_people(text: str) -> list:
     return [re.sub(r"^(?:左|left|L)?\s*\d+\s*[:：.、)]\s*", "", l, flags=re.I).rstrip("。.") for l in lines]
 
 
-# ------------------------------------------------------------------- 0.5.91 Recast: who is who, then one edit
-def parse_roster(text: str) -> list:
-    """people_at_start -> [(name, look)] left to right at the start.  'Eva: blonde, blue dress' names her; a line
-    without a name gets 'person k' (人物k)."""
-    out = []
-    for k, line in enumerate(parse_people(text), 1):
-        m = re.match(r"^\s*([^:：，,。；;]{1,16}?)\s*[:：]\s*(.+)$", line)
-        out.append((m.group(1).strip(), m.group(2).strip().rstrip("。.；;")) if m else (f"人物{k}", line))
-    return out
+# ----------------------------------------------- 0.5.91 Recast: the user's H3 Image AIO v1.01 chain (18:31)
+# One plain sentence (the user's own wording, 18:28) -> the official MiniMax H3 Image prompt enhancer writes the
+# prompt -> one H3 Image edit of the whole keyframe.  Test 18:27 (user, 0 s keyframe): all three swapped right, in
+# place, pose kept, whole outfit, no extra people.  Our own long prompt template (17:32/17:47: people added instead
+# of replaced) and the Qwen Image 2.1 path are gone.
+SWAP_KEEP = ("严格保持图1中的对应人物的朝向,姿势,动作,表情,口型,人物在图片里的位置和所占比例的大小,还有前后遮挡关系不变. "
+             "严格保持{pics}里的人的五官外貌,发型发色,服装等特征不变,")
 
 
-ROSTER_ASK = ("图1是视频里的一个画面。这一步不修改图片：请从左到右逐个描述图1中每个人的外貌，只写发型、发色和全身穿着"
-              "（上衣、裤子或裙子、鞋），每人一句，格式为“左1：……；左2：……”。")
-# 0.5.91 (test 17:32): asked to "only name the people, change nothing" the enhancer - trained to write EDIT prompts -
-# wrote "add name labels under the people", named people wrongly and its label text leaked into our prompt (text
-# drawn in the keyframes).  Asked for the swap itself (test 17:12) it named all 15 people right.  So it is asked for
-# the swap, and only who stands where is read from its answer: nothing it writes goes into the edit prompt.
-IDENTIFY_ASK = ("图1是视频里的一个画面，里面的人名字和外貌如下——{roster}他们在画面里的位置可能和平时不一样，"
-                "请按外貌认出图1中每个人是谁。然后{swaps}；每个人保持原来的位置、大小、姿势、动作、表情和朝向，"
-                "背景和其他一切不变。描述时写明从左数第几个人是谁、换成谁。")
-_RANK = re.compile(r"(?:从左(?:往右)?(?:数|起)?|左(?:起|侧|边)?)\s*第?\s*([1-9]|[一二三四五六七八九])\s*(?:个|位|名|人|[:：])")
+def h3_size(w, h, mp=EDIT_MP, grid=32):
+    """the edit canvas as the AIO workflow's Resolution Selector makes it: the keyframe aspect at mp megapixels, each
+    side rounded to a multiple of grid"""
+    asp = w / float(max(1, h))
+    return (max(grid, int(round(math.sqrt(mp * 1e6 * asp) / grid)) * grid),
+            max(grid, int(round(math.sqrt(mp * 1e6 / asp) / grid)) * grid))
 
 
-def identify_ask(roster, swaps) -> str:
-    """the enhancer request (the swap, as in the test that named everybody right): roster [(name, look)], swaps
-    [(name, picture number in the request)]"""
-    sw = "，".join(f"把{n}换成图{i}中的人" for n, i in swaps)
-    return IDENTIFY_ASK.format(roster="".join(f"{n}：{l}；" for n, l in roster), swaps=sw)
+def swap_sentence(pairs, n_people) -> str:
+    """the plain request for the enhancer: pairs [(place from the left in this keyframe, picture number)], n_people
+    in the keyframe.  'replace the 1st from the left with picture 3, the 2nd with picture 4, ...' + the user's keep
+    clause; others not recast are kept."""
+    pairs = sorted(pairs)
+    head = "把图1里" + "，".join(f"从左数第{r}个人替换成图{i}里的人" for r, i in pairs) + "，"
+    if len(pairs) < n_people:
+        head += "图1里其他的人保持不变，"
+    pics = "、".join(f"图{i}" for i in sorted(i for _, i in pairs))
+    return head + SWAP_KEEP.format(pics=pics)
 
 
-def _segments(text):
-    """'左1：... 左2：...' / '从左数第1位...' -> [(place from the left, text up to the next place)]"""
-    hits = list(_RANK.finditer(text or ""))
-    return [(cn_number(h.group(1)), text[h.end():hits[i + 1].start() if i + 1 < len(hits) else len(text)])
-            for i, h in enumerate(hits)]
-
-
-def parse_roster_answer(text: str) -> list:
-    """the enhancer's answer to ROSTER_ASK -> [(name, look)] left to right ([] when it is not in that form)"""
-    seen = {}
-    for r, seg in _segments(text):
-        look = re.split(r"[。；;\n]", seg.strip(" ，,：:"))[0].strip()
-        if look and r not in seen:
-            seen[r] = look[:80]
-    if not seen or sorted(seen) != list(range(1, len(seen) + 1)):
-        return []
-    return [(f"人物{r}", seen[r]) for r in sorted(seen)]
-
-
-def _look_bits(look):
-    """the first two parts of a look ('金色长卷发', '浅蓝色丝绸深V连衣裙'), to find a person the enhancer described
-    without her name"""
-    return [x.strip() for x in re.split(r"[，,、；;。]", look or "") if len(x.strip()) >= 3][:2]
-
-
-def parse_identify(text: str, roster) -> dict:
-    """the enhancer's answer -> {name: place from the left}.  In each place's piece: the first name written there,
-    else the one person whose look (hair, first garment) is written there.  A place and a name are taken once.
-    The pictures it says she becomes are NOT read (it swapped them once, test 17:12)."""
-    names = [n for n, _ in roster]
-    ranks = {}
-    for r, seg in _segments(text):
-        if r in ranks.values():
-            continue
-        found = sorted((seg.find(n), n) for n in names if n and n in seg and n not in ranks)
-        n = found[0][1] if found else None
-        if n is None:
-            hit = [nm for nm, lk in roster if nm not in ranks and any(b in seg for b in _look_bits(lk))]
-            n = hit[0] if len(hit) == 1 else None
-        if n is not None:
-            ranks[n] = r
-    return ranks
-
-
-def settle_rank(tracker_rank, pe_rank):
-    """where a person stands in a keyframe: the tracker's place checked against the enhancer's (by look) -> (place,
-    note).  They differ -> the tracker's (right in all 10 keyframes of the 17:12 and 17:32 tests; the enhancer was
-    wrong in 2 of 5 at 17:32), flagged in the report."""
-    if pe_rank is None:
-        return tracker_rank, "enhancer did not place her - tracker's place"
-    if tracker_rank is None:
-        return pe_rank, "no tracker place - enhancer's place"
-    if tracker_rank == pe_rank:
-        return pe_rank, "tracker and enhancer agree"
-    return tracker_rank, f"DIFFER: tracker {tracker_rank}, enhancer {pe_rank} - tracker's place used"
-
-
-SWAP_HEAD = "在图1上换人：图1的背景、光照、色调、构图、镜头远近和画面范围完全不变，画面里的人数不变。"
-SWAP_ONE = ("把图1中从左数第{rank}个人{who}整个人换成图{img}中的人：脸、发型、发色、肤色和身材与图{img}完全一致，"
-            "全身穿着：{desc}；原来身上的全部服装和配饰都去掉，换成这一身。保持原来的位置、大小、姿势、动作、表情、"
-            "头部朝向和视线。")
-SWAP_TAIL = "图1中其他人保持原样不变。每个人只出现一次。"
-
-
-def recast_prompt(people) -> str:
-    """the Qwen Image 2.1 edit prompt for one keyframe, written by us (nothing from the enhancer): people = [{rank,
-    img, name, look, desc}] -> 'person at place r (name, look) becomes picture img, the whole outfit changed'"""
-    parts = [SWAP_HEAD]
-    for p in people:
-        who = "，".join(x for x in (p.get("name") or "", p.get("look") or "") if x)
-        parts.append(SWAP_ONE.format(rank=p["rank"], img=p["img"], who=f"（{who}）" if who else "",
-                                     desc=(p.get("desc") or f"与图{p['img']}一致的服装").rstrip("。. ")))
-    parts.append(SWAP_TAIL)
-    return "".join(parts)
+def pe_caption(text):
+    """the enhancer's expanded_caption (its answer is one JSON object, after an optional thinking part) or None"""
+    import json
+    t = str(text or "")
+    if "</think>" in t:
+        t = t.rsplit("</think>", 1)[1]
+    i, j = t.find("{"), t.rfind("}")
+    if i < 0 or j <= i:
+        return None
+    try:
+        cap = json.loads(t[i:j + 1]).get("expanded_caption")
+    except Exception:
+        m = re.search(r'"expanded_caption"\s*:\s*"((?:[^"\\]|\\.)*)"', t[i:j + 1], re.S)
+        cap = json.loads('"' + m.group(1) + '"') if m else None
+    cap = (cap or "").strip()
+    return cap or None
 
 
 def plan_length(n_frames: int) -> int:

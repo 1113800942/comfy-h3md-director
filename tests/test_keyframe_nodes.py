@@ -60,7 +60,6 @@ def test_prepare_assemble(clip):
         "clips/src.mp4", "图1换左二", "a man with short red hair, yellow coat", "伊娃：金发\n阿比：红发\n义父：黑发",
         5.0, 0.4, 8, picture_1=pic)["result"]
     i = json.loads(info)
-    assert N.K.parse_roster(job["roster"]) == [("伊娃", "金发"), ("阿比", "红发"), ("义父", "黑发")]
     assert i["people_at_start"] == 3 and i["mapping"] == [{"picture": 1, "left": 2}]
     assert len(pics) == i["recasts"] == sum(len(m["items"]) for m in job["moments"]) >= 2
     assert job["size"] == [1664, 960] and job["length"] <= SEC * FPS
@@ -93,38 +92,44 @@ def test_prepare_assemble(clip):
         N.H3MDKeyframeAssemble().assemble(job, "t2", False)
 
 
-def test_recast_who_is_who(clip, monkeypatch):
-    """0.5.91: the enhancer only tells who stands where (by look); H3MD writes the prompt; one edit per keyframe"""
+
+def test_recast_h3aio(clip, monkeypatch):
+    """0.5.91: the H3 Image AIO chain - plain sentence (places from the tracker) -> enhancer -> one edit per keyframe"""
+    from types import SimpleNamespace as NS
+    import comfy_extras.nodes_textgen as TG
+    import comfy_extras.nodes_minimax_h3 as MH
+    import comfy_extras.nodes_custom_sampler as CS
+    import nodes as CN
     pic = torch.rand(1, 1200, 1000, 3)
     pics, job, sheet, info = N.H3MDKeyframePrepare().prepare(
-        "clips/src.mp4", "图1换左二", "a man with short red hair, yellow coat", "伊娃：金发\n阿比：红发\n义父：黑发",
-        5.0, 0.4, 8, picture_1=pic)["result"]
+        "clips/src.mp4", "图1换左二", "a man with short red hair, yellow coat", "", 5.0, 0.4, 8, picture_1=pic)["result"]
     todo = [m for m in job["moments"] if m["items"]]
-    calls, prompts = [], []
+    asked, prompts, order = [], [], []
 
-    def fake_enhance(pe_model, request, images, seed, unload):
-        k = len(calls)
-        calls.append(unload)
-        assert "阿比：红发" in request and "把阿比换成图2中的人" in request and len(images) == 2
-        m = todo[k]
-        if k == len(todo) - 1:      # a wrong enhancer answer: the tracker's place wins, flagged
-            return "从左数第3位是阿比，添加文字标签。"
-        return ("左1：伊娃，站立；左2：阿比，举起右手，穿黄色外套，替换为<image2>；左3：义父" if m["at"] < 5.0 else
-                "从左数第1位（红发）的人替换为<image2>中的人，添加文字标签；从左数第2位是伊娃；从左数第3位是义父。")
+    def fake_pe(**kw):
+        order.append("pe")
+        asked.append(kw["prompt"])
+        assert kw["thinking"] is True and kw["mtp"] == "off" and kw["system_prompt"] == "SYS" and len(kw["images"]) == 2
+        return NS(result=('{"expanded_caption": "CAP %d", "aspect_ratio": "16:9"}' % len(asked),))
 
-    def fake_edit(model, clip_, vae, sampler, sigmas, seed, prompt, images):
-        prompts.append(prompt)
-        assert len(images) == 2
-        return np.zeros((int(images[0].shape[1]), int(images[0].shape[2]), 3), np.uint8)
+    def fake_cond(**kw):
+        order.append("edit")
+        prompts.append(kw["prompt"])
+        assert list(kw["images"]) == ["image_0", "image_1"] and (kw["width"], kw["height"]) == (2624, 1504)
+        return NS(result=("COND", {"samples": None}))
 
-    monkeypatch.setattr(N, "_enhance", fake_enhance)
-    monkeypatch.setattr(N, "_qwen_edit", fake_edit)
-    imgs, job2, report = N.H3MDKeyframeRecast().recast([job], pics, [None], [None], [None], [None], [None],
-                                                       [{"unload": True}], [7])["result"]
-    assert calls == [False] * (len(todo) - 1) + [True]               # the enhancer stays loaded until the last
-    assert len(imgs) == len(todo) == len(job2["recast_frames"]) and imgs[0].shape[1:3] == (960, 1664)
-    for m, p in zip(todo, prompts):
+    monkeypatch.setattr(TG.TextGenerateV2, "execute", staticmethod(fake_pe))
+    monkeypatch.setattr(MH.MiniMaxH3ImageConditioning, "execute", staticmethod(fake_cond))
+    monkeypatch.setattr(CS.BasicGuider, "execute", staticmethod(lambda **kw: NS(result=("G",))))
+    monkeypatch.setattr(CS.RandomNoise, "execute", staticmethod(lambda **kw: NS(result=("N",))))
+    monkeypatch.setattr(CS.SamplerCustomAdvanced, "execute", staticmethod(lambda **kw: NS(result=("LAT", None))))
+    monkeypatch.setattr(CN.VAEDecode, "decode", lambda self, vae, s: (torch.rand(1, 1536, 2688, 3),))
+    imgs, job2, report = N.H3MDKeyframeRecast().recast(
+        [job], pics, [None], [None], [None], [None], [None], [None], ["SYS"], ["TASK: {input text}"], [4.0],
+        [7])["result"]
+    assert order == ["pe"] * len(todo) + ["edit"] * len(todo)            # enhancer for all first, then the edits
+    for m, a in zip(todo, asked):
         r = 2 if m["at"] < 5.0 else 1
-        assert f"从左数第{r}个人（阿比，红发）整个人换成图2中的人" in p and "a man with short red hair" in p
-        assert "全部服装和配饰都去掉" in p and "黄色" not in p and "举起" not in p and "标签" not in p
-    assert "tracker and enhancer agree" in report and "DIFFER: tracker 1, enhancer 3" in report
+        assert a.startswith(f"TASK: 把图1里从左数第{r}个人替换成图2里的人，图1里其他的人保持不变，")
+    assert prompts == [f"CAP {k + 1}" for k in range(len(todo))]
+    assert len(imgs) == len(todo) and imgs[0].shape[1:3] == (960, 1664) and "seed 7" in report

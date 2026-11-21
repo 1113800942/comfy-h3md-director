@@ -395,12 +395,9 @@ class H3MDKeyframePrepare:
                                             "jacket, white T-shirt, black jeans'). Used in the edit prompt and the "
                                             "Remake prompt; English recommended. 每张图一行外貌描述。"}),
                 "people_at_start": ("STRING", {"multiline": True, "default": "", "tooltip":
-                                    "One line per person in the source, left to right at the start: a name, then what "
-                                    "they look like (hair, every garment, shoes), e.g. 'Eva: long wavy blonde hair, light "
-                                    "blue silk dress, long light blue gloves'. Recast's prompt enhancer finds every "
-                                    "person by this look in every keyframe, wherever they stand. Empty: the enhancer "
-                                    "describes the people itself. 原片里从左到右每人一行：名字：外貌（发型、全身衣服、鞋），"
-                                    "例如「伊娃：金色长卷发，浅蓝丝绸长裙，浅蓝长手套」。"}),
+                                    "Optional: one line per person in the source, left to right at the start, what "
+                                    "they look like now (e.g. 'the woman with wavy dark-brown hair in a red crop top'). "
+                                    "Helps the Remake prompt keep the others. 可选：原片里从左到右每人一行，现在的样子。"}),
                 "max_gap_s": ("FLOAT", {"default": 5.0, "min": 2.0, "max": 8.0, "step": 0.5, "tooltip":
                                         "Largest distance between two keyframes (Remake splits long videos into "
                                         "parts; each part needs a keyframe)."}),
@@ -433,8 +430,8 @@ class H3MDKeyframePrepare:
     DESCRIPTION = ("Multi-person swap keyframes, step 1. Finds and numbers the people in the source (left to right "
                    "at the start), picks keyframe moments at most max_gap_s apart (people standing apart, little "
                    "motion) and notes where every person to recast stands then. Then H3MD Keyframe 1b: Recast "
-                   "(who is who by the prompt enhancer, one Qwen Image 2.1 edit per keyframe) and H3MD Keyframe 2: "
-                   "Assemble.")
+                   "(H3 Image AIO chain: plain sentence, official enhancer, one edit per keyframe) and H3MD "
+                   "Keyframe 2: Assemble.")
 
     def prepare(self, video, mapping, descriptions, people_at_start, max_gap_s, threshold, max_people,
                 source_video=None, start_s=0.0, end_s=0.0, **pics):
@@ -563,8 +560,7 @@ class H3MDKeyframePrepare:
         prompt = K.swap_prompt(length, chosen, descs, len(order), changes, names, looks)
         job = {"video": plan_path(video, path), "video_abs": path, "duration": info["duration"],
                "has_audio": info["audio"], "size": list(size), "length": length, "moments": job_moments,
-               "frames": full, "prompt": prompt, "chosen": chosen, "order": order,
-               "roster": people_at_start or ""}
+               "frames": full, "prompt": prompt, "chosen": chosen, "order": order}
         if float(start_s or 0.0) > 0 or float(end_s or 0.0) > 0:
             # 0.5.6: where the cut part sits in the original, so H3MD RH can cut the same part from a whole original
             st = round(max(0.0, float(start_s or 0.0)), 3)
@@ -666,60 +662,14 @@ class H3MDKeyframeAssemble:
         return {"ui": {"text": [msg]}, "result": (to_tensor(sheet), plan_s, zip_path)}
 
 
-def _qwen_edit(model, clip, vae, sampler, sigmas, seed, prompt, images):
-    """one Qwen Image 2.1 edit (as the user's 'Qwen2.1 image editor' chain): images = [tensor, ...] -> uint8 image on
-    image 1's canvas"""
-    import nodes
-    from comfy_extras.nodes_qwen import TextEncodeQwenImage21
-    from comfy_extras.nodes_custom_sampler import SamplerCustom
-    enc = TextEncodeQwenImage21.execute(clip=clip, prompt=prompt, negative_prompt="", vae=vae, resolution=0,
-                                        images={f"image_{i + 1}": im for i, im in enumerate(images)})
-    out = SamplerCustom.execute(model=model, add_noise=True, noise_seed=seed, cfg=1.0, positive=enc.result[0],
-                                negative=enc.result[1], sampler=sampler, sigmas=sigmas, latent_image=enc.result[2])
-    img = nodes.VAEDecode().decode(vae, out.result[0])[0]
-    img = img.reshape(-1, img.shape[-3], img.shape[-2], img.shape[-1])[:1].clamp(0, 1)
-    return to_u8(img)
-
-
-def _resized(u8, w, h):
-    """uint8 image -> float tensor [1, h, w, 3]"""
-    import numpy as np
-    from PIL import Image
-    return to_tensor(np.asarray(Image.fromarray(u8).resize((w, h), Image.LANCZOS)))
-
-
-def _enhance(pe_model, request, images, seed, unload):
-    """one call of the Qwen Image 2.1 prompt enhancer (ComfyUI-Prompt-Enhancer's node, the user's PE loader settings),
-    text only: the answer's prompt text.  unload=False keeps the enhancer loaded for the next keyframe."""
-    import nodes
-    cls = nodes.NODE_CLASS_MAPPINGS.get("QwenImage21PromptEnhancer")
-    if cls is None:
-        raise K.KeyframeError(f"{TAG} the Qwen Image 2.1 Prompt Enhancer node is not installed "
-                              "(ComfyUI-Prompt-Enhancer). 没装 Qwen Image 2.1 提示词增强节点。")
-    out = cls().enhance(**{"Prompt": request, "Task": "Image Edit (edit)", "Seed": int(seed) & 0xFFFFFFFF,
-                           "Use Cache": True, "Target Megapixels": 1.0, "Aspect Ratio": "Auto (model decides)",
-                           "Prompt Count": 1, "Output Language": "Chinese (zh)", "Prompt Enhancement": True,
-                           "pe_model": dict(pe_model, unload=bool(unload)),
-                           **{f"Image {i + 1}": im for i, im in enumerate(images)}})
-    v = out[0]
-    return str(v[0] if isinstance(v, (list, tuple)) else v)
-
-
-def _places(it):
-    """[(person id, place from the left)] of everybody in a keyframe, from one item's own / others boxes"""
-    allp = [(it["id"], it["own"])] + list(zip(it.get("others_ids") or [], it.get("others") or []))
-    allp.sort(key=lambda qb: (qb[1][0] + qb[1][2]) / 2.0)
-    return [(q, r) for r, (q, b) in enumerate(allp, 1)]
-
-
 class H3MDKeyframeRecast:
-    """0.5.91: per keyframe, (1) the Qwen Image 2.1 prompt enhancer tells who is who - by look, against the names and
-    looks of people_at_start, wherever they stand now; it is asked for the swap (asked to only name people it wrote
-    'add name labels', test 17:32) and only the places are read; where it differs from the tracker the tracker's
-    place is used and flagged; (2) WE write the edit prompt, nothing of the enhancer's text in it: the person at place r (name, look) becomes picture N, whole outfit changed
-    (user 2026-11-20 17:12: the enhancer, left to write the prompt itself, swapped two pictures once and kept the
-    original clothes in 3 of 5 keyframes); (3) one Qwen Image 2.1 edit redraws the whole keyframe.
-    The layered method (erase / make alone / put back, 817837a) is gone."""
+    """0.5.91: the user's own H3 Image AIO v1.01 chain, moved into H3MD (user 18:31).  Per keyframe: one plain sentence
+    (the user's wording: who stands at which place from the left becomes which picture; keep pose, expression, mouth,
+    place, size, occlusion; keep the new people's faces, hair, clothes) -> the official MiniMax H3 Image prompt
+    enhancer (TextGenerateV2, its system and task prompts, thinking on) writes the prompt, the sentence itself when it
+    gives no caption -> one MiniMax H3 Image edit of the whole keyframe (<Picture 1> = the keyframe, 2... = the new
+    people), the tuned 6-step sigmas.  All keyframes go through the enhancer first, then all edits (each model loaded
+    once).  Test 18:27 (the user's workflow, 0 s keyframe): all three swapped right."""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -727,15 +677,17 @@ class H3MDKeyframeRecast:
             "required": {
                 "job": ("H3MD_KEYFRAME_JOB", {"tooltip": "From H3MD Keyframe 1: Prepare"}),
                 "pictures": ("IMAGE", {"tooltip": "Prepare's pictures output"}),
-                "model": ("MODEL", {"tooltip": "Qwen Image 2.1 (+ the 2-step LoRA etc., as the 'Qwen2.1 image "
-                                    "editor' workflow)"}),
-                "clip": ("CLIP", {"tooltip": "The Qwen Image 2.1 text encoder (qwen3-vl, type qwen_image)"}),
-                "vae": ("VAE", {"tooltip": "qwen_image_2.1_vae"}),
+                "model": ("MODEL", {"tooltip": "MiniMax H3 Image (+ LoRA), as in the H3 Image AIO workflow"}),
+                "clip": ("CLIP", {"tooltip": "qwen3vl_32b_minimax_h3 (type minimax)"}),
+                "vae": ("VAE", {"tooltip": "minimax_h3_image_vae"}),
                 "sampler": ("SAMPLER", {"tooltip": "euler"}),
-                "sigmas": ("SIGMAS", {"tooltip": "ManualSigmas 1.0, 0.5, 0 (2-step LoRA)"}),
-                "pe_model": ("QWE_PE_MODEL", {"tooltip": "Qwen Image 2.1 PE Loader (GGUF): it only tells who is "
-                                              "who in every keyframe. Thinking on, Plan Tokens 400. "
-                                              "增强器只负责认人。"}),
+                "sigmas": ("SIGMAS", {"tooltip": "the tuned exact 6-step PDD sigmas"}),
+                "pe_clip": ("CLIP", {"tooltip": "The prompt enhancer: qwen3.5_9b (type minimax)"}),
+                "pe_system_prompt": ("STRING", {"forceInput": True, "tooltip": "The enhancer system prompt"}),
+                "pe_task_prompt": ("STRING", {"forceInput": True,
+                                              "tooltip": "The enhancer task prompt (with {input text})"}),
+                "megapixels": ("FLOAT", {"default": K.EDIT_MP, "min": 0.5, "max": 8.0, "step": 0.1,
+                                         "tooltip": "Edit canvas, keyframe aspect, multiple of 32 (AIO: 4.0)"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "control_after_generate": True}),
             }
         }
@@ -746,96 +698,79 @@ class H3MDKeyframeRecast:
     OUTPUT_IS_LIST = (True, False, False)
     OUTPUT_TOOLTIPS = ("The finished keyframes, one per swap moment (whole frames).",
                        "The job with the keyframes (connect to Assemble).",
-                       "Per keyframe: who the enhancer found where, the check against the tracker, the edit prompt, "
-                       "times.")
+                       "Per keyframe: the sentence, the enhancer's prompt, times.")
     FUNCTION = "recast"
     CATEGORY = CATEGORY
-    DESCRIPTION = ("Multi-person swap keyframes, step 1b (0.5.91): the Qwen Image 2.1 prompt enhancer tells who is "
-                   "who in every keyframe (by the names and looks in people_at_start), H3MD writes the swap prompt, "
-                   "one Qwen Image 2.1 edit per keyframe. Then H3MD Keyframe 2: Assemble.")
+    DESCRIPTION = ("Multi-person swap keyframes, step 1b (0.5.91): the H3 Image AIO chain - a plain sentence, the "
+                   "official H3 Image prompt enhancer, one H3 Image edit per keyframe. Then H3MD Keyframe 2: Assemble.")
 
-    def recast(self, job, pictures, model, clip, vae, sampler, sigmas, pe_model, seed):
+    PE_MAX = 8196
+    PE_SAMPLING = {"sampling_mode": "on", "temperature": 1.0, "top_k": 20, "top_p": 0.95, "min_p": 0.0,
+                   "repetition_penalty": 1.0, "presence_penalty": 0.0}
+
+    def recast(self, job, pictures, model, clip, vae, sampler, sigmas, pe_clip, pe_system_prompt, pe_task_prompt,
+               megapixels, seed):
         import time
         import numpy as np
         import comfy.utils
+        import nodes
         from PIL import Image
+        from comfy_extras.nodes_minimax_h3 import MiniMaxH3ImageConditioning
+        from comfy_extras.nodes_custom_sampler import BasicGuider, RandomNoise, SamplerCustomAdvanced
+        from comfy_extras.nodes_textgen import TextGenerateV2
         one = lambda v: v[0] if isinstance(v, list) else v
-        job, model, clip, vae, sampler, sigmas, pe_model = (one(job), one(model), one(clip), one(vae), one(sampler),
-                                                            one(sigmas), one(pe_model))
-        seed = int(one(seed))
+        job, model, clip, vae, sampler, sigmas, pe_clip = (one(job), one(model), one(clip), one(vae), one(sampler),
+                                                           one(sigmas), one(pe_clip))
+        system, task = str(one(pe_system_prompt)), str(one(pe_task_prompt))
+        mp, seed = float(one(megapixels)), int(one(seed))
+        if "{input text}" not in task:
+            raise K.KeyframeError(f"{TAG} pe_task_prompt has no '{{input text}}': connect the enhancer task prompt. "
+                                  "增强器任务提示词里没有 {input text}。")
         pics = [p[b:b + 1] for p in pictures for b in range(int(p.shape[0]))]
         need = sum(len(m["items"]) for m in job["moments"])
         if len(pics) != need:
             raise K.KeyframeError(f"{TAG} {len(pics)} picture(s) for {need} recast person(s): connect Prepare's "
                                   "pictures. 请接上 Prepare 的 pictures。")
         W, H = job["size"]
+        gw, gh = K.h3_size(W, H, mp=mp)
         todo = [m for m in job["moments"] if m["items"]]
         pbar = comfy.utils.ProgressBar(max(1, 2 * len(todo)))
-        lines, t_all = [], time.time()
-        # who is who: names and looks from people_at_start (left to right at the start), else the enhancer
-        # describes the people of the first keyframe
-        who = {}
-        roster = K.parse_roster(job.get("roster", ""))
-        order = job.get("order") or []
-        if roster:
-            for k, nl in enumerate(roster, 1):
-                if k <= len(order):
-                    who[order[k - 1]] = nl
-            lines.append("people (people_at_start): " + "; ".join(f"{n}: {l}" for n, l in roster))
-        else:
-            t0 = time.time()
-            first = todo[0]
-            ans = _enhance(pe_model, K.ROSTER_ASK, [to_tensor(np.ascontiguousarray(job["frames"][first["at"]]))],
-                           seed, unload=False)
-            roster = K.parse_roster_answer(ans)
-            for q, r in _places(first["items"][0]):
-                if r <= len(roster):
-                    who[q] = roster[r - 1]
-            lines.append(f"people (described by the enhancer at {first['at']:.2f} s, {time.time() - t0:.1f} s): " +
-                         ("; ".join(f"{n}: {l}" for n, l in roster) if roster else
-                          f"NOT UNDERSTOOD - places from the tracker only. Fill people_at_start. Answer: {ans[:300]}"))
-        # 1 the enhancer: who stands where in every keyframe (asked for the swap; only the places are read; kept
-        # loaded until the last keyframe)
-        found, n = {}, 0
-        for i, m in enumerate(todo):
-            t0 = time.time()
+        lines, t_all, work, n = [], time.time(), [], 0
+        # 1 the enhancer, every keyframe
+        for m in todo:
             refs = pics[n:n + len(m["items"])]
             n += len(m["items"])
-            src_t = to_tensor(np.ascontiguousarray(job["frames"][m["at"]]))
-            swaps = [(who[it["id"]][0], j + 2) for j, it in enumerate(m["items"]) if it["id"] in who]
-            ans = (_enhance(pe_model, K.identify_ask(list(who.values()), swaps), [src_t] + refs, seed,
-                            unload=i == len(todo) - 1) if who else "")
-            found[m["at"]] = (K.parse_identify(ans, list(who.values())), ans, time.time() - t0)
+            frame = to_tensor(np.ascontiguousarray(job["frames"][m["at"]]))
+            n_people = max(int(it.get("n") or 0) for it in m["items"])
+            sentence = K.swap_sentence([(it["rank"], j + 2) for j, it in enumerate(m["items"])], n_people)
+            t0 = time.time()
+            pe = TextGenerateV2.execute(clip=pe_clip, prompt=task.replace("{input text}", sentence),
+                                        max_length=self.PE_MAX, sampling_mode=dict(self.PE_SAMPLING, seed=seed),
+                                        thinking=True, use_default_template=True, mtp="off", system_prompt=system,
+                                        images={f"image{j + 1}": im for j, im in enumerate([frame] + refs)})
+            caption = K.pe_caption(pe.result[0])
+            work.append((m, frame, refs, sentence, caption, time.time() - t0, str(pe.result[0])[:300]))
             pbar.update(1)
-        # 2 our prompt + one Qwen Image 2.1 edit per keyframe
-        done, out_imgs, n = {}, [], 0
-        gw, gh = K.fit_size(W, H)
-        for m in job["moments"]:
-            if not m["items"]:
-                continue
-            refs = pics[n:n + len(m["items"])]
-            n += len(m["items"])
-            ranks, ans, t_pe = found[m["at"]]
-            people, notes = [], []
-            for j, it in enumerate(m["items"]):
-                nm, lk = who.get(it["id"], ("", it.get("look") or ""))
-                rank, note = K.settle_rank(it["rank"], ranks.get(nm) if nm else None)
-                people.append({"rank": rank, "img": j + 2, "name": nm, "look": lk, "desc": it.get("desc", ""),
-                               "picture": it["picture"]})
-                notes.append(f"  picture {it['picture']} = {nm or 'left ' + str(it['left'])}: place {rank} ({note})")
-            if len({p["rank"] for p in people}) < len(people):
-                for p, it in zip(people, m["items"]):
-                    p["rank"] = it["rank"]
-                notes.append("  two people got the same place - the tracker's places used for all")
-            prompt = K.recast_prompt(people)
+        # 2 one H3 Image edit per keyframe
+        done, out_imgs = {}, []
+        for m, frame, refs, sentence, caption, t_pe, raw in work:
             t0 = time.time()
-            src = np.ascontiguousarray(job["frames"][m["at"]])
-            out = _qwen_edit(model, clip, vae, sampler, sigmas, seed, prompt, [_resized(src, gw, gh)] + refs)
-            out = np.asarray(Image.fromarray(out).resize((W, H), Image.LANCZOS))
+            prompt = caption or sentence
+            enc = MiniMaxH3ImageConditioning.execute(clip=clip, prompt=prompt, width=gw, height=gh, vae=vae,
+                                                     images={f"image_{j}": im for j, im in enumerate([frame] + refs)})
+            guider = BasicGuider.execute(model=model, conditioning=enc.result[0]).result[0]
+            noise = RandomNoise.execute(noise_seed=seed).result[0]
+            res = SamplerCustomAdvanced.execute(noise=noise, guider=guider, sampler=sampler, sigmas=sigmas,
+                                                latent_image=enc.result[1])
+            img = nodes.VAEDecode().decode(vae, res.result[0])[0]
+            img = img.reshape(-1, img.shape[-3], img.shape[-2], img.shape[-1])[:1].clamp(0, 1)
+            out = to_u8(img)
+            if out.shape[1] != W or out.shape[0] != H:
+                out = np.asarray(Image.fromarray(out).resize((W, H), Image.LANCZOS))
             lines.append(f"{m['at']:.2f} s: enhancer {t_pe:.1f} s, edit {time.time() - t0:.1f} s ({gw}x{gh})")
-            lines.extend(notes)
-            lines.append("  enhancer: " + " ".join(ans.split())[:600])
-            lines.append("  prompt: " + prompt)
+            lines.append("  sentence: " + sentence)
+            lines.append("  prompt: " + (caption if caption else f"ENHANCER GAVE NO CAPTION - the sentence used. "
+                                                                   f"Its output: {raw!r}"))
             done[m["at"]] = out
             out_imgs.append(to_tensor(out))
             pbar.update(1)
@@ -843,13 +778,13 @@ class H3MDKeyframeRecast:
         report = "\n".join(lines)
         LOG.info("%s recast report:\n%s", TAG, report)
         job = dict(job, recast_frames=done,
-                   recast={"method": "enhancer tells who is who, H3MD writes the prompt, one Qwen Image 2.1 edit",
-                           "seed": seed, "report": report})
+                   recast={"method": "H3 Image AIO chain: plain sentence, official enhancer, one edit", "seed": seed,
+                           "report": report})
         return {"ui": {"text": [report]}, "result": (out_imgs, job, report)}
 
 
 NODE_CLASS_MAPPINGS = {"H3MDKeyframePrepare": H3MDKeyframePrepare, "H3MDKeyframeRecast": H3MDKeyframeRecast,
                        "H3MDKeyframeAssemble": H3MDKeyframeAssemble}
 NODE_DISPLAY_NAME_MAPPINGS = {"H3MDKeyframePrepare": "H3MD Keyframe 1: Prepare 准备关键帧 0.5.91",
-                              "H3MDKeyframeRecast": "H3MD Keyframe 1b: Recast 认人换人 0.5.91",
+                              "H3MDKeyframeRecast": "H3MD Keyframe 1b: Recast H3 Image 换人 0.5.91",
                               "H3MDKeyframeAssemble": "H3MD Keyframe 2: Assemble 打包计划 0.5.91"}
