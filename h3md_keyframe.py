@@ -411,6 +411,13 @@ FACE_ID, SPLIT_ID = 1000, 5000   # ids given by split_by_face (tracker ids are s
 DUP_IOU = 0.7                    # two boxes of one person overlapping this much are one detection
 WIDE_BOX = 1.6                   # 0.5.91: a box this much wider than the person's usual box spans two people
 HIDDEN_COVER, HIDDEN_AREA = 0.8, 0.35   # a box this much inside a bigger one (and this small) = a hidden person
+TALL_RATIO = 6.0                 # 0.5.91 (_017 #2): a box taller than this x its width (pixels, not at a side edge) is
+                                 # no person (a box from the ceiling to the floor) - the frame is never a keyframe
+TINY_REL = 0.2                   # 0.5.91 (_017 #15): a box lower than this x the others' median height, not at an
+                                 # edge, is a stray detection (a spot on a truck), not a person - dropped
+GAP_S = 0.5                      # 0.5.91 (_017 #1): a person seen within this before AND after a frame but missing in
+                                 # it was missed by the tracker there (five men walking, one not boxed) - never a
+                                 # keyframe (he would be neither replaced nor described)
 
 
 def face_of_hidden(b, q_box, faces):
@@ -442,7 +449,12 @@ def clean_frames(frames, face_boxes=None):
             widths.setdefault(pid, []).append(b[2] - b[0])
     med = {pid: statistics.median(ws) for pid, ws in widths.items() if len(ws) >= 3}
     n_wide = n_hidden = 0
-    n_face = 0
+    heights = {}
+    for f in frames:
+        for pid, b in f.get("who") or ():
+            heights.setdefault(pid, []).append(b[3] - b[1])
+    med_h = {pid: statistics.median(hs) for pid, hs in heights.items() if len(hs) >= 3}
+    n_face = n_odd = n_stray = n_gap = 0
     for fi, f in enumerate(frames):
         who = f.get("who") or []
         keep = []
@@ -459,14 +471,45 @@ def clean_frames(frames, face_boxes=None):
                 n_hidden += 1
                 continue
             keep.append([pid, b])
+        if len(keep) >= 3:      # a stray small box among people (not at an edge) is not a person
+            hs = sorted(b[3] - b[1] for _, b in keep)
+            mid = hs[len(hs) // 2]
+            stray = [pid for pid, b in keep if (b[3] - b[1]) < TINY_REL * mid and b[0] > 0.01 and b[2] < 0.99]
+            if stray:
+                n_stray += len(stray)
+                keep = [w for w in keep if w[0] not in stray]
         f["who"] = keep
         bad = [pid for pid, b in keep if pid in med and (b[2] - b[0]) > WIDE_BOX * med[pid]
                and any(iou(b, c) > CLEAR_IOU for q, c in keep if q != pid)]
         if bad:
-            f["bad"] = bad
             n_wide += 1
-    return frames, [f"{n_wide} frame(s) with a box spanning two people (never keyframes), {n_hidden} hidden "
-                    f"person box(es) not counted as seen, {n_face} half-hidden with the face showing kept"]
+        odd = [pid for pid, b in keep if b[0] > 0.01 and b[2] < 0.99 and (
+            (b[3] - b[1]) > TALL_RATIO * (b[2] - b[0]) * FRAME_ASPECT
+            or (pid in med_h and (b[3] - b[1]) > WIDE_BOX * med_h[pid]))]
+        if odd:
+            n_odd += 1
+        if bad or odd:
+            f["bad"] = sorted(set(bad) | set(odd))
+    # a person seen shortly before and after a frame but not in it: the tracker missed him there
+    for fi, f in enumerate(frames):
+        here = {pid for pid, _ in f.get("who") or ()}
+        t = float(f.get("at", fi))
+        def near(rng):
+            out = set()
+            for j in rng:
+                tj = float(frames[j].get("at", j))
+                if abs(tj - t) > GAP_S:
+                    break
+                out |= {pid for pid, b in frames[j].get("who") or () if b[0] > 0.01 and b[2] < 0.99}
+            return out
+        missed = (near(range(fi - 1, -1, -1)) & near(range(fi + 1, len(frames)))) - here
+        if missed:
+            f["bad"] = sorted(set(f.get("bad") or []) | missed)
+            n_gap += 1
+    return frames, [f"{n_wide} frame(s) with a box spanning two people, {n_odd} with an impossible box (too tall), "
+                    f"{n_gap} with a person the tracker missed (never keyframes); {n_hidden} hidden person box(es) "
+                    f"not counted as seen, {n_face} half-hidden with the face showing kept, {n_stray} stray small "
+                    "box(es) dropped"]
 
 
 def reid_merge(per_frame, looks=None, times=None, keep=None):
