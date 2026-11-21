@@ -138,3 +138,25 @@ def test_clean_frames_wide_and_hidden_boxes():
     out, notes = K.clean_frames(fr)
     assert out[10].get("bad") == [2] and K.score(out, 10, {1, 2}) is None
     assert all(w[0] != 3 for w in out[12]["who"])
+
+
+def test_back_turned_piece_fills_a_gap_of_his_track():
+    """_013 (24.2-26.5 s): the lead singer turned his back; the tracker gave the back a new number while his own track
+    paused, then his face came back to the old number.  The piece fills the gap: joined by look, not 'kept'."""
+    import numpy as np
+    rng = np.random.default_rng(5)
+    per_frame = []
+    for i in range(60):
+        fr = {1: [0.70, 0.1, 0.9, 0.95]}
+        if 20 <= i < 35:
+            fr[7] = [0.30, 0.1, 0.5, 0.95]          # the back-turned piece
+        else:
+            fr[4] = [0.30, 0.1, 0.5, 0.95]
+        per_frame.append(fr)
+    white = np.ones(3) / 3
+    nick, other = _emb(4, rng), _emb(1, rng)
+    odd = 0.8 * nick + 0.6 * _emb(9, rng)
+    odd = odd / np.linalg.norm(odd)
+    looks = {4: (white, white, nick), 1: (white, white, other), 7: (white, white, odd)}
+    out, joins, unsure = K.reid_merge(per_frame, looks, list(range(60)))
+    assert any(j["new"] == 7 and j["into"] == 4 for j in joins), (joins, unsure, K.reid_merge.notes)

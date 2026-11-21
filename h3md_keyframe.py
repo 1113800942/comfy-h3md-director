@@ -482,11 +482,17 @@ def reid_merge(per_frame, looks=None, times=None, keep=None):
                 continue
             span = frames_of[old]
             shared = sorted(span & frames_of[new])
-            if max(span) >= max(frames_of[new]):        # the old one is still there after the new one ends
-                why_not.append(f"{old}: still there after it")
-                continue
+            gap = False
+            if max(span) >= max(frames_of[new]):        # the old one is still there after the new one ends ...
+                during = [i for i in span if f0 <= i <= max(frames_of[new])]
+                if len(during) > REID_OVERLAP:          # ... and was there meanwhile: someone else
+                    why_not.append(f"{old}: still there after it")
+                    continue
+                # 0.5.91 (_013, 24.2-26.5 s): the new track fills a gap of the old one (he turned his back, the
+                # tracker gave his back a new number, then his face came back to the old one): a candidate
+                gap = True
             ov = 0.0
-            if len(shared) > REID_OVERLAP or max(span) > f0 + REID_OVERLAP:
+            if not gap and (len(shared) > REID_OVERLAP or max(span) > f0 + REID_OVERLAP):
                 if len(shared) > REID_HANDOFF or max(span) > f0 + REID_HANDOFF:
                     why_not.append(f"{old}: seen together {len(shared)} frames")
                     continue
@@ -915,6 +921,19 @@ def finish_moments(frames, moments, chosen_ids, duration, max_gap=5.0, cuts=(), 
     -> (moments sorted by time, notes)"""
     notes = []
     out = sorted(moments, key=lambda m: frames[m[0]]["at"])
+    # 0.5.91 (_013: keyframes at 10.0 and 10.17 s): a keyframe closer than NEAR_S to another that shows the same
+    # replaced people or fewer is a near copy - dropped (never a kept one)
+    j = 0
+    while j < len(out):
+        i = out[j][0]
+        twin = [m for m in out if m is not out[j] and abs(frames[m[0]]["at"] - frames[i]["at"]) < NEAR_S
+                and kf_people(frames, i, chosen_ids) <= kf_people(frames, m[0], chosen_ids)]
+        if twin and frames[i]["at"] not in set(keep):
+            notes.append(f"keyframe at {frames[i]['at']:.2f} s dropped: a near copy of the one at "
+                         f"{frames[twin[0][0]]['at']:.2f} s")
+            out.pop(j)
+            continue
+        j += 1
     if not out:
         cand = [i for i, f in enumerate(frames) if any(w[0] in chosen_ids for w in f.get("who") or ())]
         if cand:
@@ -933,6 +952,7 @@ def kf_people(frames, i, chosen_ids):
 COVER_S = 3.0             # 0.5.91 (user 03:31): every replaced person on screen has a keyframe at least every this
                           # many seconds - the Director's parts depend on the GPU it runs on (token budget), and each
                           # part takes the look of a person only from its own keyframes
+NEAR_S = 0.5              # 0.5.91: two keyframes closer than this showing the same people are one too many
 COVER_APART = 0.75        # ... and an added keyframe is at least this far from the others (no near copies)
 COVER_MIN_S = 0.5         # ... when he is seen for at least this long in that stretch (a short
                           # appearance in a part still gets his look from a keyframe)
