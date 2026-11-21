@@ -865,11 +865,17 @@ class DirectorEditor {
     const frames = lay.length ? lay[lay.length - 1].endFrame : 0;
     const close = () => { this.importDlg = null; this.render(); };
     const usePlan = () => {
-      this.plan = RM.ensure(M.ensureShape(JSON.parse(j.plan_json)));
+      // 0.5.91: a plan without its own global prompt (e.g. a multi-swap plan from H3MD Keyframe Assemble) keeps the
+      // trigger words already in the Director instead of wiping them (user rule: never lose the globalPrompt)
+      const prevGlobal = (this.plan && this.plan.globalPrompt) || "";
+      const np = RM.ensure(M.ensureShape(JSON.parse(j.plan_json)));
+      const kept = !String(np.globalPrompt || "").trim() && prevGlobal.trim();
+      if (kept) np.globalPrompt = prevGlobal;
+      this.plan = np;
       this.importDlg = null;
       this.commit();
       this.probeAll();
-      this.setPlanIOMsg(`imported plan '${j.name}'`);
+      this.setPlanIOMsg(`imported plan '${j.name}'` + (kept ? " (your global prompt kept)" : ""));
     };
     const useAll = async () => {
       const wf = JSON.parse(JSON.stringify(j.workflow));

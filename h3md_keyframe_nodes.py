@@ -464,10 +464,12 @@ class H3MDKeyframePrepare:
                                        "first clear frame (see people_sheet). '图1换左二' = picture 1 replaces the "
                                        "second from the left; English: 'picture 1 -> left 2'."}),
                 "descriptions": ("STRING", {"multiline": True, "default": "", "tooltip":
-                                            "One line per picture, in picture order: race, age, face, hair, every "
-                                            "garment (e.g. 'a Black man in his twenties, short black hair, red bomber "
-                                            "jacket, white T-shirt, black jeans'). Used in the edit prompt and the "
-                                            "Remake prompt; English recommended. 每张图一行外貌描述。"}),
+                                            "One line per picture, in picture order, head to toe: race, age, face, "
+                                            "hair, every garment and the shoes (e.g. 'a Black man in his twenties, short "
+                                            "black hair, red bomber jacket, white T-shirt, black jeans, white sneakers, "
+                                            "bare hands'). ALWAYS write what the picture does not show (a half-body "
+                                            "picture: trousers and shoes) - nobody else can know it. Used by the AI and "
+                                            "in the Remake prompt; English."}),
                 "people_at_start": ("STRING", {"multiline": True, "default": "", "tooltip":
                                     "Optional: one line per person in the source, left to right at the start, what "
                                     "they look like now (e.g. 'the woman with wavy dark-brown hair in a red crop top'). "
