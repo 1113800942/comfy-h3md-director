@@ -730,11 +730,12 @@ class H3MDKeyframeRecast:
             t0 = time.time()
             frame = to_tensor(np.ascontiguousarray(job["frames"][m["at"]]))
             n_people = max(int(it.get("n") or 0) for it in m["items"])
-            ans = TextGenerateV2.execute(clip=pose_clip, prompt=K.POSE_ASK.format(n=n_people), max_length=600,
+            ans = TextGenerateV2.execute(clip=pose_clip, prompt=K.POSE_ASK.format(n=n_people), max_length=900,
                                          sampling_mode={"sampling_mode": "off"}, thinking=False,
                                          use_default_template=True, mtp="off", system_prompt="",
                                          images={"image1": frame}).result[0]
-            read[m["at"]] = (K.parse_poses(ans, n_people), str(ans), time.time() - t0)
+            poses, group = K.parse_poses(ans, n_people)
+            read[m["at"]] = (poses, group, str(ans), time.time() - t0)
             pbar.update(1)
         # 2 one H3 Image edit per keyframe
         for m in todo:
@@ -742,10 +743,9 @@ class H3MDKeyframeRecast:
             n += len(m["items"])
             frame = to_tensor(np.ascontiguousarray(job["frames"][m["at"]]))
             n_people = max(int(it.get("n") or 0) for it in m["items"])
-            poses, ans, t_pose = read[m["at"]]
-            prompt = K.h3_prompt([(it["rank"], j + 2, it.get("desc", ""),
-                                   ((it["own"][3] - it["own"][1]) / float(H), bool(it.get("cut_bottom"))))
-                                  for j, it in enumerate(m["items"])], n_people, poses)
+            poses, group, ans, t_pose = read[m["at"]]
+            prompt = K.h3_prompt([(it["rank"], j + 2, it.get("desc", "")) for j, it in enumerate(m["items"])],
+                                 n_people, poses, group)
             t0 = time.time()
             enc = MiniMaxH3ImageConditioning.execute(clip=clip, prompt=prompt, width=gw, height=gh, vae=vae,
                                                      images={f"image_{j}": im for j, im in enumerate([frame] + refs)})

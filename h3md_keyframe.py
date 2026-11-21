@@ -732,29 +732,27 @@ def parse_people(text: str) -> list:
     return [re.sub(r"^(?:左|left|L)?\s*\d+\s*[:：.、)]\s*", "", l, flags=re.I).rstrip("。.") for l in lines]
 
 
-# ----------------------------------------------- 0.5.91 Recast: H3 Image, the prompt filled in by H3MD (19:23)
-# The official H3 Image enhancer wrote the same structure every time (test 18:27-19:20): define every new person as
-# <Subject k> from <Picture n>; the target is <Picture 1> with the people replaced; each Subject keeps its own face,
-# hair and outfit and follows the person at its place in <Picture 1>; each place now wears the full outfit.  The user
-# (19:23): drop the enhancer (55-83 s a keyframe, once an empty answer, seed-dependent) and fill that structure in
-# ourselves.  Keep list in the user's words, plus the hand gesture (19:2x: with it fists stayed fists); every new
-# person written head to toe, positively, from the descriptions (half-body pictures: legs and shoes are not seen).
+# ----------------------------------------------- 0.5.91 Recast: H3 Image, the prompt filled in by H3MD (21:52)
+# Built line by line on what the official H3 Image enhancer wrote in the user's run that came out right (18:27):
+# the pictures of the new people as Subjects; <Picture 1> itself as a Subject whose background and ORIGINAL SPATIAL
+# LAYOUT are retained while the people are replaced; one sentence on how the people stand together; each new person
+# integrated into "the position of the person originally there", adopting that person's stance - with what that
+# person does read from the keyframe.  The reader (qwen3.5 9b, no thinking) reads per person the user's keep list
+# (21:32: orientation, pose, action, palm gesture, expression, mouth, place and size, front/back and overlap) and one
+# line on the group (spacing, who is in front, crop).  Clothes words are dropped from what it reads (it wrote
+# "hands in long gloves", 21:24).  No size percentages, no "shoes outside the image" (contradicted the description,
+# the picture widened, 19:55).
 H3_DEFINE = "The person in <Picture {img}> is <Subject {s}>: {desc}."
-H3_SCENE = ("The target image is <Picture 1> with exactly the same background, lighting, colors, camera angle, framing "
-            "and composition, where {subs} take the places of the people standing there.")
-H3_ONE = ("<Subject {s}> is partially preserved: the face, the hair and the complete outfit of <Subject {s}> come from "
-          "<Picture {img}>, while the position in the image, the size in the frame, the body and head orientation, the "
-          "pose, the action, the hand gestures (fists stay fists, open hands stay open, pointing stays pointing), the "
-          "facial expression, the mouth shape and what stands in front of or behind this person exactly follow the "
-          "{ord} person from the left in <Picture 1>{pose}.")
-H3_WEAR = ("The {ord} person from the left is now <Subject {s}>, {desc}, in exactly the pose, framing and "
-           "crop of the original {ord} person from the left in <Picture 1>.")
-H3_SIZE = ("<Subject {s}> is exactly as big in the image as that original person, about {pct}% of the image height"
-           "{cut}.")
-H3_CUT = (", and the bottom edge of the image cuts through the legs at the same place, so the feet and shoes are "
-          "outside the image")
+H3_SOURCE = "The group of people in <Picture 1> is <Subject {s}>."
+H3_SCENE = "The target image keeps <Picture 1> exactly: {group}."
+H3_KEEP = ("<Subject {s}> is partially preserved: its background, floor, lighting, camera angle, framing and crop and "
+           "the original spatial layout of the people - their places, spacing, sizes in the picture, who stands in "
+           "front of whom and who overlaps whom - are retained, while the people in it are replaced.")
+H3_ONE = ("<Subject {s}> is partially preserved: the face, hair and outfit from <Picture {img}> are integrated into "
+          "the position of the {ord} person from the left in <Picture 1>, adopting exactly that person's body and "
+          "head orientation, pose, action, hand and palm gestures, facial expression, mouth shape, size in the "
+          "picture and overlap with the others{pose}.")
 H3_OTHERS = "Every other person in <Picture 1> stays exactly as before."
-H3_END = "Nothing else in <Picture 1> changes."
 
 
 def h3_size(w, h, mp=EDIT_MP, grid=32):
@@ -765,49 +763,59 @@ def h3_size(w, h, mp=EDIT_MP, grid=32):
             max(grid, int(round(math.sqrt(mp * 1e6 / asp) / grid)) * grid))
 
 
-POSE_ASK = ("There are {n} people in this picture. For each person, from left to right, write one line "
-            "'k: ...' (k = 1 for the leftmost) describing only what can be seen of the body: which way the body and the "
-            "head face, the pose and action, where each arm is, what each hand does (fist, open palm, pointing, on the "
-            "hip, holding something), the legs and stance, the facial expression and the mouth (open, closed, "
-            "smiling), and which body parts are cut off by the frame. No clothes, no hair, no names. One sentence each, "
-            "starting with a verb, e.g. '1: stands facing the camera with both arms raised, fists closed, legs apart, "
-            "smiling with the mouth open, cut off at the knees'.")
+POSE_ASK = ("There are {n} people in this picture. Describe only what can be seen of the bodies: no clothes, no "
+            "accessories, no hair, no names. For each person, from left to right, write one line 'k: ...' (k = 1 for "
+            "the leftmost), starting with a verb, saying: which way the body and the head face; the pose and the "
+            "action; where each arm is and what each hand and palm does (fist, open palm, pointing, on the hip, "
+            "touching someone); the legs and stance; the facial expression; the mouth (open, closed, smiling); "
+            "whether this person stands in front of or behind the neighbours and who overlaps whom; where the edge of "
+            "the picture cuts the body. Then one last line 'group: ...' saying how the people stand together: how "
+            "close, who is in front and who is behind, who leans towards whom, how much of the picture they fill and "
+            "where the bottom edge of the picture cuts them.")
+_CLOTHES = re.compile(r"\b(glove|dress|skirt|gown|shirt|top|blouse|jacket|coat|trouser|pant|jean|boot|heel|shoe|"
+                      r"sneaker|sock|sleeve|strap|belt|scarf|hat|cap|necklace|earring|bracelet|ring|hair|satin|silk|"
+                      r"fabric|outfit|wear|wearing|dressed|cloth)", re.I)
+
+
+def _no_clothes(text):
+    """drop every part of the reader's sentence that names clothes, accessories or hair"""
+    parts = [p.strip() for p in re.split(r"[,;]", str(text or ""))]
+    return ", ".join(p for p in parts if p and not _CLOTHES.search(p)).strip().rstrip(".")
 
 
 def parse_poses(text, n):
-    """the pose reader's answer -> {place from the left: sentence}"""
-    out = {}
+    """the reader's answer -> ({place from the left: sentence}, group sentence)"""
+    out, group = {}, ""
     for line in str(text or "").splitlines():
+        g = re.match(r"^\s*[\-*]?\s*group\s*[:.)\-]\s*(.+?)\s*$", line, re.I)
+        if g and not group:
+            group = _no_clothes(g.group(1))
+            continue
         m = re.match(r"^\s*[\-*]?\s*(?:person\s*)?(\d+)\s*[:.)\-]\s*(.+?)\s*$", line, re.I)
         if m and 1 <= int(m.group(1)) <= n and int(m.group(1)) not in out:
-            out[int(m.group(1))] = m.group(2).strip().rstrip(".")
-    return out
+            out[int(m.group(1))] = _no_clothes(m.group(2))
+    return out, group
 
 
-def h3_prompt(people, n_people, poses=None) -> str:
-    """the H3 Image edit prompt for one keyframe, in the official enhancer's structure: people = [(place from the left
-    in this keyframe, picture number, description of the new person head to toe[, (share of the image height, cut
-    by the bottom edge)])], n_people in the keyframe, poses
-    {place: what that person in the keyframe does} (test 19:40: without the pose in words every new person stood
-    straight, framing widened to show the described shoes)"""
+def h3_prompt(people, n_people, poses=None, group="") -> str:
+    """the H3 Image edit prompt for one keyframe: people = [(place from the left in this keyframe, picture number,
+    description of the new person)], n_people in the keyframe, poses {place: what that person does}, group = how
+    the people stand together (both read from the keyframe)"""
     poses = poses or {}
-    size = {p[0]: p[3] for p in people if len(p) > 3 and p[3]}
     people = sorted(p[:3] for p in people)
     subs = {img: k + 1 for k, (r, img, d) in enumerate(people)}
+    src = len(people) + 1
     clean = lambda d: (d or "the person exactly as shown in the picture").strip().rstrip(".。 ")
     parts = [H3_DEFINE.format(img=img, s=subs[img], desc=clean(d)) for r, img, d in sorted(people, key=lambda p: p[1])]
-    names = [f"<Subject {subs[img]}>" for r, img, d in people]
-    parts.append(H3_SCENE.format(subs=", ".join(names[:-1]) + " and " + names[-1] if len(names) > 1 else names[0]))
+    parts.append(H3_SOURCE.format(s=src))
+    if group:
+        parts.append(H3_SCENE.format(group=group.rstrip(".")))
+    parts.append(H3_KEEP.format(s=src))
     for r, img, d in people:
         pz = (poses.get(r) or "").strip().rstrip(".。 ")
-        parts.append(H3_ONE.format(s=subs[img], img=img, ord=ordinal(r), pose=f", who {pz}" if pz else ""))
-    for r, img, d in people:
-        parts.append(H3_WEAR.format(ord=ordinal(r), s=subs[img], desc=clean(d)))
-        if r in size:          # test 19:47: framing widened to show the described shoes when the frame cuts the legs
-            parts.append(H3_SIZE.format(s=subs[img], pct=int(round(100 * size[r][0])), cut=H3_CUT if size[r][1] else ""))
+        parts.append(H3_ONE.format(s=subs[img], img=img, ord=ordinal(r), pose=f": that person {pz}" if pz else ""))
     if len(people) < n_people:
         parts.append(H3_OTHERS)
-    parts.append(H3_END)
     return " ".join(parts)
 
 

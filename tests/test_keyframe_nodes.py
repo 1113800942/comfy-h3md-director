@@ -118,7 +118,7 @@ def test_recast_h3(clip, monkeypatch):
     def fake_read(**kw):
         order.append("read")
         assert kw["thinking"] is False and "There are 3 people" in kw["prompt"] and list(kw["images"]) == ["image1"]
-        return NS(result=("1: stands still\n2: raises both fists, mouth open\n3: claps",))
+        return NS(result=("1: stands still\n2: raises both fists, mouth open\n3: claps\ngroup: they stand close",))
 
     monkeypatch.setattr(TG.TextGenerateV2, "execute", staticmethod(fake_read))
     monkeypatch.setattr(MH.MiniMaxH3ImageConditioning, "execute", staticmethod(fake_cond))
@@ -132,6 +132,7 @@ def test_recast_h3(clip, monkeypatch):
     for m, p in zip(todo, prompts):
         r = "second" if m["at"] < 5.0 else "first"
         who = "raises both fists, mouth open" if m["at"] < 5.0 else "stands still"
-        assert f"follow the {r} person from the left in <Picture 1>, who {who}." in p and "a man with short red hair" in p
+        assert f"position of the {r} person from the left in <Picture 1>" in p and f"that person {who}." in p
+        assert "a man with short red hair" in p and "keeps <Picture 1> exactly: they stand close." in p
         assert N.K.H3_OTHERS in p
     assert len(imgs) == len(todo) and imgs[0].shape[1:3] == (960, 1664) and "seed 7" in report
