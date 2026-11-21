@@ -560,7 +560,7 @@ def compare_pages(pairs, labels, people=None, page=(1920, 1080), per_page=1):
     from PIL import Image, ImageDraw
     PW, PH = page
     f = _font(28)
-    out = []
+    out, kf_pages = [], []
 
     def fit(im, w, h):
         im = Image.fromarray(im) if not isinstance(im, Image.Image) else im
@@ -579,8 +579,10 @@ def compare_pages(pairs, labels, people=None, page=(1920, 1080), per_page=1):
                 t = fit(im, cw // 2 - 6, ch - 40)
                 sheet.paste(t, (x0 + c * (cw // 2) + (cw // 2 - t.width) // 2, y0 + 36))
             d.text((x0 + 8, y0 + 4), f"{lab}   original | new", fill=(255, 255, 255), font=f)
-        out.append(np.asarray(sheet))
-    for (a, b), lab, who in zip(pairs, labels, people or [None] * len(pairs)):
+        kf_pages.append(np.asarray(sheet))
+    for idx, ((a, b), lab, who) in enumerate(zip(pairs, labels, people or [None] * len(pairs))):
+        if idx < len(kf_pages) and per_page == 1:
+            out.append(kf_pages[idx])
         if not who:
             continue
         sheet = Image.new("RGB", (PW, PH), (20, 20, 20))
@@ -602,7 +604,26 @@ def compare_pages(pairs, labels, people=None, page=(1920, 1080), per_page=1):
             d.text((j * cw + 8, 6), name, fill=(255, 255, 255), font=f)
         d.text((8, PH - 34), f"{lab}   each person: original above, new below", fill=(200, 200, 200), font=f)
         out.append(np.asarray(sheet))
+    if per_page != 1:
+        out = kf_pages + out
     return out or [np.zeros((64, 64, 3), np.uint8)]
+
+
+def save_pages(pages, folder):
+    """0.5.91 (user 06:56: pages in the ComfyUI preview are small and hard to move around when zoomed): the Compare
+    pages also as numbered JPEGs, to flip through full screen in any picture viewer (arrow keys).  Old pages of the
+    same video are replaced.  -> folder"""
+    from PIL import Image
+    os.makedirs(folder, exist_ok=True)
+    for f in os.listdir(folder):
+        if f.startswith("page_") and f.endswith(".jpg"):
+            try:
+                os.remove(os.path.join(folder, f))
+            except OSError:
+                pass
+    for i, pg in enumerate(pages, 1):
+        Image.fromarray(pg).save(os.path.join(folder, f"page_{i:03d}.jpg"), quality=92)
+    return folder
 
 
 def pages_tensor(pages):
@@ -1372,6 +1393,12 @@ class H3MDKeyframeRecast:
                         for it in sorted(m["items"], key=lambda x: int(x["rank"]))
                         if 0 < int(it["rank"]) <= len(boxes)])
         cmp = compare_pages(pairs, [f"#{k}  {m['at']:.2f} s" for k, m in enumerate(todo, 1)], who)
+        try:
+            cdir = save_pages(cmp, os.path.join(folder_paths.get_output_directory(), KF_SUBDIR, "compare" + self.CACHE_TAG,
+                                                os.path.basename(cache)))
+            report += f"\nCompare pages (open page_001.jpg, arrow keys to flip): {cdir}"
+        except OSError as e:
+            LOG.warning("%s compare pages not saved: %s", TAG, e)
         LOG.info("%s recast report:\n%s", TAG, report)
         job = dict(job, recast_frames=done,
                    recast={"method": self.METHOD, "seed": seed, "report": report})
