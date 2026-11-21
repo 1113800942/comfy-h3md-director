@@ -1,6 +1,6 @@
 {
  "last_node_id": 50,
- "last_link_id": 24,
+ "last_link_id": 23,
  "nodes": [
   {
    "id": 1,
@@ -330,10 +330,10 @@
     "Node name for S&R": "UNETLoader"
    },
    "widgets_values": [
-    "wan2.1_14B_SCAIL_2_int8_convrot.safetensors",
+    "qwen_image_2.1_int8_convrot.safetensors",
     "default"
    ],
-   "title": "SCAIL-2 (int8)"
+   "title": "Qwen Image 2.1 (int8)"
   },
   {
    "id": 21,
@@ -369,10 +369,10 @@
     "Node name for S&R": "LoraLoaderModelOnly"
    },
    "widgets_values": [
-    "wan2.1_SCAIL_2_DPO_lora_bf16.safetensors",
+    "Qwqen21 2 step lora v1 pytorch_lora_weights.safetensors",
     1.0
    ],
-   "title": "SCAIL-2 DPO LoRA (1.0)"
+   "title": "2-step LoRA 两步 (1.0)"
   },
   {
    "id": 22,
@@ -400,8 +400,7 @@
      "name": "MODEL",
      "type": "MODEL",
      "links": [
-      9,
-      10
+      9
      ]
     }
    ],
@@ -409,21 +408,21 @@
     "Node name for S&R": "LoraLoaderModelOnly"
    },
    "widgets_values": [
-    "lightx2v_I2V_14B_480p_cfg_step_distill_rank128_bf16.safetensors",
-    0.8
+    "qwen2-1-detailer-v1-elusarcas.safetensors",
+    0.7
    ],
-   "title": "lightx2v distill LoRA 加速 (0.8)"
+   "title": "Detailer LoRA 细节 (0.7)"
   },
   {
    "id": 23,
-   "type": "ModelSamplingSD3",
+   "type": "LoraLoaderModelOnly",
    "pos": [
     800,
     330
    ],
    "size": [
     380,
-    58
+    82
    ],
    "flags": {},
    "order": 10,
@@ -440,30 +439,69 @@
      "name": "MODEL",
      "type": "MODEL",
      "links": [
+      10
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "LoraLoaderModelOnly"
+   },
+   "widgets_values": [
+    "Qwen2.1_Low_Resolution_Slider_V1-3-3.safetensors",
+    -2.0
+   ],
+   "title": "Low-res slider 低清滑块 (-2)"
+  },
+  {
+   "id": 24,
+   "type": "ModelSamplingAuraFlow",
+   "pos": [
+    800,
+    440
+   ],
+   "size": [
+    380,
+    58
+   ],
+   "flags": {},
+   "order": 11,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "model",
+     "type": "MODEL",
+     "link": 10
+    }
+   ],
+   "outputs": [
+    {
+     "name": "MODEL",
+     "type": "MODEL",
+     "links": [
       13
      ]
     }
    ],
    "properties": {
-    "Node name for S&R": "ModelSamplingSD3"
+    "Node name for S&R": "ModelSamplingAuraFlow"
    },
    "widgets_values": [
-    5.0
+    1.0
    ]
   },
   {
-   "id": 24,
+   "id": 25,
    "type": "CLIPLoader",
    "pos": [
     800,
-    420
+    520
    ],
    "size": [
     380,
     106
    ],
    "flags": {},
-   "order": 11,
+   "order": 12,
    "mode": 0,
    "inputs": [],
    "outputs": [
@@ -479,40 +517,9 @@
     "Node name for S&R": "CLIPLoader"
    },
    "widgets_values": [
-    "umt5_xxl_fp8_e4m3fn_scaled.safetensors",
-    "wan",
+    "qwen3-vl-8b-heretic-1.3.0-int8convrot.safetensors",
+    "qwen_image",
     "default"
-   ]
-  },
-  {
-   "id": 25,
-   "type": "CLIPVisionLoader",
-   "pos": [
-    800,
-    550
-   ],
-   "size": [
-    380,
-    58
-   ],
-   "flags": {},
-   "order": 12,
-   "mode": 0,
-   "inputs": [],
-   "outputs": [
-    {
-     "name": "CLIP_VISION",
-     "type": "CLIP_VISION",
-     "links": [
-      15
-     ]
-    }
-   ],
-   "properties": {
-    "Node name for S&R": "CLIPVisionLoader"
-   },
-   "widgets_values": [
-    "clip_vision_h.safetensors"
    ]
   },
   {
@@ -520,7 +527,7 @@
    "type": "VAELoader",
    "pos": [
     800,
-    630
+    650
    ],
    "size": [
     380,
@@ -535,7 +542,7 @@
      "name": "VAE",
      "type": "VAE",
      "links": [
-      16
+      15
      ]
     }
    ],
@@ -543,7 +550,7 @@
     "Node name for S&R": "VAELoader"
    },
    "widgets_values": [
-    "wan_2.1_vae.safetensors"
+    "qwen_image_2.1_vae_bf16.safetensors"
    ]
   },
   {
@@ -551,7 +558,7 @@
    "type": "KSamplerSelect",
    "pos": [
     800,
-    710
+    730
    ],
    "size": [
     380,
@@ -566,7 +573,7 @@
      "name": "SAMPLER",
      "type": "SAMPLER",
      "links": [
-      17
+      16
      ]
     }
    ],
@@ -579,43 +586,35 @@
   },
   {
    "id": 28,
-   "type": "BasicScheduler",
+   "type": "ManualSigmas",
    "pos": [
     800,
-    790
+    810
    ],
    "size": [
     380,
-    106
+    80
    ],
    "flags": {},
    "order": 15,
    "mode": 0,
-   "inputs": [
-    {
-     "name": "model",
-     "type": "MODEL",
-     "link": 10
-    }
-   ],
+   "inputs": [],
    "outputs": [
     {
      "name": "SIGMAS",
      "type": "SIGMAS",
      "links": [
-      18
+      17
      ]
     }
    ],
    "properties": {
-    "Node name for S&R": "BasicScheduler"
+    "Node name for S&R": "ManualSigmas"
    },
    "widgets_values": [
-    "simple",
-    6,
-    1.0
+    "1.0, 0.5, 0"
    ],
-   "title": "6 steps 六步（官方模板）"
+   "title": "2 steps 两步"
   },
   {
    "id": 30,
@@ -653,24 +652,19 @@
      "link": 14
     },
     {
-     "name": "clip_vision",
-     "type": "CLIP_VISION",
-     "link": 15
-    },
-    {
      "name": "vae",
      "type": "VAE",
-     "link": 16
+     "link": 15
     },
     {
      "name": "sampler",
      "type": "SAMPLER",
-     "link": 17
+     "link": 16
     },
     {
      "name": "sigmas",
      "type": "SIGMAS",
-     "link": 18
+     "link": 17
     }
    ],
    "outputs": [
@@ -678,28 +672,28 @@
      "name": "keyframes",
      "type": "IMAGE",
      "links": [
-      19
+      18
      ]
     },
     {
      "name": "job",
      "type": "H3MD_KEYFRAME_JOB",
      "links": [
-      22
+      21
      ]
     },
     {
      "name": "report",
      "type": "STRING",
      "links": [
-      21
+      20
      ]
     },
     {
-     "name": "masks",
+     "name": "layers",
      "type": "IMAGE",
      "links": [
-      20
+      19
      ]
     }
    ],
@@ -730,7 +724,7 @@
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 19
+     "link": 18
     }
    ],
    "outputs": [],
@@ -758,7 +752,7 @@
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 20
+     "link": 19
     }
    ],
    "outputs": [],
@@ -766,7 +760,7 @@
     "Node name for S&R": "PreviewImage"
    },
    "widgets_values": [],
-   "title": "Colours 颜色对应（左：要换的人，右：角色）"
+   "title": "Layers 分层（左：干净背景，右：单独做出的每个角色）"
   },
   {
    "id": 32,
@@ -786,7 +780,7 @@
     {
      "name": "source",
      "type": "*",
-     "link": 21
+     "link": 20
     }
    ],
    "outputs": [
@@ -820,7 +814,7 @@
     {
      "name": "job",
      "type": "H3MD_KEYFRAME_JOB",
-     "link": 22
+     "link": 21
     }
    ],
    "outputs": [
@@ -828,7 +822,7 @@
      "name": "keyframes_sheet",
      "type": "IMAGE",
      "links": [
-      23
+      22
      ]
     },
     {
@@ -840,7 +834,7 @@
      "name": "zip_path",
      "type": "STRING",
      "links": [
-      24
+      23
      ]
     }
    ],
@@ -870,7 +864,7 @@
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 23
+     "link": 22
     }
    ],
    "outputs": [],
@@ -898,7 +892,7 @@
     {
      "name": "source",
      "type": "*",
-     "link": 24
+     "link": 23
     }
    ],
    "outputs": [
@@ -934,7 +928,7 @@
     "Node name for S&R": "MarkdownNote"
    },
    "widgets_values": [
-    "## H3MD Keyframe 0.5.91 关键帧\n\n1. 原片拖进 **Source video**；角色图放 图1/图2/图3（全身、背景干净）。\n2. **mapping**：图1换左一 …（编号按开头第一个看清的画面从左往右，看 People 预览核对）。\n3. **descriptions**：每张图一行，写人种、年龄、脸、发型、全身衣服和鞋。\n4. 每张关键帧用 SCAIL-2 换人（官方模板的模型和设置）：取关键帧前后 17 帧原片驱动，所有人一次换完，按颜色对应角色（看 Colours 预览），背景和不换的人来自原片。一帧最多换 6 人。\n5. 看 **Report**：每张关键帧找到了谁、提示词和用时。\n6. 打包后在导演台（H3MD Director Remake.json）Import plan。"
+    "## H3MD Keyframe 0.5.91 关键帧\n\n1. 原片拖进 **Source video**；角色图放 图1/图2/图3（全身、背景干净）。\n2. **mapping**：图1换左一 …（编号按开头第一个看清的画面从左往右，看 People 预览核对）。\n3. **descriptions**：每张图一行，写人种、年龄、脸、发型、全身衣服和鞋。\n4. 每张关键帧分层换人（Qwen Image 2.1），一次一个人：先把要换的人删掉得到干净背景，再单独做出每个新角色（摆原来那个人的姿势，全身衣着按描述），最后从远到近脸对脸放回去。看 Layers 预览检查每一层。\n5. 看 **Report**：每个人删、做、放各用了多久，是脸对脸还是整个人对框。\n6. 打包后在导演台（H3MD Director Remake.json）Import plan。"
    ],
    "title": "How to use 用法"
   }
@@ -1014,9 +1008,9 @@
   ],
   [
    10,
-   22,
+   23,
    0,
-   28,
+   24,
    0,
    "MODEL"
   ],
@@ -1038,7 +1032,7 @@
   ],
   [
    13,
-   23,
+   24,
    0,
    30,
    2,
@@ -1046,7 +1040,7 @@
   ],
   [
    14,
-   24,
+   25,
    0,
    30,
    3,
@@ -1054,38 +1048,30 @@
   ],
   [
    15,
-   25,
-   0,
-   30,
-   4,
-   "CLIP_VISION"
-  ],
-  [
-   16,
    26,
    0,
    30,
-   5,
+   4,
    "VAE"
   ],
   [
-   17,
+   16,
    27,
    0,
    30,
-   6,
+   5,
    "SAMPLER"
   ],
   [
-   18,
+   17,
    28,
    0,
    30,
-   7,
+   6,
    "SIGMAS"
   ],
   [
-   19,
+   18,
    30,
    0,
    31,
@@ -1093,7 +1079,7 @@
    "IMAGE"
   ],
   [
-   20,
+   19,
    30,
    3,
    34,
@@ -1101,7 +1087,7 @@
    "IMAGE"
   ],
   [
-   21,
+   20,
    30,
    2,
    32,
@@ -1109,7 +1095,7 @@
    "STRING"
   ],
   [
-   22,
+   21,
    30,
    1,
    40,
@@ -1117,7 +1103,7 @@
    "H3MD_KEYFRAME_JOB"
   ],
   [
-   23,
+   22,
    40,
    0,
    41,
@@ -1125,7 +1111,7 @@
    "IMAGE"
   ],
   [
-   24,
+   23,
    40,
    2,
    42,

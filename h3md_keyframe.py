@@ -23,11 +23,12 @@ LOOK_S = 3.0              # the numbering moment is searched in the first second
 CLEAR_IOU = 0.2
 COVERED = 0.3
 SPACING = 0.7            # keyframes are picked in (prev + 0.7 * max_gap, prev + max_gap]: as few as the gap allows
-SCAIL_MP = 0.46           # 0.5.91: SCAIL-2 keyframe canvas, about 896x512 = the official template's (test 15:01:
-                          # at 1280x736 wide shots got extra, giant people)
-SCAIL_LEN = 17            # ... frames of the source around a keyframe it is driven by (4n+1)
-SCAIL_COLOURS = 6         # SCAIL-2 binds people to references by 6 trained mask colours
-SCAIL_MATCH_IOU = 0.3     # a tracked person in the window = the one we recast if their boxes overlap this
+EDIT_MP = 1.0             # 0.5.91 layers: Qwen Image 2.1 edit canvas (megapixels) for a person's crop
+MATCH_IOU = 0.3           # a person SAM3 finds in the keyframe = the one we recast if their boxes overlap this
+ERASE_GROW = 0.06         # layer 1: the erased area = her mask grown by this share of her box height ...
+ERASE_CONTEXT = 0.5       # ... edited in a crop reaching this share of her box size past it (background to copy)
+PERSON_PAD = 0.12         # layer 2: the pose crop reaches this share of her box past it
+FEATHER = 0.004           # soft edge of every paste, share of the frame height
 
 CN = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
 ORDINAL = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"]
@@ -707,14 +708,13 @@ def cover_crop(src_w, src_h, tw, th):
     return int(round((src_w - w) / 2)), int(round((src_h - h) / 2)), int(round(w)), int(round(h))
 
 
-def scail_size(w, h, mp=SCAIL_MP, grid=32):
-    """0.5.91: the SCAIL-2 canvas for a keyframe of w x h: within 10 % of mp megapixels, multiples of 32, the one
-    closest to the keyframe's aspect (it is scaled back to w x h, so a wrong aspect would stretch the people)"""
-    asp, area = w / float(h), mp * 1e6
+def fit_size(w, h, mp=EDIT_MP, grid=32):
+    """a canvas of about mp megapixels with the aspect of w x h, multiples of grid"""
+    asp, area = w / float(max(1, h)), mp * 1e6
     best = None
     for gh in range(grid, 4096 + grid, grid):
         for gw in {max(grid, math.floor(gh * asp / grid) * grid), max(grid, math.ceil(gh * asp / grid) * grid)}:
-            if abs(gw * gh - area) <= 0.1 * area:
+            if abs(gw * gh - area) <= 0.15 * area:
                 err = abs(gw / float(gh) - asp)
                 if best is None or err < best[0] - 1e-9:
                     best = (err, gw, gh)
@@ -724,18 +724,49 @@ def scail_size(w, h, mp=SCAIL_MP, grid=32):
     return best[1], best[2]
 
 
-def window_times(at, duration, length=SCAIL_LEN, fps=FPS):
-    """0.5.91: the length source frames SCAIL-2 is driven by for the keyframe at `at` s: centred on it, moved inside
-    the clip at its ends.  -> (times, index of the keyframe among them)"""
-    last = max(0, int(math.floor(duration * fps + 1e-6)) - 1)
-    k = int(round(at * fps))
-    a = min(max(0, k - length // 2), max(0, last - length + 1))
-    idx = [min(a + i, last) for i in range(length)]
-    return [round(i / fps, 4) for i in idx], min(k, last) - a
+def grow_box(box, frac_w, frac_h, w, h):
+    """a box (x0, y0, x1, y1 px) grown by frac of its width / height on every side, clipped to w x h, ints"""
+    bw, bh = box[2] - box[0], box[3] - box[1]
+    return (max(0, int(math.floor(box[0] - frac_w * bw))), max(0, int(math.floor(box[1] - frac_h * bh))),
+            min(w, int(math.ceil(box[2] + frac_w * bw))), min(h, int(math.ceil(box[3] + frac_h * bh))))
 
 
-def match_people(obj_boxes, people_boxes, min_iou=SCAIL_MATCH_IOU):
-    """0.5.91: the tracked object (in the SCAIL window) that is each person we recast, by box overlap at the keyframe.
+def _grow1(m, r, ax):
+    import numpy as np
+    pad = [(0, 0), (0, 0)]
+    pad[ax] = (r + 1, r)
+    c = np.cumsum(np.pad(m.astype(np.int32), pad), axis=ax)
+    n = m.shape[ax]
+    return (np.take(c, np.arange(2 * r + 1, 2 * r + 1 + n), axis=ax) - np.take(c, np.arange(0, n), axis=ax)) > 0
+
+
+def grow_mask(m, r):
+    """square dilation of a bool mask by r pixels"""
+    r = int(max(0, r))
+    return _grow1(_grow1(m, r, 0), r, 1) if r else m.copy()
+
+
+def mask_box(m):
+    """the box (x0, y0, x1, y1) of a bool mask, or None"""
+    import numpy as np
+    ys, xs = np.nonzero(m)
+    if not len(xs):
+        return None
+    return [int(xs.min()), int(ys.min()), int(xs.max()) + 1, int(ys.max()) + 1]
+
+
+def far_to_near(boxes):
+    """indices of boxes ordered farthest first (higher box bottom = farther from the camera)"""
+    return sorted(range(len(boxes)), key=lambda i: (boxes[i][3], i))
+
+
+def in_front(a, b):
+    """box a stands in front of box b (they overlap and a's bottom is lower)"""
+    return iou(a, b) > 0 and a[3] > b[3]
+
+
+def match_people(obj_boxes, people_boxes, min_iou=MATCH_IOU):
+    """0.5.91: the object SAM3 found in the keyframe that is each person we recast, by box overlap.
     obj_boxes {object index: box}, people_boxes [box] (all normalised).  -> [object index or None] per person"""
     pairs = sorted(((iou(pb, ob), j, o) for j, pb in enumerate(people_boxes) for o, ob in obj_boxes.items()),
                    reverse=True)
@@ -769,7 +800,7 @@ PART_PROMPTS = ("face:16", "head:16")   # ':N' = keep up to N detections (SAM3 k
 
 
 def place_character(t_box, c_box, t_head=None, c_head=None):
-    """0.5.91: where a character picture goes on the SCAIL-2 reference (aligned with the keyframe): scale s and
+    """0.5.91: where a new character goes in the keyframe (aligned with the person she replaces): scale s and
     shift (dx, dy) so that picture pixel (x, y) lands on (x * s + dx, y * s + dy).  Part on part (same size, same
     top, same middle) when both parts are known - a face or a head, right for a half-body photo and a full-body one
     alike; else her whole figure on the person's box (same height, same top, same middle)."""
@@ -795,17 +826,18 @@ def parse_people(text: str) -> list:
     return [re.sub(r"^(?:左|left|L)?\s*\d+\s*[:：.、)]\s*", "", l, flags=re.I).rstrip("。.") for l in lines]
 
 
-def scail_prompt(people):
-    """0.5.91: the SCAIL-2 text prompt for a keyframe - what the recast people look like, by where they stand now
-    (the template's prompt describes the result).  people = [{rank, desc}]"""
-    parts = [f"the {ordinal(p['rank'])} person from the left is {p['desc'].rstrip('. ')}" if p.get("desc")
-             else f"the {ordinal(p['rank'])} person from the left is the character from the reference"
-             for p in sorted(people, key=lambda q: q["rank"])]
-    return ("The people keep the pose, movement and place of the people they replace, in the same scene. In this "
-            "shot " + "; ".join(parts) + ".")
+ERASE_PROMPT = ("删除红框内的人物以及这个人身上和手里的一切，按红框周围的背景自然补全这块地方，同时去掉红框；"
+                "红框以外的画面完全不变。")
+PERSON_PROMPT = ("生成一张新照片：画面里只有一个人，就是图2中的人物，脸、发型、发色、肤色和身材与图2完全一致，"
+                 "全身穿着：{desc}。这个人摆出与图1正中间那个人完全相同的姿势、动作、手臂和腿的位置、表情、头部朝向和视线，"
+                 "在画面中的位置、大小和裁切与图1正中间那个人相同。纯白色背景，没有其他任何人和物体，没有文字。")
 
 
-# ---------------------------------------------------------------------------------------------------- plan
+def person_prompt(desc):
+    """0.5.91 layer 2: the new character in her pose, alone on white (desc = her whole look from the descriptions)"""
+    return PERSON_PROMPT.format(desc=(desc or "与图2一致的服装").rstrip("。. "))
+
+
 def plan_length(n_frames: int) -> int:
     """largest 5 + 17n not past the source's end (the Director would round UP and run past it)"""
     if n_frames < MIN_FRAMES:
