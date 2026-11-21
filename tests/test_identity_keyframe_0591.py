@@ -35,31 +35,42 @@ def test_sliver_at_the_edge_does_not_count_and_never_large_warns():
     assert warns and "picture 2" in warns[0]
 
 
-def test_finish_keeps_the_identity_keyframe():
+def test_finish_no_longer_thins():
+    """0.5.91 (03:31): thinning to 4 per estimated part is gone - the Director picks 4 per real part"""
     fr = [{"at": round(i / 6.0, 4), "who": [[1, [0.1, 0.1, 0.3, 0.9]]]} for i in range(120)]
-    moments = [(i, "swap") for i in (0, 12, 24, 36, 48)]          # 5 keyframes in 8 s: one must go
-    out, notes = K.finish_moments(fr, moments, {1}, 20.0, keep={fr[24]["at"]}, part_frames=345)
-    assert fr[24]["at"] in [fr[i]["at"] for i, _ in out] and len(out) == 4
+    moments = [(i, "swap") for i in (0, 12, 24, 36, 48)]
+    out, notes = K.finish_moments(fr, moments, {1}, 20.0, keep={fr[24]["at"]})
+    assert len(out) == 5
 
 
-def test_every_part_shows_every_replaced_person():
-    """2026-11-21 _009 trial: part 1 (0-7.3 s) had keyframes at 1.0, 3.17, 7.0 s, none with the man who walked in at
-    3.3 s - Remake gave him another character's look.  ensure_part_cover adds a keyframe with him in that part."""
+def _clip():
+    """20 s at 6 fps: man 1 the whole time, man 2 walks in at 3.3 s and out at 12 s"""
     fr = []
-    for i in range(120):                      # 20 s at 6 fps
+    for i in range(120):
         t = i / 6.0
         who = [[1, [0.1, 0.1, 0.3, 0.95]]]
         if 3.3 <= t < 12:
             who.append([2, [0.5, 0.1, 0.7, 0.95]])
         fr.append({"at": round(t, 4), "who": who})
-    ids = {1, 2}
+    return fr
+
+
+def test_cover_holds_for_any_split():
+    """2026-11-21 _009 trial: part 1 (0-7.3 s) had no keyframe of the man who walked in at 3.3 s.  ensure_cover puts
+    a keyframe of every replaced person at least every COVER_S s, so a part of any length >= COVER_S where he is
+    seen has one - whatever split the GPU of the run gives."""
+    fr, ids = _clip(), {1, 2}
     idx = {round(f["at"], 2): i for i, f in enumerate(fr)}
-    moments = [(idx[1.0], "swap"), (idx[3.0], "swap"), (idx[7.0], "swap"), (idx[14.83], "swap")]
-    bounds = [(0.0, 7.29), (7.29, 12.25), (12.25, 19.33)]
-    out, notes, warns = K.ensure_part_cover(fr, moments, ids, 19.33, bounds=bounds)
-    for a, b in bounds:
-        shown = set().union(*[K.kf_people(fr, i, ids) for i, _ in out if a <= fr[i]["at"] < b] or [set()])
-        need = {pid for pid in ids if any(a <= f["at"] < b and pid in K.kf_people(fr, j, ids) for j, f in enumerate(fr))}
-        assert need <= shown, (a, b, need, shown)
-        assert sum(1 for i, _ in out if a <= fr[i]["at"] < b) <= K.PART_MAX_KF
+    moments = [(idx[1.0], "swap"), (idx[7.0], "swap"), (idx[14.83], "swap")]
+    out, notes, warns = K.ensure_cover(fr, moments, ids, 19.33)
     assert notes and not warns
+    for part in (K.COVER_S, 3.5, 5.0, 7.29, 10.0):
+        t0 = 0.0
+        while t0 + part <= 19.33:
+            a, b = t0, t0 + part
+            shown = set().union(*[K.kf_people(fr, i, ids) for i, _ in out if a <= fr[i]["at"] < b] or [set()])
+            need = {pid for pid in ids
+                    if sum(1 for j, f in enumerate(fr) if a <= f["at"] < b and pid in K.kf_people(fr, j, ids)) / 6.0
+                    >= part - 0.01}                             # seen the whole part
+            assert need <= shown, (part, a, b, need, shown)
+            t0 += 0.5

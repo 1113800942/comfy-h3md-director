@@ -277,10 +277,36 @@ def _pins_for_segment(keyframes: list, n: int, seg_index: int) -> list:
         seen.add(f)
         valid.append(kf)
     if len(valid) > MAX_REFS:
-        LOG.warning("%s segment %d: %d keyframes, Remake takes %d - the first %d are used", _TAG, seg_index + 1,
-                    len(valid), MAX_REFS, MAX_REFS)
-        valid = valid[:MAX_REFS]
+        valid, missing = pick_keyframes(valid, MAX_REFS)
+        LOG.info("%s segment %d: %d keyframes in this part, Remake takes %d: frames %s%s", _TAG, seg_index + 1,
+                 len(keyframes), MAX_REFS, [int(k["frame"]) for k in valid],
+                 f" - people {missing} are in none of them (they may get another character's look)" if missing
+                 else " (every replaced person of the part is shown)" if any("people" in k for k in valid) else "")
     return valid
+
+
+def pick_keyframes(kfs: list, k: int = MAX_REFS):
+    """0.5.91 (user 03:31): the Director splits a shot by the token budget of the GPU it runs on, so a part can hold
+    more keyframes than Remake takes.  Pick k: first greedily the ones that show the most replaced people not shown
+    yet ("people" from the plan), then the rest spread over the part (largest gap to the picked ones).  Without
+    "people" (older plans) this is a time spread too.  -> (picked sorted by frame, people shown by none)"""
+    kfs = sorted(kfs, key=lambda x: int(x["frame"]))
+    need = set().union(*[set(x.get("people") or ()) for x in kfs]) if kfs else set()
+    picked, have = [], set()
+    while len(picked) < k and need - have:
+        best = max((x for x in kfs if x not in picked),
+                   key=lambda x: (len(set(x.get("people") or ()) - have), len(x.get("people") or ())), default=None)
+        if best is None or not (set(best.get("people") or ()) - have):
+            break
+        picked.append(best)
+        have |= set(best.get("people") or ())
+    while len(picked) < k and len(picked) < len(kfs):
+        rest = [x for x in kfs if x not in picked]
+        if not picked:
+            picked.append(rest[len(rest) // 2])
+            continue
+        picked.append(max(rest, key=lambda x: min(abs(int(x["frame"]) - int(p["frame"])) for p in picked)))
+    return sorted(picked, key=lambda x: int(x["frame"])), sorted(need - have)
 
 
 def encode(plan: dict, seg: dict, picked: dict, prompt: str, clip, vae, audio_vae, keyframes: list, load_keyframe,

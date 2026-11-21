@@ -193,7 +193,8 @@ def segment_signature(plan: dict, k: int) -> dict:
         if plan.get("remakeMode"):
             sig["remakeMode"] = plan["remakeMode"]
     if seg.get("keyframes"):   # 0.4.9: only shots with keyframes get the key (old plans keep their keys)
-        sig["keyframes"] = [[k["image"], int(k["frame"])] for k in seg["keyframes"]]
+        sig["keyframes"] = [[k["image"], int(k["frame"])] + ([k["people"]] if "people" in k else [])
+                            for k in seg["keyframes"]]
     if seg.get("keyframesNear"):   # 2026-11-15: a swap part without its own keyframe (nearest one, un-pinned)
         sig["keyframesNear"] = [[k["image"], int(k["frame"])] for k in seg["keyframesNear"]]
     # window-exp: only window-mode plans get these keys, so every other plan keeps its old cache keys

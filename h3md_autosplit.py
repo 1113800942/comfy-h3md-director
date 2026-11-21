@@ -267,7 +267,7 @@ def split_segment(D, seg: dict, media: dict, contents: list) -> list:
             base = dict(p.get("audioStarts") or {})
             p["audioStarts"] = {a: round(float(base.get(a, 0.0)) + (start - s0) / fps, 6) for a in p["audios"]}
         if seg.get("keyframes"):   # 0.4.9: part frame 0 = shot frame (start - s0); keep the part's own new frames
-            kfs = [{"image": k["image"], "frame": int(k["frame"]) - (start - s0)} for k in seg["keyframes"]]
+            kfs = [dict(k, frame=int(k["frame"]) - (start - s0)) for k in seg["keyframes"]]   # keeps "people"
             kfs = [k for k in kfs if ov <= k["frame"] < p["length"]]
             if kfs:
                 p["keyframes"] = kfs

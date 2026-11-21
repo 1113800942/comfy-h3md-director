@@ -143,18 +143,8 @@ def test_cut_off_prompt():
     assert K.cut_at_bottom((0.1, 0.2, 0.3, 1.0)) and not K.cut_at_bottom((0.1, 0.2, 0.3, 0.9))
 
 
-def test_finish_moments_caps_four_per_part_and_never_empty():
-    wide = {0: (0.1, 0.2, 0.25, 0.9), 1: (0.42, 0.2, 0.57, 0.9)}
-    frames = [_f(i / 6, wide) for i in range(6 * 16)]
-    ms = [(i, "swap") for i in (6, 18, 30, 42, 54, 66)]           # 6 keyframes in 10 s
-    out, notes = K.finish_moments(frames, ms, {0, 1}, 16.0)
-    ts = [frames[i]["at"] for i, _ in out]
-    import h3md_autosplit as A
-    parts = A.plan_parts(16 * 24, 0, 345)
-    for nudge in (-17, 0, 17):                                     # the Director may move the cut point one unit
-        b = parts[0] + nudge
-        assert len([t for t in ts if t * 24 < b]) <= 4 and len([t for t in ts if t * 24 >= b]) <= 4
-    assert notes
+def test_finish_moments_never_empty():
+    """(0.5.91: the cap of 4 per part moved to the Director, h3md_remake_engine.pick_keyframes)"""
     close = {0: (0.05, 0.0, 0.35, 1.0)}
     frames2 = [_f(i / 6, close) for i in range(30)]
     out2, notes2 = K.finish_moments(frames2, [], {0}, 5.0)
@@ -170,12 +160,6 @@ def test_finish_moments_keeps_only_keyframe_of_a_shot():
     ts = [frames[i]["at"] for i, _ in out]
     assert 5.0 in ts                                             # the only keyframe of shot 4.5-10 s stays
     assert 11.0 in ts
-
-
-def test_part_span_follows_the_director_split():
-    # run 38: 396 frames are split 209 + 187, not into one 345-frame part
-    assert abs(K.part_span(396 / 24) - (209 + 17) / 24) < 1e-6
-    assert K.part_span(10.0) >= 10.0                               # one part: no thinning needed below 4
 
 
 def test_partial_person_at_side_and_bottom_is_skipped():

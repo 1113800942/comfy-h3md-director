@@ -354,8 +354,20 @@ def _skill_rules(parsed, raw, add, D, W, env):
                 add("error", "skill", f"part {k}", "no keyframe in this part (skill 12d: one at most ~5-6 s apart)")
             elif not kf:
                 add("warn", "skill", f"part {k}", "no keyframe of its own: the nearest one is borrowed un-pinned")
-            if len(kf) > 4:
-                add("warn", "skill", f"part {k}", f"{len(kf)} keyframes: Remake takes the first 4, the rest are dropped")
+            if len(kf) > 4:   # 0.5.91: H3MD picks the 4 that show every replaced person (pick_keyframes)
+                try:
+                    try:
+                        from . import h3md_remake_engine as RE
+                    except ImportError:
+                        import h3md_remake_engine as RE
+                    _, miss = RE.pick_keyframes(kf, 4)
+                except Exception:
+                    miss = []
+                if miss:
+                    add("warn", "skill", f"part {k}", f"{len(kf)} keyframes, Remake takes 4: people {miss} are in "
+                        "none of the 4 picked (they may get another character's look)")
+                elif not any("people" in x for x in kf):
+                    add("warn", "skill", f"part {k}", f"{len(kf)} keyframes: Remake takes 4, spread over the part")
     # window mode: every window needs a timed action, none right at a window handoff (skill section 2)
     wm = parsed.get("windowMode")
     if wm:

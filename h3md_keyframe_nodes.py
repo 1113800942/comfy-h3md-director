@@ -445,32 +445,6 @@ def people_places(m):
     return out
 
 
-def director_parts(video_file, info, size, length, overlap=None):
-    """0.5.91: [(start s, end s)] of the new frames of each part the Director will make of this clip (its own parse and
-    token budget, h3md_autosplit.preview).  None when it cannot tell (then the old estimate is used)."""
-    try:
-        try:
-            from . import h3md_autosplit as AS
-        except ImportError:
-            import h3md_autosplit as AS
-        plan = K.build_plan(video_file, info["duration"], info["audio"], size, length, [], "x", "probe")
-        res = AS.preview(plan, size[0], size[1])
-        if not res.get("ok"):
-            return None
-        shot = (res.get("shots") or [{}])[0]
-        parts = [int(p) for p in (shot.get("parts") or [length])]
-        ov = int(shot.get("overlap") or (overlap if overlap is not None else getattr(AS, "AUTO_OVERLAP", 39)))
-        out, s = [], 0
-        for j, n in enumerate(parts):
-            a = s + (ov if j else 0)
-            out.append((a / K.FPS, (s + n) / K.FPS))
-            s += n - ov
-        return out
-    except Exception as exc:
-        LOG.warning("%s Director parts unknown (%s): estimated", TAG, exc)
-        return None
-
-
 def thumb_b64(img, h=180):
     """PIL image -> small JPEG as a data URL (the cast panel on the Prepare node)"""
     import base64
@@ -775,15 +749,10 @@ class H3MDKeyframePrepare:
         moments, full_notes = K.prefer_full(frames, moments, ids, cuts, dur, max_gap_s)
         # 0.5.91: every replaced person gets one large, clear keyframe (else Remake has no face for the close-ups)
         moments, id_keep, id_notes, id_warns = K.ensure_identity(frames, moments, chosen, dur)
-        # 0.5.91 (_009 trial 03:10): the parts are the Director's own autosplit of this clip at this size (token
-        # budget of this GPU) - the 10.8 s estimate was wrong, the run used 7.3 s parts
-        bounds = director_parts(plan_path(video, path), info, size, length)
-        span = min(b - a for a, b in bounds) if bounds else None
-        if bounds:
-            LOG.info("%s Director parts: %s", TAG, ", ".join(f"{a:.2f}-{b:.2f} s" for a, b in bounds))
-        moments, fin_notes = K.finish_moments(frames, moments, ids, dur, max_gap_s, cuts=cuts, keep=id_keep, span=span)
-        # 0.5.91: every replaced person seen in a Remake part has a keyframe in that part
-        moments, cov_notes, cov_warns = K.ensure_part_cover(frames, moments, ids, dur, keep=id_keep, bounds=bounds)
+        moments, fin_notes = K.finish_moments(frames, moments, ids, dur, max_gap_s, cuts=cuts, keep=id_keep)
+        # 0.5.91 (_009 trial, user 03:31): the Director's parts depend on the GPU it runs on - every replaced person
+        # gets a keyframe at least every COVER_S s, and the Director picks 4 per real part that show everybody
+        moments, cov_notes, cov_warns = K.ensure_cover(frames, moments, ids, dur)
         id_warns = list(id_warns) + cov_warns
         fin_notes = full_notes + id_notes + fin_notes + cov_notes
         for n_ in fin_notes:
@@ -938,7 +907,7 @@ class H3MDKeyframeAssemble:
             fr = int(round(m["at"] * K.FPS))
             fn = f"kf_{fr:04d}.png"
             Image.fromarray(out).save(os.path.join(kdir, fn))
-            kfs.append((f"kf{mi + 1}", f"{rel}/{fn}", m["at"]))
+            kfs.append((f"kf{mi + 1}", f"{rel}/{fn}", m["at"], sorted({int(i["left"]) for i in m["items"]})))
             imgs.append(out)
             label = f"{m['at']:.2f} s  " + ("pic " + ", ".join(str(i["picture"]) for i in m["items"])
                                              if m["items"] else "source frame")

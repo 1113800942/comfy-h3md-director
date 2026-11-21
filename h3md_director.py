@@ -1071,9 +1071,15 @@ def normalize_keyframes(value, n, length: int, overlap: int, media: dict, notes:
                          f"overlap (first {int(overlap)} frames come from the previous shot) - skipped")
             continue
         if frame in by_frame:
-            notes.append(f"segment {n}: two keyframes at frame {frame} - '{image}' replaces '{by_frame[frame]}'")
-        by_frame[frame] = image
-    out = [{"image": by_frame[f], "frame": f} for f in sorted(by_frame)]
+            notes.append(f"segment {n}: two keyframes at frame {frame} - '{image}' replaces '{by_frame[frame][0]}'")
+        # 0.5.91: "people" = the replaced people this keyframe shows (multi-person swap) - each Remake part picks
+        # its 4 keyframes so that every person of the part is shown (h3md_remake_engine.pick_keyframes)
+        ppl = e.get("people")
+        ppl = sorted({int(x) for x in ppl}) if isinstance(ppl, list) and all(_num(x) is not None for x in ppl) else None
+        by_frame[frame] = (image, ppl)
+    out = [dict({"image": by_frame[f][0], "frame": f}, **({"people": by_frame[f][1]} if by_frame[f][1] is not None
+                                                         else {}))
+           for f in sorted(by_frame)]
     if out:
         notes.append(f"segment {n}: keyframes at " + ", ".join(f"{k['frame'] / FPS:.2f} s ({k['image']})"
                                                                for k in out))

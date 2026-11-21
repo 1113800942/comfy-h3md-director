@@ -737,8 +737,6 @@ def ensure_per_shot(frames, moments, chosen_ids, cuts, duration, settle=SHOT_SET
     return sorted(out, key=lambda m: frames[m[0]]["at"])
 
 
-PART_FRAMES = 345          # Remake renders at most this per autosplit part ...
-PART_MAX_KF = 4            # ... and takes only the first 4 keyframes of a part (the rest are dropped - h3md_report)
 
 
 FULL_SHRINK = 0.85        # prefer_full: a frame of the same shot where the people are this much smaller (camera farther)
@@ -853,36 +851,12 @@ def ensure_identity(frames, moments, chosen, duration, min_h=ID_MIN_H, apart=ID_
     return sorted(out, key=lambda m: frames[m[0]]["at"]), added, notes, warns
 
 
-def part_span(duration, part_frames=PART_FRAMES):
-    """seconds of new frames the biggest autosplit part can carry: the Director splits a shot evenly (h3md_autosplit
-    .plan_parts) and may move a cut point by one 17-frame unit, so this + 17 frames.  A smaller VRAM budget only makes
-    the parts smaller.  Falls back to part_frames.  (Run 38: a fixed 14.4 s window dropped the keyframe at 8.33 s
-    although the real parts were 0-8.7 s with 3 and 8.7-16.5 s with 2.)"""
-    try:
-        from . import h3md_autosplit as A
-    except ImportError:
-        try:
-            import h3md_autosplit as A
-        except ImportError:
-            return part_frames / FPS
-    n = int(round(duration * FPS))
-    try:
-        parts = A.plan_parts(n, 0, int(part_frames))
-    except Exception:
-        parts = None
-    if not parts:
-        return part_frames / FPS
-    return min(part_frames, max(parts) + 17 * getattr(A, "NUDGE_UNITS", 1)) / FPS
-
-
-def finish_moments(frames, moments, chosen_ids, duration, max_gap=5.0, part_frames=PART_FRAMES,
-                   part_max=PART_MAX_KF, cuts=(), keep=(), span=None):
+def finish_moments(frames, moments, chosen_ids, duration, max_gap=5.0, cuts=(), keep=()):
     """0.5.9 cross-check of the moment rules (picks every <= max_gap s, one per shot, none on close-ups):
     (1) no keyframe at all (only close-ups found) -> the best frame anyway, close-ups allowed - a part without any
         keyframe is an error;
-    (2) more than part_max keyframes inside any part_frames stretch -> thin out: drop the one whose removal leaves
-        the smallest gap, never the only keyframe of a shot window - else Remake would silently drop the LAST ones
-        of that part (often the ones right after a cut, the most important).
+    (0.5.91: the old step (2), thinning to 4 keyframes per estimated part, is gone - the parts depend on the GPU;
+    the Director picks 4 per real part, h3md_remake_engine.pick_keyframes.)
     -> (moments sorted by time, notes)"""
     notes = []
     out = sorted(moments, key=lambda m: frames[m[0]]["at"])
@@ -893,36 +867,6 @@ def finish_moments(frames, moments, chosen_ids, duration, max_gap=5.0, part_fram
                                              -_motion(frames, i, frames[i]["who"][0][0])))
             out = [(best, "swap")]
             notes.append(f"only close-ups found: one keyframe at {frames[best]['at']:.2f} s anyway")
-    span = span or part_span(duration, part_frames)   # 0.5.91: the Director's real part length when known
-    changed = True
-    while changed:
-        changed = False
-        ts = [frames[i]["at"] for i, _ in out]
-        for a in range(len(ts)):
-            win = [j for j in range(a, len(ts)) if ts[j] - ts[a] < span]
-            if len(win) <= part_max:
-                continue
-            def gap_without(j):
-                rest = ts[:j] + ts[j + 1:]
-                pts = [0.0] + rest + [duration]
-                return max(b - a_ for a_, b in zip(pts, pts[1:]))
-            bounds = [0.0] + sorted(c for c in cuts if 0 < c < duration) + [duration]
-            shot = lambda t_: max(k for k, b0 in enumerate(bounds) if b0 <= t_)
-            alone = {j for j in win if sum(1 for t_ in ts if shot(t_) == shot(ts[j])) == 1}
-            kept = {j for j in win if ts[j] in set(keep)}         # 0.5.91: a person's only large, clear keyframe
-            pool = ([j for j in win if j not in alone and j not in kept] or [j for j in win if j not in kept]
-                    or win)                                       # the only keyframe of a shot stays if possible
-            # 0.5.91 (_009 trial: the 5.83 s keyframe was dropped - the only one of part 1 with the sunglasses man,
-            # who then got another man's look): drop a keyframe whose people the others in the window also show
-            have = {j: kf_people(frames, out[j][0], chosen_ids) for j in win}
-            spare = [j for j in pool if have[j] <= set().union(*[have[x] for x in win if x != j])]
-            pool = spare or pool
-            drop = min(pool, key=lambda j: (gap_without(j), -abs(ts[j] - ts[j - 1]) if j else 0))
-            notes.append(f"{len(win)} keyframes within {span:.1f} s: dropped the one at {ts[drop]:.2f} s "
-                         f"(Remake keeps {part_max} per part)")
-            out.pop(drop)
-            changed = True
-            break
     return out, notes
 
 
@@ -931,79 +875,52 @@ def kf_people(frames, i, chosen_ids):
     return {pid for pid, b in visible(frames[i]) if pid in chosen_ids and not sliver(b)}
 
 
-def part_bounds(duration, part_frames=PART_FRAMES):
-    """[(start s, end s)] of the Director's autosplit parts (new frames of each part, h3md_autosplit.plan_parts)"""
-    n = int(round(duration * FPS))
-    parts = None
-    try:
-        try:
-            from . import h3md_autosplit as A
-        except ImportError:
-            import h3md_autosplit as A
-        parts = A.plan_parts(n, 0, int(part_frames))
-    except Exception:
-        parts = None
-    if not parts:
-        k = max(1, int(math.ceil(n / float(part_frames))))
-        parts = [n // k + (1 if j < n % k else 0) for j in range(k)]
-    out, t = [], 0
-    for c in parts:
-        out.append((t / FPS, (t + c) / FPS))
-        t += c
-    return out
+COVER_S = 3.0             # 0.5.91 (user 03:31): every replaced person on screen has a keyframe at least every this
+                          # many seconds - the Director's parts depend on the GPU it runs on (token budget), and each
+                          # part takes the look of a person only from its own keyframes
 
 
-def ensure_part_cover(frames, moments, chosen_ids, duration, part_frames=PART_FRAMES, part_max=PART_MAX_KF,
-                      min_s=CAST_MIN_S, keep=(), bounds=None):
-    """0.5.91 (_009 trial, user 03:10): Remake takes the look of every replaced person in a part only from that part's
-    keyframes.  A replaced person seen clearly for min_s or more in a part but in none of its keyframes got the look
-    of another character (the sunglasses man came out as a second striped-polo man).  For every part and every such
-    person: add the frame of that part where he is seen best (most chosen people, then tallest, no close-up); a part
-    with more than part_max keyframes then loses one whose people the others also show (never a kept one).
-    -> (moments sorted by time, notes, warnings)"""
+def ensure_cover(frames, moments, chosen_ids, duration, every=COVER_S, min_s=CAST_MIN_S):
+    """0.5.91: for every replaced person, every stretch of `every` seconds in which he is seen clearly for min_s or
+    more holds a keyframe that shows him (a part of any length >= every then has one).  Greedy from the start: the
+    first such stretch without one gets the frame in its first half where he is seen best (most replaced people,
+    then tallest, no close-up), which covers up to `every` s further.  The Director picks 4 per part
+    (h3md_remake_engine.pick_keyframes).  -> (moments sorted by time, notes, warnings)"""
     out = sorted(moments, key=lambda m: frames[m[0]]["at"])
     notes, warns = [], []
     step = (frames[-1]["at"] - frames[0]["at"]) / (len(frames) - 1) if len(frames) > 1 else 1.0
     last = duration - 2.0 / FPS
-    for p0, p1 in (bounds or part_bounds(duration, part_frames)):
-        inpart = lambda: [m for m in out if p0 <= frames[m[0]]["at"] < p1]
-        covered = set().union(*[kf_people(frames, i, chosen_ids) for i, _ in inpart()]) if inpart() else set()
-        for pid in sorted(chosen_ids):
-            if pid in covered:
+    half = every / 2.0
+    for pid in sorted(chosen_ids):
+        seen = [(f["at"], i) for i, f in enumerate(frames) if f["at"] <= last and pid in kf_people(frames, i, chosen_ids)]
+        j = 0
+        while j < len(seen):
+            t = seen[j][0]
+            if sum(1 for u, _ in seen if t <= u < t + every) * step < min_s - 1e-6:
+                j += 1
                 continue
-            seen = [i for i, f in enumerate(frames) if p0 <= f["at"] < min(p1, last) and pid in kf_people(frames, i,
-                                                                                                         chosen_ids)]
-            if len(seen) * step < min_s - 1e-6:
-                continue
-            cand = [i for i in seen if score(frames, i, chosen_ids) is not None
-                    and all(abs(frames[i]["at"] - frames[m[0]]["at"]) >= 0.25 for m in out)]
-            if not cand:
-                warns.append(f"a replaced person is seen in {p0:.1f}-{p1:.1f} s but never clearly enough for a "
-                             "keyframe there: Remake may give him another character's look in that part. "
-                             f"{p0:.1f}-{p1:.1f} 秒里有一个要换的人没有合适的关键帧，这一段他可能换错。")
-                continue
-            best = max(cand, key=lambda i: (len(kf_people(frames, i, chosen_ids)),
-                                            round(clear_height(frames[i], pid), 2)))
-            out.append((best, "swap"))
-            out.sort(key=lambda m: frames[m[0]]["at"])
-            covered |= kf_people(frames, best, chosen_ids)
-            notes.append(f"part {p0:.1f}-{p1:.1f} s: keyframe added at {frames[best]['at']:.2f} s so every replaced "
-                         "person seen in this part has a keyframe there")
-            while len(inpart()) > part_max:
-                ms = inpart()
-                have = {m: kf_people(frames, m[0], chosen_ids) for m in ms}
-                spare = [m for m in ms if frames[m[0]]["at"] not in set(keep) and m[0] != best
-                         and have[m] <= set().union(*[have[x] for x in ms if x != m])]
-                if not spare:
-                    warns.append(f"part {p0:.1f}-{p1:.1f} s needs more than {part_max} keyframes to show every "
-                                 "replaced person; the last ones are dropped by Remake. 这一段要换的人太多，"
-                                 f"{part_max} 张关键帧放不下。")
-                    break
-                drop = min(spare, key=lambda m: (len(have[m]), clear_height(frames[m[0]], next(iter(have[m]), -1))
-                                                 if have[m] else 0))
-                out.remove(drop)
-                notes.append(f"part {p0:.1f}-{p1:.1f} s: dropped the keyframe at {frames[drop[0]]['at']:.2f} s "
-                             "(its people are in the other keyframes of this part)")
+            cov = [frames[i]["at"] for i, _ in out if pid in kf_people(frames, i, chosen_ids)
+                   and abs(frames[i]["at"] - t) <= half]
+            if cov:
+                t_next = max(cov) + half
+            else:
+                cand = [i for u, i in seen if t <= u <= t + half and score(frames, i, chosen_ids) is not None
+                        and all(abs(frames[i]["at"] - frames[m[0]]["at"]) >= 0.25 for m in out)]
+                if not cand:
+                    warns.append(f"a replaced person seen around {t:.1f} s has no frame clear enough for a keyframe "
+                                 f"there: Remake may give him another character's look. {t:.1f} 秒附近有一个要换的人"
+                                 "没有合适的关键帧，可能换错。")
+                    t_next = t + half
+                else:
+                    best = max(cand, key=lambda i: (len(kf_people(frames, i, chosen_ids)),
+                                                    round(clear_height(frames[i], pid), 2)))
+                    out.append((best, "swap"))
+                    out.sort(key=lambda m: frames[m[0]]["at"])
+                    notes.append(f"keyframe added at {frames[best]['at']:.2f} s: a replaced person seen around "
+                                 f"{t:.1f} s had none within {half:.1f} s")
+                    t_next = frames[best]["at"] + half
+            while j < len(seen) and seen[j][0] <= t_next:
+                j += 1
     return sorted(out, key=lambda m: frames[m[0]]["at"]), notes, warns
 
 
@@ -1346,11 +1263,13 @@ def swap_prompt(length, chosen, descs, n_people, changes, names, looks=None, peo
 
 
 def build_plan(video_file, duration_s, has_audio, size, length, keyframes, prompt, name):
-    """keyframes [(media id, file, seconds)] -> the H3MD plan dict (swapEngine remake, one shot, autosplit)."""
+    """keyframes [(media id, file, seconds[, replaced people shown])] -> the H3MD plan dict (swapEngine remake, one
+    shot, autosplit)."""
     w, h = size
+    keyframes = list(keyframes)
     return {"version": 1, "fps": FPS, "width": w, "height": h, "name": name, "globalPrompt": LMS_TRIGGER,
             "globalMode": "prepend", "refVideoHeight": "auto", "autoSplit": True, "swapEngine": "remake",
-            "media": {"images": [{"id": i, "file": f} for i, f, _ in keyframes],
+            "media": {"images": [{"id": kf[0], "file": kf[1]} for kf in keyframes],
                       "videos": [{"id": "src", "file": video_file, "duration": round(float(duration_s), 3),
                                   "hasAudio": bool(has_audio)}],
                       "audios": [], "refmods": []},
@@ -1359,5 +1278,7 @@ def build_plan(video_file, duration_s, has_audio, size, length, keyframes, promp
                                       "useDuration": round(length / FPS, 4)}],
                           "audios": [], "audioMode": "locked" if has_audio else "none",
                           **({"locked": {"source": "video:src", "offset": 0}} if has_audio else {}),
-                          "keyframes": [{"image": i, "at": round(float(t), 4)} for i, _, t in keyframes],
+                          "keyframes": [dict({"image": kf[0], "at": round(float(kf[2]), 4)},
+                                             **({"people": list(kf[3])} if len(kf) > 3 else {}))
+                                        for kf in keyframes],
                           "prompt": prompt}]}
