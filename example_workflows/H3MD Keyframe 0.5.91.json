@@ -1,6 +1,6 @@
 {
  "last_node_id": 50,
- "last_link_id": 20,
+ "last_link_id": 21,
  "nodes": [
   {
    "id": 1,
@@ -541,6 +541,40 @@
    "title": "Exact 6-step PDD Sigmas"
   },
   {
+   "id": 29,
+   "type": "CLIPLoader",
+   "pos": [
+    800,
+    720
+   ],
+   "size": [
+    380,
+    106
+   ],
+   "flags": {},
+   "order": 14,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "CLIP",
+     "type": "CLIP",
+     "links": [
+      16
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "CLIPLoader"
+   },
+   "widgets_values": [
+    "qwen3.5_9b_int8_convrot.safetensors",
+    "minimax",
+    "default"
+   ],
+   "title": "Pose reader 看姿势 (qwen3.5 9b)"
+  },
+  {
    "id": 30,
    "type": "H3MDKeyframeRecast",
    "pos": [
@@ -552,7 +586,7 @@
     300
    ],
    "flags": {},
-   "order": 14,
+   "order": 15,
    "mode": 0,
    "inputs": [
     {
@@ -589,6 +623,11 @@
      "name": "sigmas",
      "type": "SIGMAS",
      "link": 15
+    },
+    {
+     "name": "pose_clip",
+     "type": "CLIP",
+     "link": 16
     }
    ],
    "outputs": [
@@ -596,21 +635,21 @@
      "name": "keyframes",
      "type": "IMAGE",
      "links": [
-      16
+      17
      ]
     },
     {
      "name": "job",
      "type": "H3MD_KEYFRAME_JOB",
      "links": [
-      18
+      19
      ]
     },
     {
      "name": "report",
      "type": "STRING",
      "links": [
-      17
+      18
      ]
     }
    ],
@@ -636,13 +675,13 @@
     300
    ],
    "flags": {},
-   "order": 15,
+   "order": 16,
    "mode": 0,
    "inputs": [
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 16
+     "link": 17
     }
    ],
    "outputs": [],
@@ -664,13 +703,13 @@
     420
    ],
    "flags": {},
-   "order": 16,
+   "order": 17,
    "mode": 0,
    "inputs": [
     {
      "name": "source",
      "type": "*",
-     "link": 17
+     "link": 18
     }
    ],
    "outputs": [
@@ -698,13 +737,13 @@
     110
    ],
    "flags": {},
-   "order": 17,
+   "order": 18,
    "mode": 0,
    "inputs": [
     {
      "name": "job",
      "type": "H3MD_KEYFRAME_JOB",
-     "link": 18
+     "link": 19
     }
    ],
    "outputs": [
@@ -712,7 +751,7 @@
      "name": "keyframes_sheet",
      "type": "IMAGE",
      "links": [
-      19
+      20
      ]
     },
     {
@@ -724,7 +763,7 @@
      "name": "zip_path",
      "type": "STRING",
      "links": [
-      20
+      21
      ]
     }
    ],
@@ -748,13 +787,13 @@
     320
    ],
    "flags": {},
-   "order": 18,
+   "order": 19,
    "mode": 0,
    "inputs": [
     {
      "name": "images",
      "type": "IMAGE",
-     "link": 19
+     "link": 20
     }
    ],
    "outputs": [],
@@ -776,13 +815,13 @@
     120
    ],
    "flags": {},
-   "order": 19,
+   "order": 20,
    "mode": 0,
    "inputs": [
     {
      "name": "source",
      "type": "*",
-     "link": 20
+     "link": 21
     }
    ],
    "outputs": [
@@ -810,7 +849,7 @@
     360
    ],
    "flags": {},
-   "order": 20,
+   "order": 21,
    "mode": 0,
    "inputs": [],
    "outputs": [],
@@ -818,7 +857,7 @@
     "Node name for S&R": "MarkdownNote"
    },
    "widgets_values": [
-    "## H3MD Keyframe 0.5.91 关键帧\n\n1. 原片拖进 **Source video**；角色图放 图1/图2/图3（全身、背景干净）。\n2. **mapping**：图1换左一 …（编号按开头第一个看清的画面从左往右，看 People 预览核对）。\n3. **descriptions**：每张图一行，写人种、年龄、脸、发型、全身衣服和鞋。\n4. **descriptions** 写全身（参考图只有半身时，看不到的裤子、鞋子也要写；手上有没有东西也写明）。每张关键帧 H3MD 按跟踪站位把提示词填好（官方增强器的格式：每个新人物是 Subject，站到原来那个人的位置，保持姿势、动作、手势、表情、口型、大小、前后遮挡），H3 Image 整帧改一次，不用增强器。\n5. 看 **Report**：每张的提示词和用时。种子影响结果，某张不对就换种子重跑。\n6. 打包后在导演台（H3MD Director Remake.json）Import plan。"
+    "## H3MD Keyframe 0.5.91 关键帧\n\n1. 原片拖进 **Source video**；角色图放 图1/图2/图3（全身、背景干净）。\n2. **mapping**：图1换左一 …（编号按开头第一个看清的画面从左往右，看 People 预览核对）。\n3. **descriptions**：每张图一行，写人种、年龄、脸、发型、全身衣服和鞋。\n4. **descriptions** 写全身（参考图只有半身时，看不到的裤子、鞋子也要写；手上有没有东西也写明）。每张关键帧 H3MD 按跟踪站位把提示词填好（官方增强器的格式：每个新人物是 Subject，站到原来那个人的位置，保持姿势、动作、手势、表情、口型、大小、前后遮挡；每个人在做什么由「看姿势」模型每张写一句，不思考），H3 Image 整帧改一次，不用增强器。\n5. 看 **Report**：每张的提示词和用时。种子影响结果，某张不对就换种子重跑。\n6. 打包后在导演台（H3MD Director Remake.json）Import plan。"
    ],
    "title": "How to use 用法"
   }
@@ -946,6 +985,14 @@
   ],
   [
    16,
+   29,
+   0,
+   30,
+   7,
+   "CLIP"
+  ],
+  [
+   17,
    30,
    0,
    31,
@@ -953,7 +1000,7 @@
    "IMAGE"
   ],
   [
-   17,
+   18,
    30,
    2,
    32,
@@ -961,7 +1008,7 @@
    "STRING"
   ],
   [
-   18,
+   19,
    30,
    1,
    40,
@@ -969,7 +1016,7 @@
    "H3MD_KEYFRAME_JOB"
   ],
   [
-   19,
+   20,
    40,
    0,
    41,
@@ -977,7 +1024,7 @@
    "IMAGE"
   ],
   [
-   20,
+   21,
    40,
    2,
    42,

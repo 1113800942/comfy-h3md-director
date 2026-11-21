@@ -746,8 +746,9 @@ H3_ONE = ("<Subject {s}> is partially preserved: the face, the hair and the comp
           "<Picture {img}>, while the position in the image, the size in the frame, the body and head orientation, the "
           "pose, the action, the hand gestures (fists stay fists, open hands stay open, pointing stays pointing), the "
           "facial expression, the mouth shape and what stands in front of or behind this person exactly follow the "
-          "{ord} person from the left in <Picture 1>.")
-H3_WEAR = "The {ord} person from the left is now <Subject {s}>, {desc}."
+          "{ord} person from the left in <Picture 1>{pose}.")
+H3_WEAR = ("The {ord} person from the left is now <Subject {s}>, {desc}, in exactly the pose, framing and "
+           "crop of the original {ord} person from the left in <Picture 1>.")
 H3_OTHERS = "Every other person in <Picture 1> stays exactly as before."
 H3_END = "Nothing else in <Picture 1> changes."
 
@@ -760,9 +761,31 @@ def h3_size(w, h, mp=EDIT_MP, grid=32):
             max(grid, int(round(math.sqrt(mp * 1e6 / asp) / grid)) * grid))
 
 
-def h3_prompt(people, n_people) -> str:
+POSE_ASK = ("There are {n} people in this picture. For each person, from left to right, write one line "
+            "'k: ...' (k = 1 for the leftmost) describing only what can be seen of the body: which way the body and the "
+            "head face, the pose and action, where each arm is, what each hand does (fist, open palm, pointing, on the "
+            "hip, holding something), the legs and stance, the facial expression and the mouth (open, closed, "
+            "smiling), and which body parts are cut off by the frame. No clothes, no hair, no names. One sentence each, "
+            "starting with a verb, e.g. '1: stands facing the camera with both arms raised, fists closed, legs apart, "
+            "smiling with the mouth open, cut off at the knees'.")
+
+
+def parse_poses(text, n):
+    """the pose reader's answer -> {place from the left: sentence}"""
+    out = {}
+    for line in str(text or "").splitlines():
+        m = re.match(r"^\s*[\-*]?\s*(?:person\s*)?(\d+)\s*[:.)\-]\s*(.+?)\s*$", line, re.I)
+        if m and 1 <= int(m.group(1)) <= n and int(m.group(1)) not in out:
+            out[int(m.group(1))] = m.group(2).strip().rstrip(".")
+    return out
+
+
+def h3_prompt(people, n_people, poses=None) -> str:
     """the H3 Image edit prompt for one keyframe, in the official enhancer's structure: people = [(place from the left
-    in this keyframe, picture number, description of the new person head to toe)], n_people in the keyframe"""
+    in this keyframe, picture number, description of the new person head to toe)], n_people in the keyframe, poses
+    {place: what that person in the keyframe does} (test 19:40: without the pose in words every new person stood
+    straight, framing widened to show the described shoes)"""
+    poses = poses or {}
     people = sorted(people)
     subs = {img: k + 1 for k, (r, img, d) in enumerate(people)}
     clean = lambda d: (d or "the person exactly as shown in the picture").strip().rstrip(".。 ")
@@ -770,7 +793,8 @@ def h3_prompt(people, n_people) -> str:
     names = [f"<Subject {subs[img]}>" for r, img, d in people]
     parts.append(H3_SCENE.format(subs=", ".join(names[:-1]) + " and " + names[-1] if len(names) > 1 else names[0]))
     for r, img, d in people:
-        parts.append(H3_ONE.format(s=subs[img], img=img, ord=ordinal(r)))
+        pz = (poses.get(r) or "").strip().rstrip(".。 ")
+        parts.append(H3_ONE.format(s=subs[img], img=img, ord=ordinal(r), pose=f", who {pz}" if pz else ""))
     for r, img, d in people:
         parts.append(H3_WEAR.format(ord=ordinal(r), s=subs[img], desc=clean(d)))
     if len(people) < n_people:

@@ -26,3 +26,13 @@ def test_h3_prompt_one_of_three():
 
 def test_h3_size():
     assert K.h3_size(1664, 960, mp=4.0) == (2624, 1504) and K.h3_size(1664, 960, mp=2.0) == (1856, 1088)
+
+
+def test_poses():
+    ans = "Here you go:\n1: stands with hands on the hips, smiling, cut off at the thighs.\n- 2) raises both fists\n3: claps\n4: extra"
+    assert K.parse_poses(ans, 3) == {1: "stands with hands on the hips, smiling, cut off at the thighs",
+                                     2: "raises both fists", 3: "claps"}
+    p = K.h3_prompt([(1, 2, EVA)], 3, {1: "claps above the head."})
+    assert "follow the first person from the left in <Picture 1>, who claps above the head." in p
+    assert "in exactly the pose, framing and crop of the original first person from the left in <Picture 1>." in p
+    assert "There are 3 people" in K.POSE_ASK.format(n=3)

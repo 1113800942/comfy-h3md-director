@@ -99,6 +99,7 @@ def test_recast_h3(clip, monkeypatch):
     from types import SimpleNamespace as NS
     import comfy_extras.nodes_minimax_h3 as MH
     import comfy_extras.nodes_custom_sampler as CS
+    import comfy_extras.nodes_textgen as TG
     import nodes as CN
     pic = torch.rand(1, 1200, 1000, 3)
     pics, job, sheet, info = N.H3MDKeyframePrepare().prepare(
@@ -107,19 +108,30 @@ def test_recast_h3(clip, monkeypatch):
     prompts = []
 
     def fake_cond(**kw):
+        order.append("edit")
         prompts.append(kw["prompt"])
         assert list(kw["images"]) == ["image_0", "image_1"] and (kw["width"], kw["height"]) == (1856, 1088)
         return NS(result=("COND", {"samples": None}))
 
+    order = []
+
+    def fake_read(**kw):
+        order.append("read")
+        assert kw["thinking"] is False and "There are 3 people" in kw["prompt"] and list(kw["images"]) == ["image1"]
+        return NS(result=("1: stands still\n2: raises both fists, mouth open\n3: claps",))
+
+    monkeypatch.setattr(TG.TextGenerateV2, "execute", staticmethod(fake_read))
     monkeypatch.setattr(MH.MiniMaxH3ImageConditioning, "execute", staticmethod(fake_cond))
     monkeypatch.setattr(CS.BasicGuider, "execute", staticmethod(lambda **kw: NS(result=("G",))))
     monkeypatch.setattr(CS.RandomNoise, "execute", staticmethod(lambda **kw: NS(result=("N",))))
     monkeypatch.setattr(CS.SamplerCustomAdvanced, "execute", staticmethod(lambda **kw: NS(result=("LAT", None))))
     monkeypatch.setattr(CN.VAEDecode, "decode", lambda self, vae, s: (torch.rand(1, 1088, 1856, 3),))
     imgs, job2, report = N.H3MDKeyframeRecast().recast(
-        [job], pics, [None], [None], [None], [None], [None], [2.0], [7])["result"]
+        [job], pics, [None], [None], [None], [None], [None], [None], [2.0], [7])["result"]
+    assert order == ["read"] * len(todo) + ["edit"] * len(todo)
     for m, p in zip(todo, prompts):
         r = "second" if m["at"] < 5.0 else "first"
-        assert f"follow the {r} person from the left in <Picture 1>" in p and "a man with short red hair" in p
+        who = "raises both fists, mouth open" if m["at"] < 5.0 else "stands still"
+        assert f"follow the {r} person from the left in <Picture 1>, who {who}." in p and "a man with short red hair" in p
         assert N.K.H3_OTHERS in p
     assert len(imgs) == len(todo) and imgs[0].shape[1:3] == (960, 1664) and "seed 7" in report

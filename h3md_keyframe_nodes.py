@@ -679,6 +679,9 @@ class H3MDKeyframeRecast:
                 "vae": ("VAE", {"tooltip": "minimax_h3_image_vae"}),
                 "sampler": ("SAMPLER", {"tooltip": "euler"}),
                 "sigmas": ("SIGMAS", {"tooltip": "the tuned exact 6-step PDD sigmas"}),
+                "pose_clip": ("CLIP", {"tooltip": "Reads what every person in the keyframe does (pose, arms, hands, "
+                                       "expression, crop) in one short line each, no thinking: qwen3.5_9b (type "
+                                       "minimax), the H3 Image enhancer's model. 看图写每个人的姿势。"}),
                 "megapixels": ("FLOAT", {"default": K.EDIT_MP, "min": 0.5, "max": 8.0, "step": 0.1,
                                          "tooltip": "Edit canvas, keyframe aspect, multiple of 32"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "control_after_generate": True}),
@@ -698,7 +701,7 @@ class H3MDKeyframeRecast:
                    "in by H3MD (who at which place becomes which picture, full outfit from the descriptions, pose and "
                    "hands kept). Then H3MD Keyframe 2: Assemble.")
 
-    def recast(self, job, pictures, model, clip, vae, sampler, sigmas, megapixels, seed):
+    def recast(self, job, pictures, model, clip, vae, sampler, sigmas, pose_clip, megapixels, seed):
         import time
         import numpy as np
         import comfy.utils
@@ -706,9 +709,10 @@ class H3MDKeyframeRecast:
         from PIL import Image
         from comfy_extras.nodes_minimax_h3 import MiniMaxH3ImageConditioning
         from comfy_extras.nodes_custom_sampler import BasicGuider, RandomNoise, SamplerCustomAdvanced
+        from comfy_extras.nodes_textgen import TextGenerateV2
         one = lambda v: v[0] if isinstance(v, list) else v
-        job, model, clip, vae, sampler, sigmas = (one(job), one(model), one(clip), one(vae), one(sampler),
-                                                  one(sigmas))
+        job, model, clip, vae, sampler, sigmas, pose_clip = (one(job), one(model), one(clip), one(vae),
+                                                             one(sampler), one(sigmas), one(pose_clip))
         mp, seed = float(one(megapixels)), int(one(seed))
         pics = [p[b:b + 1] for p in pictures for b in range(int(p.shape[0]))]
         need = sum(len(m["items"]) for m in job["moments"])
@@ -718,15 +722,29 @@ class H3MDKeyframeRecast:
         W, H = job["size"]
         gw, gh = K.h3_size(W, H, mp=mp)
         todo = [m for m in job["moments"] if m["items"]]
-        pbar = comfy.utils.ProgressBar(max(1, len(todo)))
+        pbar = comfy.utils.ProgressBar(max(1, 2 * len(todo)))
         lines, done, out_imgs, n, t_all = [], {}, [], 0, time.time()
+        # 1 what every person in each keyframe does, in words (all keyframes first: each model loaded once)
+        read = {}
+        for m in todo:
+            t0 = time.time()
+            frame = to_tensor(np.ascontiguousarray(job["frames"][m["at"]]))
+            n_people = max(int(it.get("n") or 0) for it in m["items"])
+            ans = TextGenerateV2.execute(clip=pose_clip, prompt=K.POSE_ASK.format(n=n_people), max_length=600,
+                                         sampling_mode={"sampling_mode": "off"}, thinking=False,
+                                         use_default_template=True, mtp="off", system_prompt="",
+                                         images={"image1": frame}).result[0]
+            read[m["at"]] = (K.parse_poses(ans, n_people), str(ans), time.time() - t0)
+            pbar.update(1)
+        # 2 one H3 Image edit per keyframe
         for m in todo:
             refs = pics[n:n + len(m["items"])]
             n += len(m["items"])
             frame = to_tensor(np.ascontiguousarray(job["frames"][m["at"]]))
             n_people = max(int(it.get("n") or 0) for it in m["items"])
+            poses, ans, t_pose = read[m["at"]]
             prompt = K.h3_prompt([(it["rank"], j + 2, it.get("desc", "")) for j, it in enumerate(m["items"])],
-                                 n_people)
+                                 n_people, poses)
             t0 = time.time()
             enc = MiniMaxH3ImageConditioning.execute(clip=clip, prompt=prompt, width=gw, height=gh, vae=vae,
                                                      images={f"image_{j}": im for j, im in enumerate([frame] + refs)})
@@ -739,8 +757,11 @@ class H3MDKeyframeRecast:
             out = to_u8(img)
             if out.shape[1] != W or out.shape[0] != H:
                 out = np.asarray(Image.fromarray(out).resize((W, H), Image.LANCZOS))
-            lines.append(f"{m['at']:.2f} s: {time.time() - t0:.1f} s ({gw}x{gh}), places "
+            lines.append(f"{m['at']:.2f} s: poses {t_pose:.1f} s ({len(poses)}/{n_people}), edit "
+                         f"{time.time() - t0:.1f} s ({gw}x{gh}), places "
                          + ", ".join(f"picture {it['picture']} -> {K.ordinal(it['rank'])}" for it in m["items"]))
+            if len(poses) < n_people:
+                lines.append("  POSE READER ANSWER NOT UNDERSTOOD FOR EVERYBODY: " + " ".join(ans.split())[:400])
             lines.append("  prompt: " + prompt)
             done[m["at"]] = out
             out_imgs.append(to_tensor(out))
