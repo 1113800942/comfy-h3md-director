@@ -329,15 +329,26 @@ def parse_segments(text: str, n: int) -> list:
     return sorted(out)
 
 
-def cache_usable(cache, k: int, segs: list, beta: bool) -> bool:
-    """Segment k (0-based) can be taken from the cache as it is (same check as the rerun pre-check)."""
+def segment_contents(plan: dict) -> dict:
+    """0.5.91: segment index -> signature of what the segment is made from (prompt, pictures, keyframes, media files,
+    geometry: h3md_cache.segment_signature), stored in its cache manifest as 'content'"""
+    return {k: C._sha(C.segment_signature(plan, k)) for k in range(len(plan["segments"]))}
+
+
+def cache_usable(cache, k: int, segs: list, beta: bool, content=None) -> bool:
+    """Segment k (0-based) can be taken from the cache as it is (same check as the rerun pre-check).  With `content`
+    (segment_contents): only when it was made from this plan's segment k - a cache folder is shared by every plan
+    with the same settings (0.5.91: a trial spliced in segment 2 of another plan).  Old manifests without 'content'
+    do not pass."""
     man = cache.manifest(k) if cache is not None else None
     if man is None or int(man.get("frames", -1)) != int(segs[k]["length"]):
+        return False
+    if content is not None and man.get("content") != content.get(k):
         return False
     return not (beta and not man.get("lowres"))
 
 
-def plan_segments_to_run(text: str, segs: list, cache, beta: bool):
+def plan_segments_to_run(text: str, segs: list, cache, beta: bool, content=None):
     """v0.3 'segments_to_run' (H3MD Control Panel): one box instead of rerun_segments + stop_after.
     Empty -> None (normal run).  '2' / '1-2' / '3, 6-7, 9' -> (stop_after, rerun list, log line):
     run up to the highest one; the listed segments are generated again even if cached; earlier segments missing
@@ -346,9 +357,9 @@ def plan_segments_to_run(text: str, segs: list, cache, beta: bool):
     if not sel:
         return None
     stop = max(sel) + 1
-    forced = [k for k in sel if cache_usable(cache, k, segs, beta)]
-    missing = [k for k in range(stop) if k not in sel and not cache_usable(cache, k, segs, beta)]
-    later_cached = all(cache_usable(cache, k, segs, beta) for k in range(stop, len(segs)))
+    forced = [k for k in sel if cache_usable(cache, k, segs, beta)]          # made again: any take will do
+    missing = [k for k in range(stop) if k not in sel and not cache_usable(cache, k, segs, beta, content)]
+    later_cached = all(cache_usable(cache, k, segs, beta, content) for k in range(stop, len(segs)))
     if forced and later_cached:
         stop = len(segs)   # a repair inside a finished video: keep the whole video (later segments from the cache)
     rerun = sorted(set(sel) | set(missing)) if forced else []
@@ -358,7 +369,7 @@ def plan_segments_to_run(text: str, segs: list, cache, beta: bool):
     return stop, rerun, line
 
 
-def plan_trial(text: str, segs: list, cache, beta: bool):
+def plan_trial(text: str, segs: list, cache, beta: bool, content=None):
     """0.4.5 试镜 (trial) in window mode: '2' / '1, 3' -> (indices, rerun list, log line).
     Only the listed parts run; a part that starts with a continuation (overlapIn > 0: a long take with no hard cut
     inside the group limit) also needs the part before it (taken from the cache, or generated when missing).
@@ -374,9 +385,9 @@ def plan_trial(text: str, segs: list, cache, beta: bool):
         while j > 0 and int(segs[j]["overlapIn"]) > 0:
             j -= 1
             need.add(j)
-    forced = [k for k in sel if cache_usable(cache, k, segs, beta)]
-    missing = sorted(k for k in need if k not in sel and not cache_usable(cache, k, segs, beta))
-    others_cached = all(cache_usable(cache, k, segs, beta) for k in range(len(segs)) if k not in sel)
+    forced = [k for k in sel if cache_usable(cache, k, segs, beta)]          # made again: any take will do
+    missing = sorted(k for k in need if k not in sel and not cache_usable(cache, k, segs, beta, content))
+    others_cached = all(cache_usable(cache, k, segs, beta, content) for k in range(len(segs)) if k not in sel)
     indices = list(range(len(segs))) if (forced and others_cached) else sorted(need)
     rerun = sorted(set(sel) | set(missing)) if forced else []
     one = lambda ks: ", ".join(str(k + 1) for k in ks) or "-"   # noqa: E731
@@ -915,7 +926,7 @@ class H3MDLoopSampler:
                 LOG.warning("%s %s (node(s) %s use 'images').", _TAG, IMAGES_PLACEHOLDER_WARNING, ", ".join(users))
         if run_text and isinstance(plan, dict) and plan.get("windowMode"):   # 0.4.5 试镜: only the chosen parts
             t_indices, selected, line = plan_trial(run_text, segs, cache if resume_from_cache else None,
-                                                   continue_lowres_prefix == BETA)
+                                                   continue_lowres_prefix == BETA, segment_contents(plan))
             LOG.info("%s %s", _TAG, line)
             if t_indices != indices:
                 indices = t_indices
@@ -924,7 +935,7 @@ class H3MDLoopSampler:
                 selected = []
         elif run_text:   # v0.3 segments_to_run: decide rerun vs. normal resume from what is really in the cache
             planned = plan_segments_to_run(run_text, segs, cache if resume_from_cache else None,
-                                           continue_lowres_prefix == BETA)
+                                           continue_lowres_prefix == BETA, segment_contents(plan))
             _stop, selected, line = planned
             LOG.info("%s %s", _TAG, line)
             if _stop != len(indices):   # whole video kept (repair) or shorter test run
@@ -985,6 +996,7 @@ class H3MDLoopSampler:
         hires_ref = None    # per-channel stats of the current shot's first segment (high-res final latent)
         tail_from = {}
         archive = None
+        contents = segment_contents(plan) if cache is not None else {}
         if rerun:  # H3MD rerun (2026-10-30): check the cache before anything is rendered
             missing = []
             for k in indices:
@@ -997,6 +1009,8 @@ class H3MDLoopSampler:
                     missing.append(f"{k + 1} (cached {man.get('frames')} frames, plan {segs[k]['length']})")
                 elif beta and not man.get("lowres"):
                     missing.append(f"{k + 1} (no low-res carry)")
+                elif man.get("content") != contents.get(k):   # 0.5.91: made for another plan (or before 0.5.91)
+                    missing.append(f"{k + 1} (cached from another plan, or before 0.5.91)")
             if missing:
                 raise ValueError(f"{_TAG} rerun_segments: these segments are not usable from the cache "
                                  f"{cache.dir if cache is not None else ''}: {', '.join(missing)}. The plan's split or "
@@ -1333,7 +1347,7 @@ class H3MDLoopSampler:
                     cache.archive(k, moved_to)
                 try:
                     cache.write(k, key, final, imgs, aud,
-                                dict({"trim": trims[-1], "report": report[-1],
+                                dict({"trim": trims[-1], "report": report[-1], "content": contents.get(k),
                                       "cuts": [int(c) for c in seg.get("windowCuts") or []]},   # redraw check
                                      **({"base_key": base_key, "redraw": redraw} if redraw else {})),
                                 lowres=prev_low if beta else None)
