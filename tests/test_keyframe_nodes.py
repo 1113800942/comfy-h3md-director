@@ -93,10 +93,10 @@ def test_prepare_assemble(clip):
 
 
 
-def test_recast_h3aio(clip, monkeypatch):
-    """0.5.91: the H3 Image AIO chain - plain sentence (places from the tracker) -> enhancer -> one edit per keyframe"""
+
+def test_recast_h3(clip, monkeypatch):
+    """0.5.91: one H3 Image edit per keyframe, the prompt filled in from the tracker's places and the descriptions"""
     from types import SimpleNamespace as NS
-    import comfy_extras.nodes_textgen as TG
     import comfy_extras.nodes_minimax_h3 as MH
     import comfy_extras.nodes_custom_sampler as CS
     import nodes as CN
@@ -104,32 +104,22 @@ def test_recast_h3aio(clip, monkeypatch):
     pics, job, sheet, info = N.H3MDKeyframePrepare().prepare(
         "clips/src.mp4", "图1换左二", "a man with short red hair, yellow coat", "", 5.0, 0.4, 8, picture_1=pic)["result"]
     todo = [m for m in job["moments"] if m["items"]]
-    asked, prompts, order = [], [], []
-
-    def fake_pe(**kw):
-        order.append("pe")
-        asked.append(kw["prompt"])
-        assert kw["thinking"] is True and kw["mtp"] == "off" and kw["system_prompt"] == "SYS" and len(kw["images"]) == 2
-        return NS(result=('{"expanded_caption": "CAP %d", "aspect_ratio": "16:9"}' % len(asked),))
+    prompts = []
 
     def fake_cond(**kw):
-        order.append("edit")
         prompts.append(kw["prompt"])
-        assert list(kw["images"]) == ["image_0", "image_1"] and (kw["width"], kw["height"]) == (2624, 1504)
+        assert list(kw["images"]) == ["image_0", "image_1"] and (kw["width"], kw["height"]) == (1856, 1088)
         return NS(result=("COND", {"samples": None}))
 
-    monkeypatch.setattr(TG.TextGenerateV2, "execute", staticmethod(fake_pe))
     monkeypatch.setattr(MH.MiniMaxH3ImageConditioning, "execute", staticmethod(fake_cond))
     monkeypatch.setattr(CS.BasicGuider, "execute", staticmethod(lambda **kw: NS(result=("G",))))
     monkeypatch.setattr(CS.RandomNoise, "execute", staticmethod(lambda **kw: NS(result=("N",))))
     monkeypatch.setattr(CS.SamplerCustomAdvanced, "execute", staticmethod(lambda **kw: NS(result=("LAT", None))))
-    monkeypatch.setattr(CN.VAEDecode, "decode", lambda self, vae, s: (torch.rand(1, 1536, 2688, 3),))
+    monkeypatch.setattr(CN.VAEDecode, "decode", lambda self, vae, s: (torch.rand(1, 1088, 1856, 3),))
     imgs, job2, report = N.H3MDKeyframeRecast().recast(
-        [job], pics, [None], [None], [None], [None], [None], [None], ["SYS"], ["TASK: {input text}"], [4.0],
-        [7])["result"]
-    assert order == ["pe"] * len(todo) + ["edit"] * len(todo)            # enhancer for all first, then the edits
-    for m, a in zip(todo, asked):
-        r = 2 if m["at"] < 5.0 else 1
-        assert a.startswith(f"TASK: 把图1里从左数第{r}个人替换成图2里的人，图1里其他的人保持不变，")
-    assert prompts == [f"CAP {k + 1}" for k in range(len(todo))]
+        [job], pics, [None], [None], [None], [None], [None], [2.0], [7])["result"]
+    for m, p in zip(todo, prompts):
+        r = "second" if m["at"] < 5.0 else "first"
+        assert f"follow the {r} person from the left in <Picture 1>" in p and "a man with short red hair" in p
+        assert N.K.H3_OTHERS in p
     assert len(imgs) == len(todo) and imgs[0].shape[1:3] == (960, 1664) and "seed 7" in report

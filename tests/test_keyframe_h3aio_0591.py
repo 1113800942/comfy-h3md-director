@@ -1,19 +1,28 @@
-"""0.5.91 Recast = the user's H3 Image AIO v1.01 chain: one plain sentence -> official H3 Image enhancer -> one edit."""
+"""0.5.91 Recast: one H3 Image edit per keyframe, the prompt filled in by H3MD in the official enhancer's structure."""
 import h3md_keyframe as K
 
-
-def test_swap_sentence():
-    s = K.swap_sentence([(3, 2), (1, 3), (2, 4)], 3)
-    assert s.startswith("把图1里从左数第1个人替换成图3里的人，从左数第2个人替换成图4里的人，从左数第3个人替换成图2里的人，严格保持图1中")
-    assert "严格保持图2、图3、图4里的人的五官外貌" in s and "其他的人" not in s
-    s2 = K.swap_sentence([(2, 2)], 3)                  # one of three recast: the others are kept
-    assert "从左数第2个人替换成图2里的人，图1里其他的人保持不变，" in s2 and "严格保持图2里的人" in s2
-    for w in ("Eva", "金发", "人数不变", "整个人"):        # no looks, no names, no 'keep the count' (18:01)
-        assert w not in s
+EVA = "a young woman with long wavy blonde hair, in a white ribbed tank top, long black jeans and white sneakers, bare hands."
+PETER = "a bearded man in a beige trench coat, dark grey trousers and brown leather shoes"
+DAVID = "a man with short black hair in a black T-shirt, dark blue jeans and black sneakers"
 
 
-def test_pe_caption():
-    assert K.pe_caption('{"expanded_caption": "A woman \\"Eva\\" stands.", "aspect_ratio": "16:9"}') == 'A woman "Eva" stands.'
-    assert K.pe_caption('<think>plan {x}</think>\n{"expanded_caption": "B", "aspect_ratio": "1:1"}') == "B"
-    assert K.pe_caption('{"expanded_caption": "C, broken json", "aspect_ratio": 16:9}') == "C, broken json"
-    assert K.pe_caption("no json here") is None and K.pe_caption('{"expanded_caption": ""}') is None
+def test_h3_prompt_changed_places():
+    p = K.h3_prompt([(3, 2, EVA), (1, 3, PETER), (2, 4, DAVID)], 3)   # 16 s: Abby, Eve, Eva -> Peter, David, Eva
+    assert p.startswith("The person in <Picture 2> is <Subject 3>: a young woman with long wavy blonde hair")
+    assert "The person in <Picture 3> is <Subject 1>: a bearded man" in p and "<Picture 4> is <Subject 2>" in p
+    assert "where <Subject 1>, <Subject 2> and <Subject 3> take the places" in p
+    assert ("<Subject 1> is partially preserved: the face, the hair and the complete outfit of <Subject 1> come from "
+            "<Picture 3>") in p and "follow the first person from the left in <Picture 1>" in p
+    assert "The third person from the left is now <Subject 3>, a young woman" in p and "bare hands." in p
+    assert "hand gestures (fists stay fists" in p and "mouth shape" in p and "in front of or behind" in p
+    assert "Every other person" not in p and p.endswith(K.H3_END) and "bare hands.." not in p
+
+
+def test_h3_prompt_one_of_three():
+    p = K.h3_prompt([(2, 2, "")], 3)
+    assert "where <Subject 1> take" in p and "the person exactly as shown in the picture" in p
+    assert K.H3_OTHERS in p
+
+
+def test_h3_size():
+    assert K.h3_size(1664, 960, mp=4.0) == (2624, 1504) and K.h3_size(1664, 960, mp=2.0) == (1856, 1088)

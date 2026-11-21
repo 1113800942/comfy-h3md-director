@@ -430,8 +430,7 @@ class H3MDKeyframePrepare:
     DESCRIPTION = ("Multi-person swap keyframes, step 1. Finds and numbers the people in the source (left to right "
                    "at the start), picks keyframe moments at most max_gap_s apart (people standing apart, little "
                    "motion) and notes where every person to recast stands then. Then H3MD Keyframe 1b: Recast "
-                   "(H3 Image AIO chain: plain sentence, official enhancer, one edit per keyframe) and H3MD "
-                   "Keyframe 2: Assemble.")
+                   "(one H3 Image edit per keyframe) and H3MD Keyframe 2: Assemble.")
 
     def prepare(self, video, mapping, descriptions, people_at_start, max_gap_s, threshold, max_people,
                 source_video=None, start_s=0.0, end_s=0.0, **pics):
@@ -663,13 +662,11 @@ class H3MDKeyframeAssemble:
 
 
 class H3MDKeyframeRecast:
-    """0.5.91: the user's own H3 Image AIO v1.01 chain, moved into H3MD (user 18:31).  Per keyframe: one plain sentence
-    (the user's wording: who stands at which place from the left becomes which picture; keep pose, expression, mouth,
-    place, size, occlusion; keep the new people's faces, hair, clothes) -> the official MiniMax H3 Image prompt
-    enhancer (TextGenerateV2, its system and task prompts, thinking on) writes the prompt, the sentence itself when it
-    gives no caption -> one MiniMax H3 Image edit of the whole keyframe (<Picture 1> = the keyframe, 2... = the new
-    people), the tuned 6-step sigmas.  All keyframes go through the enhancer first, then all edits (each model loaded
-    once).  Test 18:27 (the user's workflow, 0 s keyframe): all three swapped right."""
+    """0.5.91: one MiniMax H3 Image edit per keyframe (<Picture 1> = the keyframe, 2... = the new people), the user's
+    H3 Image AIO v1.01 model chain (6-step tuned sigmas).  The prompt is filled in here, in the structure the official
+    H3 Image enhancer wrote every time (user 19:23: the enhancer took 55-83 s a keyframe and once gave nothing): every
+    new person defined as a Subject from its picture with the full description, placed at its place from the left (the
+    tracker's), keeping that place's pose, action, hand gesture, expression, mouth, size and occlusion."""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -682,12 +679,8 @@ class H3MDKeyframeRecast:
                 "vae": ("VAE", {"tooltip": "minimax_h3_image_vae"}),
                 "sampler": ("SAMPLER", {"tooltip": "euler"}),
                 "sigmas": ("SIGMAS", {"tooltip": "the tuned exact 6-step PDD sigmas"}),
-                "pe_clip": ("CLIP", {"tooltip": "The prompt enhancer: qwen3.5_9b (type minimax)"}),
-                "pe_system_prompt": ("STRING", {"forceInput": True, "tooltip": "The enhancer system prompt"}),
-                "pe_task_prompt": ("STRING", {"forceInput": True,
-                                              "tooltip": "The enhancer task prompt (with {input text})"}),
                 "megapixels": ("FLOAT", {"default": K.EDIT_MP, "min": 0.5, "max": 8.0, "step": 0.1,
-                                         "tooltip": "Edit canvas, keyframe aspect, multiple of 32 (AIO: 4.0)"}),
+                                         "tooltip": "Edit canvas, keyframe aspect, multiple of 32"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "control_after_generate": True}),
             }
         }
@@ -698,18 +691,14 @@ class H3MDKeyframeRecast:
     OUTPUT_IS_LIST = (True, False, False)
     OUTPUT_TOOLTIPS = ("The finished keyframes, one per swap moment (whole frames).",
                        "The job with the keyframes (connect to Assemble).",
-                       "Per keyframe: the sentence, the enhancer's prompt, times.")
+                       "Per keyframe: the prompt and the time.")
     FUNCTION = "recast"
     CATEGORY = CATEGORY
-    DESCRIPTION = ("Multi-person swap keyframes, step 1b (0.5.91): the H3 Image AIO chain - a plain sentence, the "
-                   "official H3 Image prompt enhancer, one H3 Image edit per keyframe. Then H3MD Keyframe 2: Assemble.")
+    DESCRIPTION = ("Multi-person swap keyframes, step 1b (0.5.91): one H3 Image edit per keyframe, the prompt filled "
+                   "in by H3MD (who at which place becomes which picture, full outfit from the descriptions, pose and "
+                   "hands kept). Then H3MD Keyframe 2: Assemble.")
 
-    PE_MAX = 8196
-    PE_SAMPLING = {"sampling_mode": "on", "temperature": 1.0, "top_k": 20, "top_p": 0.95, "min_p": 0.0,
-                   "repetition_penalty": 1.0, "presence_penalty": 0.0}
-
-    def recast(self, job, pictures, model, clip, vae, sampler, sigmas, pe_clip, pe_system_prompt, pe_task_prompt,
-               megapixels, seed):
+    def recast(self, job, pictures, model, clip, vae, sampler, sigmas, megapixels, seed):
         import time
         import numpy as np
         import comfy.utils
@@ -717,15 +706,10 @@ class H3MDKeyframeRecast:
         from PIL import Image
         from comfy_extras.nodes_minimax_h3 import MiniMaxH3ImageConditioning
         from comfy_extras.nodes_custom_sampler import BasicGuider, RandomNoise, SamplerCustomAdvanced
-        from comfy_extras.nodes_textgen import TextGenerateV2
         one = lambda v: v[0] if isinstance(v, list) else v
-        job, model, clip, vae, sampler, sigmas, pe_clip = (one(job), one(model), one(clip), one(vae), one(sampler),
-                                                           one(sigmas), one(pe_clip))
-        system, task = str(one(pe_system_prompt)), str(one(pe_task_prompt))
+        job, model, clip, vae, sampler, sigmas = (one(job), one(model), one(clip), one(vae), one(sampler),
+                                                  one(sigmas))
         mp, seed = float(one(megapixels)), int(one(seed))
-        if "{input text}" not in task:
-            raise K.KeyframeError(f"{TAG} pe_task_prompt has no '{{input text}}': connect the enhancer task prompt. "
-                                  "增强器任务提示词里没有 {input text}。")
         pics = [p[b:b + 1] for p in pictures for b in range(int(p.shape[0]))]
         need = sum(len(m["items"]) for m in job["moments"])
         if len(pics) != need:
@@ -734,28 +718,16 @@ class H3MDKeyframeRecast:
         W, H = job["size"]
         gw, gh = K.h3_size(W, H, mp=mp)
         todo = [m for m in job["moments"] if m["items"]]
-        pbar = comfy.utils.ProgressBar(max(1, 2 * len(todo)))
-        lines, t_all, work, n = [], time.time(), [], 0
-        # 1 the enhancer, every keyframe
+        pbar = comfy.utils.ProgressBar(max(1, len(todo)))
+        lines, done, out_imgs, n, t_all = [], {}, [], 0, time.time()
         for m in todo:
             refs = pics[n:n + len(m["items"])]
             n += len(m["items"])
             frame = to_tensor(np.ascontiguousarray(job["frames"][m["at"]]))
             n_people = max(int(it.get("n") or 0) for it in m["items"])
-            sentence = K.swap_sentence([(it["rank"], j + 2) for j, it in enumerate(m["items"])], n_people)
+            prompt = K.h3_prompt([(it["rank"], j + 2, it.get("desc", "")) for j, it in enumerate(m["items"])],
+                                 n_people)
             t0 = time.time()
-            pe = TextGenerateV2.execute(clip=pe_clip, prompt=task.replace("{input text}", sentence),
-                                        max_length=self.PE_MAX, sampling_mode=dict(self.PE_SAMPLING, seed=seed),
-                                        thinking=True, use_default_template=True, mtp="off", system_prompt=system,
-                                        images={f"image{j + 1}": im for j, im in enumerate([frame] + refs)})
-            caption = K.pe_caption(pe.result[0])
-            work.append((m, frame, refs, sentence, caption, time.time() - t0, str(pe.result[0])[:300]))
-            pbar.update(1)
-        # 2 one H3 Image edit per keyframe
-        done, out_imgs = {}, []
-        for m, frame, refs, sentence, caption, t_pe, raw in work:
-            t0 = time.time()
-            prompt = caption or sentence
             enc = MiniMaxH3ImageConditioning.execute(clip=clip, prompt=prompt, width=gw, height=gh, vae=vae,
                                                      images={f"image_{j}": im for j, im in enumerate([frame] + refs)})
             guider = BasicGuider.execute(model=model, conditioning=enc.result[0]).result[0]
@@ -767,10 +739,9 @@ class H3MDKeyframeRecast:
             out = to_u8(img)
             if out.shape[1] != W or out.shape[0] != H:
                 out = np.asarray(Image.fromarray(out).resize((W, H), Image.LANCZOS))
-            lines.append(f"{m['at']:.2f} s: enhancer {t_pe:.1f} s, edit {time.time() - t0:.1f} s ({gw}x{gh})")
-            lines.append("  sentence: " + sentence)
-            lines.append("  prompt: " + (caption if caption else f"ENHANCER GAVE NO CAPTION - the sentence used. "
-                                                                   f"Its output: {raw!r}"))
+            lines.append(f"{m['at']:.2f} s: {time.time() - t0:.1f} s ({gw}x{gh}), places "
+                         + ", ".join(f"picture {it['picture']} -> {K.ordinal(it['rank'])}" for it in m["items"]))
+            lines.append("  prompt: " + prompt)
             done[m["at"]] = out
             out_imgs.append(to_tensor(out))
             pbar.update(1)
@@ -778,8 +749,7 @@ class H3MDKeyframeRecast:
         report = "\n".join(lines)
         LOG.info("%s recast report:\n%s", TAG, report)
         job = dict(job, recast_frames=done,
-                   recast={"method": "H3 Image AIO chain: plain sentence, official enhancer, one edit", "seed": seed,
-                           "report": report})
+                   recast={"method": "H3 Image, prompt filled in by H3MD", "seed": seed, "report": report})
         return {"ui": {"text": [report]}, "result": (out_imgs, job, report)}
 
 
