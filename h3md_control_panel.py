@@ -75,11 +75,11 @@ PRESETS = {
         "low": {"combat": 0.7, "enhancer": 0.5},
         "high": {"combat": 0.49, "realism": 0.5, "lms": 0.2},
     },
-    # Copy of balanced for API/Reset completeness only. Entering remake in the UI does not
-    # apply these rows (low-res uses remake_model; high-res keeps the previous style's list).
+    # 0.5.91 (user 2026-11-20 23:57): multi-person swap switches on the LMS LoRA only - before, the rows the
+    # previous style had switched on were carried over
     "remake": {
-        "low": {"combat": 0.7, "motion_repair": 0.75, "speed": 3.0, "cinematic": 0.5, "vbvr": 1.0, "enhancer": 0.55},
-        "high": {"combat": 0.49, "realism": 0.6, "motion_repair": 0.25, "cinematic": 0.2, "lms": 0.2, "vbvr": 0.5},
+        "low": {},
+        "high": {"lms": 0.2},
     },
 }
 OFF_STRENGTH = {"low": {"weapon": 0.85, "fightflow": 0.65}, "high": {"weapon": 0.5, "fightflow": 0.25}}
@@ -95,8 +95,8 @@ BRIDGES = {"balanced": None, "high_motion": None, "motion_copy": None, "remake":
 
 
 def applies_lora_presets(style: str) -> bool:
-    """False for remake: entering 多人互换 must not rewrite low/high LoRA lists or high-res turbo."""
-    return style in STYLES and style != REMAKE_STYLE
+    """Every style button sets its recommended LoRA rows (0.5.91: multi-person swap too - LMS only)."""
+    return style in STYLES
 
 
 def apply_remake_for_style(plan: dict, style: str) -> dict:

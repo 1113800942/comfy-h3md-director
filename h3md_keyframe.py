@@ -897,6 +897,12 @@ def crop_to_aspect(w, h, tw, th):
     return (0, y0, w, y0 + nh)
 
 
+# 0.5.91 (user 23:57): a multi-swap plan's global prompt = the trigger words of the LMS LoRA (the only LoRA the
+# multi-person swap style switches on; Civitai "LMS - A Little More Sharpness", trainedWords)
+LMS_TRIGGER = ("Enhance this video with sharp, crisp details while preserving a natural photorealistic "
+               "appearance.")
+
+
 def plan_length(n_frames: int) -> int:
     """largest 5 + 17n not past the source's end (the Director would round UP and run past it)"""
     if n_frames < MIN_FRAMES:
@@ -971,7 +977,7 @@ def swap_prompt(length, chosen, descs, n_people, changes, names, looks=None):
 def build_plan(video_file, duration_s, has_audio, size, length, keyframes, prompt, name):
     """keyframes [(media id, file, seconds)] -> the H3MD plan dict (swapEngine remake, one shot, autosplit)."""
     w, h = size
-    return {"version": 1, "fps": FPS, "width": w, "height": h, "name": name, "globalPrompt": "",
+    return {"version": 1, "fps": FPS, "width": w, "height": h, "name": name, "globalPrompt": LMS_TRIGGER,
             "globalMode": "prepend", "refVideoHeight": "auto", "autoSplit": True, "swapEngine": "remake",
             "media": {"images": [{"id": i, "file": f} for i, f, _ in keyframes],
                       "videos": [{"id": "src", "file": video_file, "duration": round(float(duration_s), 3),

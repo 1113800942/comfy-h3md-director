@@ -14,7 +14,7 @@ const STYLE_TIP = {
   motion_copy: "dance / motion transfer from a reference video · 动作复刻",
   remake: "多人互换：低清用 Remake 换人模型，高清照常用主模型（两个都要开，不冲突）。工作流里的「Remake model 换人模型」节点已接好，选这个风格会自动打开；切回其他风格会自动关闭它，关键帧仍保留。不会自动下载模型。 · Low-res pass on the Remake model, high-res on the usual base (both stay on). The workflow's Remake model node is wired and switched on by this style, off by the others; no download.",
 };
-export function appliesLoraPresets(style) { return style !== REMAKE_STYLE; }
+export function appliesLoraPresets(style) { return !!style; }   // 0.5.91: multi-person swap too (LMS only)
 let presetCache = null;
 async function presets() {
   if (presetCache) return presetCache;
