@@ -1104,7 +1104,7 @@ def ensure_cover(frames, moments, chosen_ids, duration, every=COVER_S, min_s=COV
     then tallest, no close-up), which covers up to `every` s further.  The Director picks 4 per part
     (h3md_remake_engine.pick_keyframes).  -> (moments sorted by time, notes, warnings)"""
     out = sorted(moments, key=lambda m: frames[m[0]]["at"])
-    notes, warns = [], []
+    notes, warns, gaps = [], [], {}
     step = (frames[-1]["at"] - frames[0]["at"]) / (len(frames) - 1) if len(frames) > 1 else 1.0
     last = duration - 2.0 / FPS
     half = every / 2.0
@@ -1124,9 +1124,7 @@ def ensure_cover(frames, moments, chosen_ids, duration, every=COVER_S, min_s=COV
                 cand = [i for u, i in seen if t <= u <= t + half and score(frames, i, chosen_ids) is not None
                         and all(abs(frames[i]["at"] - frames[m[0]]["at"]) >= COVER_APART for m in out)]
                 if not cand:
-                    warns.append(f"a replaced person seen around {t:.1f} s has no frame clear enough for a keyframe "
-                                 f"there: Remake may give him another character's look. {t:.1f} 秒附近有一个要换的人"
-                                 "没有合适的关键帧，可能换错。")
+                    gaps[round(t, 1)] = gaps.get(round(t, 1), 0) + 1   # 0.5.91: one line per moment, not per person
                     t_next = t + half
                 else:
                     best = max(cand, key=lambda i: (len(kf_people(frames, i, chosen_ids)),
@@ -1138,6 +1136,11 @@ def ensure_cover(frames, moments, chosen_ids, duration, every=COVER_S, min_s=COV
                     t_next = frames[best]["at"] + half
             while j < len(seen) and seen[j][0] <= t_next:
                 j += 1
+    for t, n in sorted(gaps.items()):
+        who = "a replaced person" if n == 1 else f"{n} replaced people"
+        warns.append(f"{who} seen around {t:.1f} s {'has' if n == 1 else 'have'} no frame clear enough for a keyframe "
+                     f"there (close-ups): Remake may give {'him' if n == 1 else 'them'} another character's look. "
+                     f"{t:.1f} 秒附近有 {n} 个要换的人没有合适的关键帧（特写），可能换错。")
     return sorted(out, key=lambda m: frames[m[0]]["at"]), notes, warns
 
 
