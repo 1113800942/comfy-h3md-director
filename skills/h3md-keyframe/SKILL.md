@@ -21,7 +21,7 @@ be pulled back.
 
 | file | what it is |
 |---|---|
-| `request.json` | `package` (this package's name), `answer_file`, and per keyframe: `keyframe` (number), `at_seconds`, `picture_1` (the keyframe file), `pictures` (the character pictures for this keyframe, in order, each with `picture` = its number in the prompt, `file`, `description`, `replaces_person_from_left`), `people_in_frame`, `keeps_people_from_left` (the people who stay, counted from the left in this keyframe), `people_from_left` (every person of this keyframe left to right: `place`, `box_percent` = left, top, right, bottom in % of the frame, `cut_by_edges`, `role` = "picture N" or "stays"), `sentence` (what the keyframe must become, in the user's words) |
+| `request.json` | `package` (this package's name), `answer_file`, `characters` (every character picture once: `picture` = the N of `character_picture_N.png`, `file`, `description` - the user's words, often empty - and `describe_it`), and per keyframe: `keyframe` (number), `at_seconds`, `picture_1` (the keyframe file), `pictures` (the character pictures for this keyframe, in order, each with `picture` = its number in the prompt, `file`, `description`, `replaces_person_from_left`), `people_in_frame`, `keeps_people_from_left` (the people who stay, counted from the left in this keyframe), `people_from_left` (every person of this keyframe left to right: `place`, `box_percent` = left, top, right, bottom in % of the frame, `cut_by_edges`, `role` = "picture N" or "stays"), `sentence` (what the keyframe must become, in the user's words) |
 | `keyframe_1.png` ... | the original video frames |
 | `character_picture_N.png` | the new people |
 | `README_for_AI.md` | a short version of this skill (for AIs without it) |
@@ -35,14 +35,30 @@ fix it**. Do not guess.
 - [ ] `request.json` is there and readable.
 - [ ] One `keyframe_k.png` for every entry in `keyframes`.
 - [ ] Every `character_picture_*.png` named in `pictures` is there.
-- [ ] Every picture has a `description`. A half-body picture's description must cover what the picture does not
-      show (trousers, shoes). If it does not, ask the user for it: nobody else can know it.
+- [ ] Every character can be described: an empty `description` is not missing - you describe the person from
+      the picture and ask the user what it does not show (2b).
 - [ ] Every keyframe has a `sentence`. Every picture has a `replaces_person_from_left`.
 - [ ] `people_in_frame` matches the people you count in the keyframe, and the person at each
       `replaces_person_from_left` is really there.
 
-Typical answers: "keyframe_3.png is missing - run Keyframe Export again", "picture 2 is half-body and its
-description says nothing about trousers and shoes - add them to the descriptions on Prepare and export again".
+Typical answer: "keyframe_3.png is missing - run Keyframe Export again".
+
+## 2b. The characters - describe them, ask for what the pictures do not show
+
+`characters` lists every character picture once. The user may have written a `description`: then it is right - use
+it and only add what it lacks. Usually it is empty, and you describe the person yourself from
+`character_picture_N.png`.
+
+Before writing any prompt, compare what the keyframes need with what each picture shows. A keyframe that shows the
+legs and feet of a person whose picture is half-body, the back of a person seen only from the front, a hand the
+picture hides: you cannot know what the character wears there. **Ask the user - all characters in one message - and
+wait for the answer.** Never invent trousers, shoes or anything else. Example: "Picture 2 shows her only to the
+waist, and keyframes 3, 5 and 7 show her legs: what does she wear below the waist (trousers or skirt, colour) and on
+her feet?" Ask only about what a keyframe needs (no shoes question when no keyframe shows the feet).
+
+Then fix **one sentence per character**, head to toe: face, age, hair, every garment, the shoes, and what they do not
+have ("bare hands", "no hat"). It goes unchanged into every keyframe prompt (minus the parts a frame cuts off) and into
+the answer as `"characters"` - the Director's video prompt is made from it.
 
 ## 3. Who is who
 
@@ -68,12 +84,11 @@ assume they are the ones at the end, and check each one in the picture before yo
 
 Write in English, in the structure of the official H3 Image prompt enhancer:
 
-a. **Define every character picture as a Subject.** Describe the person positively and completely, head to toe, from
-   the picture plus its `description`: face, hair, every garment, the shoes, and what they do not have ("bare hands",
-   "no hat", "nothing on his head"). Never describe or mention the clothes of the people in `<Picture 1>`, and never
+a. **Define every character picture as a Subject** with its sentence from 2b: positive and complete, head to toe -
+   face, hair, every garment, the shoes, and what they do not have ("bare hands", "no hat", "nothing on his head"). Never describe or mention the clothes of the people in `<Picture 1>`, and never
    write what to remove. **Use the same sentence for a character in every keyframe** (only the parts the frame cuts
    off are left out, see c): when the picture is half-body, the trousers / skirt and shoes come from the
-   `description` and must not change from keyframe to keyframe.
+   user's answer (2b) and must not change from keyframe to keyframe.
 b. **Define `<Picture 1>` as a Subject that is partially preserved.** The background, floor, lighting, camera angle,
    framing and crop, and the places, spacing, sizes, front-to-back order and overlaps of the people are retained.
    **Never name anything in the background** (no walls, windows, doors, buildings, vehicles, signs, furniture, not
@@ -167,10 +182,13 @@ If you are not sure about something, say so to the user instead of guessing.
 top:
 
 ```json
-{"package": "<request.json package>", "prompts": {"1": "prompt for keyframe 1", "2": "..."}}
+{"package": "<request.json package>",
+ "characters": {"2": "sentence for character_picture_2", "3": "..."},
+ "prompts": {"1": "prompt for keyframe 1", "2": "..."}}
 ```
 
-saved as `prompts.json`. The user clicks **Import package** on H3MD Keyframe Import and picks this file.
+saved as `prompts.json`. `characters` uses the numbers of the `character_picture_N.png` files (not the `<Picture N>`
+numbers of a keyframe) and holds your sentence from 2b for every character. The user clicks **Import package** on H3MD Keyframe Import and picks this file.
 
 **If you cannot make files:** give the text of that `prompts.json` and tell the user to save it as
 `<name>_keyframe_import_<YYYYMMDD>_<NNN>.json` next to the export package (output/H3MD_keyframes/). It must contain
@@ -181,7 +199,7 @@ saved as `prompts.json`. The user clicks **Import package** on H3MD Keyframe Imp
 The user looks at **Compare** (original | new, numbered #1, #2 ...). For a keyframe that is clearly wrong, they tell
 you its number and what is wrong.
 1. Rewrite only that prompt.
-2. Answer with a new file whose `"prompts"` holds only the numbers you redid.
+2. Answer with a new file whose `"prompts"` holds only the numbers you redid (keep `"characters"`).
 3. The user imports it, clicks those numbers on **H3MD Keyframe Redo**, and runs. Only those keyframes are made again;
    the others are kept.
 

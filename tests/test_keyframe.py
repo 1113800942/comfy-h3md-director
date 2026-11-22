@@ -32,8 +32,25 @@ def test_parse_mapping_errors(bad):
 def test_descriptions():
     d = K.parse_descriptions("图1：短发男\n\n2. 中长卷发女", [1, 2])
     assert d == {1: "短发男", 2: "中长卷发女"}
-    with pytest.raises(K.KeyframeError):
-        K.parse_descriptions("only one", [1, 2])
+    # 0.5.91 (user 16:53): optional - the AI describes the rest from the pictures
+    assert K.parse_descriptions("only one", [1, 2]) == {1: "only one", 2: ""}
+    assert K.parse_descriptions("", [1, 3]) == {1: "", 3: ""}
+    assert K.parse_descriptions("picture 3: a woman in a red dress", [1, 3]) == {1: "", 3: "a woman in a red dress"}
+
+
+def test_characters_from_the_answer_fill_the_remake_prompt():
+    people = [{"first": 0.0, "side": "left"}, {"first": 0.0, "side": "right"}]
+    pr = K.swap_prompt(120, [(1, 1, 11), (2, 2, 12)], {1: "a man in a red jacket", 2: ""}, 2, [],
+                       {11: None, 12: None}, people=people)
+    assert "a man in a red jacket" in pr and (K.DESC_SLOT % 2) in pr and (K.DESC_SLOT % 1) not in pr
+    ans = '{"package": "x", "characters": {"2": "a woman with long black hair, navy dress, black heels."}, ' \
+          '"prompts": {"1": "p"}}'
+    ch = K.parse_characters(ans)
+    assert ch == {2: "a woman with long black hair, navy dress, black heels."}
+    out, left = K.fill_characters(pr, ch)
+    assert not left and "navy dress, black heels;" in out and "{{" not in out
+    assert K.fill_characters(pr, {})[1] == [2]
+    assert K.parse_characters("#1: a prompt") == {} and K.parse_prompts(ans, 1) == {1: "p"}
 
 
 def _frames(n=60, fps=6.0):

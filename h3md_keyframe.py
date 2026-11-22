@@ -78,15 +78,54 @@ def parse_mapping(text: str) -> dict:
     return dict(sorted(out.items()))
 
 
+_DESC_NO = re.compile(r"^(?:图|圖|picture|pic)?\s*(\d+)\s*[:：.、)]\s*", re.I)
+
+
 def parse_descriptions(text: str, pictures) -> dict:
-    """one line per picture (empty lines skipped) -> {picture: description}; every mapped picture needs one."""
+    """0.5.91 (user 16:53): optional.  -> {picture: description or ""}.  Lines 'picture 3: ...' / '图3：...' go to
+    that picture; lines without a number go to the pictures in order.  A picture without a line is described by
+    the AI that writes the prompts, from the picture itself (it asks the user what the picture does not show)."""
     lines = [l.strip() for l in (text or "").splitlines() if l.strip()]
-    lines = [re.sub(r"^(?:图|picture|pic)?\s*\d+\s*[:：.、)]\s*", "", l, flags=re.I) for l in lines]
     need = sorted(pictures)
-    if len(lines) < max(need):
-        raise KeyframeError(f"{TAG} write one description line per picture (race, age, face, hair, every garment); "
-                            f"{len(lines)} line(s) for pictures up to {max(need)}. 每张角色图写一行外貌描述。")
-    return {p: lines[p - 1] for p in need}
+    out = {p: "" for p in need}
+    numbered = [(_DESC_NO.match(l), l) for l in lines]
+    if any(m for m, _ in numbered):
+        for m, l in numbered:
+            if m and int(m.group(1)) in out:
+                out[int(m.group(1))] = l[m.end():].strip()
+    else:
+        for p, l in zip(need, lines):
+            out[p] = l
+    return out
+
+
+DESC_SLOT = "{{character picture %d}}"   # in the Remake prompt until the AI's answer gives that description
+
+
+def parse_characters(text):
+    """the AI's answer -> {picture: description} from "characters": {"3": "...", ...} (the numbers of
+    character_picture_N.png); {} when the answer has none"""
+    import json
+    try:
+        d = json.loads(str(text or ""))
+    except ValueError:
+        return {}
+    ch = d.get("characters") if isinstance(d, dict) else None
+    out = {}
+    if isinstance(ch, dict):
+        for k, v in ch.items():
+            m = re.search(r"\d+", str(k))
+            if m and isinstance(v, str) and v.strip():
+                out[int(m.group())] = v.strip()
+    return out
+
+
+def fill_characters(prompt, chars):
+    """put the AI's character descriptions into the Remake prompt -> (prompt, pictures still missing)"""
+    for p, d in (chars or {}).items():
+        prompt = prompt.replace(DESC_SLOT % int(p), d.rstrip("."))
+    left = sorted({int(x) for x in re.findall(r"\{\{character picture (\d+)\}\}", prompt)})
+    return prompt, left
 
 
 # ---------------------------------------------------------------------------------------------------- boxes
@@ -1265,10 +1304,19 @@ that the people in each keyframe are replaced by the character pictures and noth
 ## 1. Check the package first
 Read request.json. The package must contain: request.json, keyframe_1.png ... keyframe_N.png (one per entry in
 "keyframes"), every character_picture_*.png named in "pictures", and per keyframe a "sentence" and for every picture
-"replaces_person_from_left" and a "description". "people_in_frame" must match the people you see in the keyframe.
-If something is missing or does not match (a file, a description, the number of people, a person who is not
-there), stop and tell the user exactly what is missing and how to fix it (run Export again, write the description,
-...). Do not guess.
+"replaces_person_from_left". "people_in_frame" must match the people you see in the keyframe.
+If something is missing or does not match (a file, the number of people, a person who is not there), stop and tell
+the user exactly what is missing and how to fix it (run Export again, ...). Do not guess.
+
+## 1b. The characters (request.json "characters")
+Every character picture has a "description" - often empty. Where it is empty, YOU describe the person from the
+picture. Before you write any prompt, check what the keyframes need of each character against what the picture
+shows: when a keyframe shows a part the picture does not (the legs and shoes of a half-body picture, the back, a
+hat or bag hidden in the picture), ASK THE USER what the character wears there and wait for the answer - never
+invent it. One question for all characters at once ("Picture 2 shows her only to the waist: what trousers / skirt
+and shoes does she wear?"). A description the user already wrote is right: use it and add only what it lacks.
+Then fix ONE sentence per character, head to toe (face, hair, every garment, shoes, what they do not have - bare
+hands, no hat): it goes into the answer as "characters" and into every keyframe prompt unchanged.
 
 ## 2. What the edit model gets
 For keyframe k: <Picture 1> = keyframe_k.png (the original video frame), <Picture 2>, <Picture 3>, ... = the
@@ -1281,10 +1329,10 @@ numbers before you write it.
 H3 Image draws what the text says: the prompt decides the result. Read the keyframe carefully.
 
 ## 3. Write each prompt (English, the structure of the official H3 Image prompt enhancer)
-  a. Define every character picture as a Subject and describe the person positively and completely, head to toe,
-     from the picture and its "description": face, hair, every garment, shoes - and what they do NOT have (bare
-     hands, no gloves). Never describe or mention the clothes of the people in <Picture 1>; never write what to
-     remove. Use the same sentence for a character in every keyframe.
+  a. Define every character picture as a Subject with its sentence from 1b (positive and complete, head to toe,
+     incl. what they do NOT have - bare hands, no gloves). Never describe or mention the clothes of the people in
+     <Picture 1>; never write what to remove. The same sentence for a character in every keyframe (leave out only
+     the parts the frame cuts off, see c).
   b. Define <Picture 1> as a Subject that is partially preserved: background, floor, lighting, camera angle,
      framing and crop, the places, spacing and sizes of the people, who is in front, the overlaps.
   c. Body parts the frame cuts off are not mentioned (feet outside the picture: no shoes for that person) - else
@@ -1319,10 +1367,14 @@ sure about something, say so instead of guessing.
 
 ## 5. Answer (the user imports it with one button - no copy and paste)
 Best: send back this package as the file  {answer_file}  : the same zip, every file unchanged, with one file
-added at the top: prompts.json = {{"package": "{package}", "prompts": {{"1": "prompt for keyframe 1", "2": "..."}}}}.
+added at the top: prompts.json = {{"package": "{package}", "characters": {{"2": "sentence for
+character_picture_2", ...}}, "prompts": {{"1": "prompt for keyframe 1", "2": "..."}}}}.
+"characters" uses the numbers of the character_picture_N.png files (not the <Picture N> numbers of a keyframe) and
+holds your sentence from 1b for every character; the Director's video prompt uses them.
 If you cannot make files: give the user the text of that prompts.json and tell them to save it as
 {answer_json}  next to the export package.
-Only redoing some keyframes: put only those numbers in "prompts"; the user picks the same numbers on the Redo node.
+Only redoing some keyframes: put only those numbers in "prompts" (keep "characters"); the user picks the same
+numbers on the Redo node.
 The folder _h3md/ is for the nodes - leave it as it is.
 """
 
@@ -1388,6 +1440,10 @@ def swap_prompt(length, chosen, descs, n_people, changes, names, looks=None, peo
         return f"performer #{k}"
     sub = {pid: f"<Subject {n}>" for n, (_, _, pid) in enumerate(chosen, 1)}
 
+    def desc(p):   # 0.5.91 (16:53): no description given - the AI's answer fills it in (fill_characters)
+        d = (descs.get(p) or "").strip().rstrip(".")
+        return d or DESC_SLOT % p
+
     def who(pid):
         return sub.get(pid) or names.get(pid) or "another performer"
 
@@ -1400,7 +1456,7 @@ def swap_prompt(length, chosen, descs, n_people, changes, names, looks=None, peo
              "performers change places."]
     for n, (p, k, pid) in enumerate(chosen, 1):
         orig = f", {looks[k]}" if looks.get(k) else ""
-        lines.append(f"<Subject {n}> is {descs[p].rstrip('.')}; this subject replaces {first_seen(k)}{orig}.")
+        lines.append(f"<Subject {n}> is {desc(p)}; this subject replaces {first_seen(k)}{orig}.")
     lines.append("In every frame each Subject has the face, hair and clothes described here, never those of the "
                  "performer they replace.")
     rest = n_people - len(chosen)
@@ -1421,7 +1477,7 @@ def swap_prompt(length, chosen, descs, n_people, changes, names, looks=None, peo
                                                            else "") +
               "; the face, hair and outfit of the recast performers are not carried over."]
     for n, (p, _, _) in enumerate(chosen, 1):
-        lines.append(f"<Subject {n}>: fully_preserved - {descs[p].rstrip('.')}, identical in every moment.")
+        lines.append(f"<Subject {n}>: fully_preserved - {desc(p)}, identical in every moment.")
     lines.append("Source audio: fully_copy - the original soundtrack and its synchronisation are kept.")
     order = ", ".join(who(pid) for pid in names)
     def move(pr):

@@ -689,12 +689,12 @@ class H3MDKeyframePrepare:
                                        "click = picture 1 ...) and run again (the tracking is reused: seconds), or "
                                        "write '图1换3号' / 'picture 1 -> 3'. 留空 = 自动；跑一次后点下面的人来挑。"}),
                 "descriptions": ("STRING", {"multiline": True, "default": "", "tooltip":
-                                            "One line per picture, in picture order, head to toe: race, age, face, "
-                                            "hair, every garment and the shoes (e.g. 'a Black man in his twenties, short "
-                                            "black hair, red bomber jacket, white T-shirt, black jeans, white sneakers, "
-                                            "bare hands'). ALWAYS write what the picture does not show (a half-body "
-                                            "picture: trousers and shoes) - nobody else can know it. Used by the AI and "
-                                            "in the Remake prompt; English."}),
+                                            "Optional (0.5.91). Leave empty: the AI that writes the keyframe prompts "
+                                            "describes every character from its picture and asks you what the picture "
+                                            "does not show (a half-body picture: trousers and shoes). Or write a line "
+                                            "per picture, e.g. 'picture 2: a Black man in his twenties, short black "
+                                            "hair, red bomber jacket, black jeans, white sneakers' - the AI uses it as "
+                                            "it is. English."}),
                 "people_at_start": ("STRING", {"multiline": True, "default": "", "tooltip":
                                     "Optional: one line per person of the cast sheet (#1, #2 ... = order of first appearance), what "
                                     "they look like now (e.g. 'the woman with wavy dark-brown hair in a red crop top'). "
@@ -1099,8 +1099,17 @@ class H3MDKeyframeExport:
                             "people_from_left": people_places(m),
                             "sentence": K.swap_sentence([(it["rank"], j + 2) for j, it in enumerate(m["items"])],
                                                         n_people)})
+            # 0.5.91 (user 16:53): every character once - an empty description = the AI describes the picture and
+            # asks the user what it does not show; its sentences come back as "characters"
+            descs_of = {}
+            for m in todo:
+                for it in m["items"]:
+                    descs_of.setdefault(int(it["picture"]), it.get("desc", ""))
+            chars = [{"picture": p, "file": saved.get(p, f"character_picture_{p}.png"), "description": d,
+                      "describe_it": not d} for p, d in sorted(descs_of.items())]
             z.writestr("request.json", json.dumps({"package": stem, "answer_file": imp + ".h3kf",
-                                                   "video": job.get("video"), "keyframes": req},
+                                                   "video": job.get("video"), "characters": chars,
+                                                   "keyframes": req},
                                                   ensure_ascii=False, indent=1))
             z.writestr("README_for_AI.md", K.AI_README.format(package=stem, answer_file=imp + ".h3kf",
                                                               answer_json=imp + ".json"))
@@ -1215,6 +1224,28 @@ class H3MDKeyframeImport:
         job, pictures, prompts, request = read_package(path)
         todo = [m for m in job["moments"] if m["items"]]
         given = K.parse_prompts(prompts, len(todo))
+        # 0.5.91 (user 16:53): the AI's character sentences go into the Director's video prompt; kept next to the
+        # export package so a later answer that only redoes some keyframes still has them
+        stem = str(request.get("package") or "")
+        store = os.path.join(_pkg_dir(), os.path.basename(stem) + "_characters.json") if stem else ""
+        chars = {}
+        if store and os.path.isfile(store):
+            try:
+                chars = {int(k): v for k, v in json.load(open(store, encoding="utf-8")).items()}
+            except (ValueError, OSError):
+                chars = {}
+        new_chars = K.parse_characters(prompts)
+        if new_chars and store:
+            chars.update(new_chars)
+            with open(store, "w", encoding="utf-8") as fh:
+                json.dump({str(k): v for k, v in sorted(chars.items())}, fh, ensure_ascii=False, indent=1)
+        job["prompt"], missing = K.fill_characters(job.get("prompt", ""), chars)
+        if missing:
+            raise K.KeyframeError(
+                f"{TAG} the answer does not describe character picture(s) {missing}: ask the AI to add "
+                '"characters": {"N": "one sentence, head to toe"} to prompts.json (the numbers of '
+                "character_picture_N.png), or write their descriptions on Prepare. 回包里缺角色图 "
+                f"{missing} 的描述，请让 AI 在 prompts.json 里补上 characters。")
         shown = [job["frames"][m["at"]] for m in todo]
         labels = [f"#{k}  {m['at']:.2f} s" for k, m in enumerate(todo, 1)]
         info = (f"{os.path.basename(path)}: {len(todo)} keyframes, prompts for {sorted(given)}"
