@@ -587,7 +587,8 @@ def identify(per_frame, times, cuts=(), faces=None, looks=None):
     for n_, g in enumerate(anchors):
         for k in g:
             owner[k] = n_
-    for g in sorted(rest, key=size):
+    def place(g):
+        """-> (anchor index or None, why, scored candidates) for a group of pieces"""
         cand = [(g_score(g, a), x) for x, a in enumerate(anchors) if g_tog(g, a) <= ID_TOGETHER]
         scored = sorted([c for c in cand if c[0] is not None], key=lambda c: -c[0])
         why, to = None, None
@@ -605,13 +606,41 @@ def identify(per_frame, times, cuts=(), faces=None, looks=None):
                 nb = {owner.get((pid, s_, parts[0] - 1)), owner.get((pid, s_, parts[-1] + 1))}
                 if len(nb) == 1 and None not in nb and any(c[1] in nb for c in cand):
                     why, to = "same track", nb.pop()
+        return to, why, scored
+
+    def join(g, to, why, scored):
+        anchors[to] += g
+        for k in g:
+            owner[k] = to
+        joins.append({"new": g[0][0], "into": anchors[to][0][0], "at": round(times[tl[g[0]][0]], 2), "why": why,
+                      "look": round(scored[0][0], 3) if scored else 0.0})
+
+    for g in sorted(rest, key=size):
+        to, why, scored = place(g)
         if to is not None:
-            anchors[to] += g
-            for k in g:
-                owner[k] = to
-            joins.append({"new": g[0][0], "into": anchors[to][0][0], "at": round(times[tl[g[0]][0]], 2), "why": why,
-                          "look": round(scored[0][0], 3) if scored else 0.0})
+            join(g, to, why, scored)
             continue
+        if len(g) > 1:
+            # 0.5.91 (_040, 21:17): a merged group is blocked as a whole when ONE of its pieces shares frames with a
+            # person (H3MD_00168: the centre woman's 3.0-8.7 s piece was merged with a 8.7-9.3 s piece of the next
+            # shot that sat on her together with her own number; the whole group stayed 'kept' and she was not
+            # replaced at 3-8.7 s).  Each piece then gets its own chance, biggest first; the ones that fit join.
+            keep = []
+            for k in sorted(g, key=lambda k: -len(tl[k])):
+                t2, w2, s2 = place([k])
+                if t2 is not None:
+                    join([k], t2, w2 + ", piece of a blocked group", s2)
+                else:
+                    keep.append(k)
+            if len(keep) < len(g):
+                notes.append(f"a group of {len(g)} pieces was blocked as a whole; {len(g) - len(keep)} joined one by one")
+            if not keep:
+                continue
+            g = sorted(keep, key=lambda k: tl[k][0])
+            to, why, scored = place(g)
+            if to is not None:
+                join(g, to, why, scored)
+                continue
         left.append(g)
         if size(g) >= ID_MIN_DET and scored and scored[0][0] >= ID_LOOSE:
             unsure.append({"new": g[0][0], "at": round(times[tl[g[0]][0]], 2),
