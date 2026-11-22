@@ -2,6 +2,22 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.6.1] - 2026-11-22
+
+### Changed / 变更
+- Multi-person swap keyframes: **as many as the Director needs, not one every 2-4 s.** Keyframe Prepare now takes one
+  keyframe per part the Director makes on the GPU it runs on (a 5090: one per about 12 s; the first one on the first
+  clear frame), the keyframe after a shot cut is also the large clear one (most people, then biggest), and a person
+  still without a large clear keyframe gets one. The 0.5.91 rule "every replaced person at least every 3 s" is gone
+  (it dated from before the Director cut on keyframes). Spare keyframes follow THIS GPU instead of a fixed 16 GB card:
+  only where a gap is longer than one of its parts. `max_gap_s` 0 (new default) = automatic. A 38 s five-person clip
+  on a 5090: 19 keyframes -> 9; 28.5 s three dancers: 14 -> 5 - Recast takes a third of the time.
+  多人换人关键帧按导演台实际需要取：按这块显卡导演台每段一张（5090 约 12 秒一张，开头那张取第一个清楚的画面），剪辑点后那张同时就是
+  大而清楚的那张，还缺的人再补一张；"每人每 3 秒一张"删除（接缝修好前的保底）；备用关键帧按本机显卡、只在空档比一段长的地方插一张。
+  max_gap_s 默认 0 = 自动。38 秒五人片 19 张 -> 9 张，三人舞 14 -> 5，画关键帧的时间约为原来的三分之一。
+- A slot with no clear frame takes a lit frame that is not a double box when there is one (a double box at 1.17 s had
+  been a keyframe). 没有合格帧时也优先取不暗、不是一框两人的帧。
+
 ## [0.6.0] - 2026-11-22
 
 ### Added / 新增

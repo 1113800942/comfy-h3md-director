@@ -143,7 +143,7 @@ def test_pick_moments_gap_and_crossing():
     m = K.pick_moments(fr, {11, 12}, duration=25.0, max_gap=5.0)
     ts = [fr[i]["at"] for i, _ in m]
     assert ts[0] <= 5.0
-    assert all(b - a <= 5.0 + 1e-6 for a, b in zip(ts, ts[1:]))
+    assert len(m) == 5 and all(b - a <= 2 * 5.0 + 1e-6 for a, b in zip(ts, ts[1:]))   # 0.6.1: one per 5 s slot (gaps over a part: spares)
     assert 25.0 - ts[-1] <= 5.0
     assert not any(4.2 < t < 4.8 for t in ts)    # never while the two cross
     assert all(k == "swap" for _, k in m)
@@ -264,3 +264,34 @@ def test_dark_frames_are_no_keyframes():
     img[10:30, 10:20] = 200
     assert abs(K.people_light(img, [[0.1, 0.2, 0.3, 0.8]]) - 200 / 255) < 0.02
     assert K.people_light(img, [[0.6, 0.2, 0.9, 0.8]]) == 0.0
+
+
+def test_one_keyframe_per_part():
+    """0.6.1 (user 01:33): one keyframe per Director part - a 38 s clip with 12 s parts gets ceil(38 / 12) = 4 slot
+    keyframes, the first near the start; with 5 s slots 8.  The 3 s per-person cover (ensure_cover) is gone."""
+    fr = []
+    for i in range(int(38 * 6)):
+        t = i / 6.0
+        fr.append({"at": t, "who": [[1, [0.1, 0.2, 0.3, 0.95]], [2, [0.5, 0.2, 0.7, 0.95]], [3, [0.75, 0.2, 0.9, 0.95]]]})
+    for gap, n in ((12.0, 4), (5.0, 8)):
+        m = K.pick_moments(fr, {1, 2, 3}, 38.0, max_gap=gap)
+        ts = [fr[i]["at"] for i, _ in m]
+        assert len(m) == n and ts[0] < 0.5 and all(b - a <= 2 * 38.0 / n + 0.2 for a, b in zip(ts, ts[1:]))
+    assert not hasattr(K, "ensure_cover")
+
+
+def test_slot_without_clear_frame_avoids_double_boxes():
+    """0.6.1: a slot with no frame score() accepts takes a frame that is not a double box when there is one"""
+    fr = []
+    for i in range(60):
+        t = i / 6.0
+        fr.append({"at": t, "who": [[1, [0.1, 0.2, 0.3, 0.95]], [2, [0.5, 0.2, 0.7, 0.95]]], "bad": t < 4.0 or t > 4.5})
+    for f in fr:
+        if not f["bad"]:
+            f["dark"] = True                     # the only non-double-box frames are dark: then any usable one
+    m = K.pick_moments(fr, {1, 2}, 10.0, max_gap=12.0)
+    assert len(m) == 1
+    fr[30]["dark"] = False; fr[30]["bad"] = False; fr[30]["at"] = 5.0
+    fr[29]["bad"] = True
+    m = K.pick_moments([dict(f, bad=True) if i != 30 else f for i, f in enumerate(fr)], {1, 2}, 10.0, max_gap=12.0)
+    assert m and m[0][0] == 30

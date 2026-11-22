@@ -55,22 +55,3 @@ def _clip():
     return fr
 
 
-def test_cover_holds_for_any_split():
-    """2026-11-21 _009 trial: part 1 (0-7.3 s) had no keyframe of the man who walked in at 3.3 s.  ensure_cover puts
-    a keyframe of every replaced person at least every COVER_S s, so a part of any length >= COVER_S where he is
-    seen has one - whatever split the GPU of the run gives."""
-    fr, ids = _clip(), {1, 2}
-    idx = {round(f["at"], 2): i for i, f in enumerate(fr)}
-    moments = [(idx[1.0], "swap"), (idx[7.0], "swap"), (idx[14.83], "swap")]
-    out, notes, warns = K.ensure_cover(fr, moments, ids, 19.33)
-    assert notes and not warns
-    for part in (K.COVER_S, 3.5, 5.0, 7.29, 10.0):
-        t0 = 0.0
-        while t0 + part <= 19.33:
-            a, b = t0, t0 + part
-            shown = set().union(*[K.kf_people(fr, i, ids) for i, _ in out if a <= fr[i]["at"] < b] or [set()])
-            need = {pid for pid in ids
-                    if sum(1 for j, f in enumerate(fr) if a <= f["at"] < b and pid in K.kf_people(fr, j, ids)) / 6.0
-                    >= part - 0.01}                             # seen the whole part
-            assert need <= shown, (part, a, b, need, shown)
-            t0 += 0.5
