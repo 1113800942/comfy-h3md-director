@@ -225,6 +225,10 @@ faces), so the source decides how far it goes:
 - **Not supported:** music videos with edited-in effects - a person changing clothes from one frame to the next, a face
   morphing into another person's, transitions that blend two people. There the source frame itself holds two people at
   once, so no keyframe can say who it is.
+- **GPU: 16 GB VRAM or more.** The Director cuts the video into parts that fit your GPU and starts every part on a
+  keyframe; Prepare adds spare keyframes ("(spare)" on the sheets) so that a 16 GB GPU finds one at every cut, and a
+  bigger GPU simply leaves them out. Below 16 GB it is not supported. A stretch made only of close-ups cannot hold a
+  keyframe at all; if a part has to start there, the Director names the second in its notes.
 
 ## Reporting a problem
 
