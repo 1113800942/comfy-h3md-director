@@ -17,10 +17,13 @@ part is kept on disk, and you repair only what went wrong — down to a few seco
 | <img src="docs/media/palace_1080p_story.gif" width="420"> | <img src="docs/media/motion_copy_depth_vs_result.gif" width="420"> |
 | **Music video**: lip-synced to a locked song (1920×1088, 2 min 40 s, excerpt) | **Music video**: empty aerial shot, the song keeps playing (excerpt) |
 | <img src="docs/media/mv_1080p_singing.gif" width="420"> | <img src="docs/media/mv_1080p_everest.gif" width="420"> |
+| **Multi-person swap (0.6.0)**: the source - three dancers (28.5 s, excerpt) | **Multi-person swap**: the same clip with three new characters - motion, lips, blackout and place change kept (1664×960) |
+| <img src="docs/media/multiswap_3dancers_source.gif" width="420"> | <img src="docs/media/multiswap_3dancers_swap.gif" width="420"> |
 
 ## Highlights
-- **Multi-person swap (0.5.0)**: replace several people in a real video with your own characters - the motion,
-  camera, lip movement and sound stay. Runs Viggle Remake inside the Director; you (or your agent) paint a few keyframes.
+- **Multi-person swap (0.6.0)**: replace 1-5 people in a real video with your own characters - the motion,
+  camera, lip movement and sound stay. One keyframe workflow with buttons: link pictures to people on the cast panel,
+  an AI writes the keyframe prompts, H3 Image redraws the keyframes, the Director runs Viggle Remake.
 - **Seamless long video (0.4.0, CCW)**: tick one switch on the Director and continued shots are rendered together on one
   timeline with Chained Context Windows — no continuation seams, no drift, no double images; hard cuts stay clean.
 - **Long video in one run**: 2–3 minutes at 1080p (measured: a 2 min 20 s music video at 1920×1088 in 2 h 18 min on an RTX 5090).

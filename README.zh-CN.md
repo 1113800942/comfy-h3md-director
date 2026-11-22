@@ -17,10 +17,12 @@
 | <img src="docs/media/palace_1080p_story.gif" width="420"> | <img src="docs/media/motion_copy_depth_vs_result.gif" width="420"> |
 | **MV**：跟锁定的歌曲对口型（1920×1088，2 分 40 秒，节选） | **MV**：空镜，歌声继续（节选） |
 | <img src="docs/media/mv_1080p_singing.gif" width="420"> | <img src="docs/media/mv_1080p_everest.gif" width="420"> |
+| **多人换人（0.6.0）**：原片，三人跳舞（28.5 秒，节选） | **多人换人**：同一段换成三个新角色，动作、口型、熄灯和换位都保留（1664×960） |
+| <img src="docs/media/multiswap_3dancers_source.gif" width="420"> | <img src="docs/media/multiswap_3dancers_swap.gif" width="420"> |
 
 ## 亮点
-- **多人换人(0.5.0)**:把真人视频里的几个人换成你的角色,动作、镜头、口型和声音都保留。导演台里直接跑
-  Viggle Remake;你(或你的智能体)画几张关键帧即可。
+- **多人换人（0.6.0）**：把真人视频里 1–5 个人换成你的角色，动作、镜头、口型和声音都保留。一个关键帧工作流全用按钮：
+  演员表上把图连到人，AI 写关键帧提示词，H3 Image 重画关键帧，导演台跑 Viggle Remake。
 - **无接缝长视频（0.4.0，CCW）**：导演台上勾一个开关，续接的镜头用接续窗口（Chained Context Windows）在同一条时间线上
   一起生成——没有续接接缝、不漂移、不重影；硬切照常是干净的硬切。
 - **一次生成长视频**：1080p 2–3 分钟（实测：2 分 20 秒 MV，1920×1088，RTX 5090 用时 2 小时 18 分）。
