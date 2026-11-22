@@ -1473,6 +1473,11 @@ numbers before you write it.
 H3 Image draws what the text says: the prompt decides the result. Read the keyframe carefully.
 
 ## 3. Write each prompt (English, the structure of the official H3 Image prompt enhancer)
+First reverse-read, then map: describe <Picture 1> as it is, person by person - exactly which parts of each person
+are visible and what hides or cuts the rest - then write the same visible parts in the new person's looks. A person
+who shows a little (the top of a head, an arm, a leg) is written as that little, in the new person's own hair and
+clothing colours, never as a whole person (else the model draws a whole extra person); no clothing colour of a
+replaced person stays. Say how many people are seen whole and who shows only a small part.
   a. Define every character picture as a Subject with its sentence from 1b (positive and complete, head to toe,
      incl. what they do NOT have - bare hands, no gloves). Never describe or mention the clothes of the people in
      <Picture 1>; never write what to remove. The same sentence for a character in every keyframe (leave out only
@@ -1481,8 +1486,8 @@ H3 Image draws what the text says: the prompt decides the result. Read the keyfr
      framing and crop, the places, spacing and sizes of the people, who is in front, the overlaps.
   c. Body parts the frame cuts off are not mentioned (feet outside the picture: no shoes for that person) - else
      the model pulls the camera back. Say where the frame cuts each person. A person mostly outside the frame or
-     almost hidden behind someone: write only the part that shows and that the rest is outside / hidden by whom,
-     else the model draws all of him.
+     almost hidden behind someone: write only the part that shows, in the new person's own colours, without his
+     full head-to-toe sentence, and that the rest is outside / hidden by whom, else the model draws all of him.
   d. For every replaced person, which Subject takes which place, and every one of these, read from <Picture 1>:
      - body orientation and how far it is turned; head turn and tilt (towards which side of the image), up/down;
        a clear tilt or lean must be written plainly, else it comes out straight;

@@ -22,6 +22,7 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   at 1.17 s had been a keyframe). 没有合格帧时也优先取不暗、不是一框两人的帧。
 - The Director no longer warns about a part that starts between keyframes: it continues from the carried frames.
   导演台不再把"某段开头没有关键帧"当警告：它接着上一段带过来的帧继续。
+- Keyframe skill and README_for_AI: first reverse-read the keyframe (which parts of each person show), then map to the new people; a person who shows a little is written as that little in the new person's own colours, never as a whole person. 关键帧 skill 和包内 README_for_AI：先反推原图（每个人露出哪些部分），再一一对应到新人；只露一点的人只写这一点，用新人自己的颜色，绝不写成完整的人。
 
 ## [0.6.0] - 2026-11-22
 
