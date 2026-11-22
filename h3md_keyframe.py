@@ -728,6 +728,61 @@ def resolve(mapping: dict, people: list) -> list:
     return out
 
 
+TWIN_MIN_S = 1.0       # 0.5.91 (user 16:11, 00154 cast #4 7.0-7.8 s; _022 keyframe 8): two ids seen together this
+TWIN_SHARE = 0.6       # long (or for most of the shorter one's life, at least TWIN_MIN_N frames), with boxes overlapping
+TWIN_MIN_N = 3         # more than DUP_IOU in this share of those frames, are ONE person boxed twice - merged
+
+
+def merge_twins(frames):
+    """one person with two boxes at the same time, for a whole stretch -> one id.  Two real people never keep
+    near-identical boxes for TWIN_MIN_S (one in front of the other: the hidden one's box is smaller or shifted).
+    frames: report() output, changed in place.  -> (frames, notes)"""
+    if len(frames) < 2:
+        return frames, []
+    step = (frames[-1]["at"] - frames[0]["at"]) / (len(frames) - 1) or 1.0
+    count, both, same = {}, {}, {}
+    for f in frames:
+        who = f.get("who") or []
+        for pid, _ in who:
+            count[pid] = count.get(pid, 0) + 1
+        for i in range(len(who)):
+            for j in range(i + 1, len(who)):
+                key = tuple(sorted((who[i][0], who[j][0])))
+                both[key] = both.get(key, 0) + 1
+                if iou(who[i][1], who[j][1]) > DUP_IOU:
+                    same[key] = same.get(key, 0) + 1
+    root = {}
+
+    def find(x):
+        while root.get(x, x) != x:
+            x = root[x]
+        return x
+
+    notes = []
+    for (a, b), n in sorted(both.items(), key=lambda kv: -kv[1]):
+        short = min(count.get(a, 0), count.get(b, 0))
+        k = same.get((a, b), 0)
+        if k < TWIN_MIN_N or (n * step < TWIN_MIN_S - 1e-6 and n < TWIN_SHARE * short) or k < TWIN_SHARE * n:
+            continue
+        ra, rb = find(a), find(b)
+        if ra == rb:
+            continue
+        keep, drop = (ra, rb) if count.get(ra, 0) >= count.get(rb, 0) else (rb, ra)
+        root[drop] = keep
+        notes.append(f"track {drop} is a second box on track {keep} ({n * step:.1f} s together, boxes the same): "
+                     "merged")
+    if not root:
+        return frames, []
+    for f in frames:
+        out = {}
+        for pid, b in f.get("who") or ():
+            r = find(pid)
+            if r not in out or pid == r:
+                out[r] = b
+        f["who"] = sorted([[pid, b] for pid, b in out.items()], key=lambda w: (w[1][0] + w[1][2]) / 2)
+    return frames, notes
+
+
 # ---------------------------------------------------------------------------------------------------- moments
 def _motion(frames, i, pid):
     """how far this person's box centre moves between the neighbouring sampled frames (share of the frame width)"""

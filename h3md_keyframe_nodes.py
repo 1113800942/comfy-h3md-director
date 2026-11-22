@@ -817,6 +817,9 @@ class H3MDKeyframePrepare:
             _TRACK_CACHE.clear()
             _TRACK_CACHE[tkey] = (times, small, per_frame, reid_joins, reid_unsure, face_boxes)
         frames = K.report(per_frame, times)
+        frames, twin_notes = K.merge_twins(frames)   # 0.5.91 (16:11): one person boxed twice = one id, not 2 numbers
+        for n_ in twin_notes:
+            LOG.info("%s %s", TAG, n_)
         frames, clean_notes = K.clean_frames(frames, face_boxes)   # 0.5.91: double / wide / hidden boxes
         LOG.info("%s %s", TAG, clean_notes[0])
         people = K.cast(frames)
