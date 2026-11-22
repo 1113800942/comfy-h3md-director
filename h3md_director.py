@@ -1076,12 +1076,15 @@ def normalize_keyframes(value, n, length: int, overlap: int, media: dict, notes:
         # its 4 keyframes so that every person of the part is shown (h3md_remake_engine.pick_keyframes)
         ppl = e.get("people")
         ppl = sorted({int(x) for x in ppl}) if isinstance(ppl, list) and all(_num(x) is not None for x in ppl) else None
-        by_frame[frame] = (image, ppl)
+        # 0.5.91 seams: "backup": true = a spare keyframe, used only where this GPU's split puts a part start that no
+        # main keyframe reaches (h3md_autosplit.plan_parts_kf); never used on a shot that is not split
+        by_frame[frame] = (image, ppl, bool(e.get("backup")))
     out = [dict({"image": by_frame[f][0], "frame": f}, **({"people": by_frame[f][1]} if by_frame[f][1] is not None
-                                                         else {}))
+                                                         else {}), **({"backup": True} if by_frame[f][2] else {}))
            for f in sorted(by_frame)]
     if out:
-        notes.append(f"segment {n}: keyframes at " + ", ".join(f"{k['frame'] / FPS:.2f} s ({k['image']})"
+        notes.append(f"segment {n}: keyframes at " + ", ".join(f"{k['frame'] / FPS:.2f} s ({k['image']}"
+                                                               f"{', spare' if k.get('backup') else ''})"
                                                                for k in out))
     return out
 

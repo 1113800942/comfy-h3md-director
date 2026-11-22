@@ -52,6 +52,27 @@ def _plan_io():
     return h3md_plan_io
 
 
+SPARE_GPU_AVAIL_GIB = 15.99 - 0.68   # a 16 GB card with ComfyUI's default reserve (no --vram-headroom)
+
+
+def spare_new_frames(size, src_size) -> int:
+    """New frames a Director part carries at most on the smallest supported GPU (16 GB), for this swap plan: the
+    Director's own token budget and part-length search (Remake size, the source as the auto-tier reference video,
+    Remake's 345-frame cap), minus the 39 carried frames."""
+    try:
+        from . import h3md_director as D, h3md_autosplit as AS
+    except ImportError:
+        import h3md_director as D
+        import h3md_autosplit as AS
+    w, h = int(size[0]), int(size[1])
+    raw = {"swapEngine": "remake", "refVideoHeight": "auto"}
+    budget = AS.token_budget(raw, D.REF_VIDEO_AUTO_TOKEN_LIMIT, int(SPARE_GPU_AVAIL_GIB * AS.GIB))["tokens"]
+    seg = {"videos": [{"id": "src", "depth": False}], "images": []}
+    lmax = AS.max_length(D, seg, {("videos", "src"): (int(src_size[0]), int(src_size[1]))}, w, h, "auto", budget)
+    lmax = min(lmax, AS.REMAKE_MAX)
+    return max(17, lmax - AS.AUTO_OVERLAP)
+
+
 # ------------------------------------------------------------------------------------------------- video
 def resolve_video(video: str) -> str:
     import folder_paths
@@ -845,9 +866,18 @@ class H3MDKeyframePrepare:
         moments, cov_notes, cov_warns = K.ensure_cover(frames, moments, ids, dur)
         id_warns = list(id_warns) + cov_warns
         fin_notes = full_notes + id_notes + fin_notes + cov_notes
+        # 0.5.91 seams (user 19:03): spare keyframes for small GPUs - the Director cuts on keyframes and takes a spare
+        # only where its parts are too short to reach the next main one; a 16 GB GPU is the smallest supported
+        try:
+            gap_s = K.spare_gap(spare_new_frames(size, (info["width"], info["height"])))
+            spare_idx, spare_notes = K.add_spares(frames, moments, ids, dur, gap_s, cuts)
+        except Exception as exc:
+            spare_idx, spare_notes = [], [f"spare keyframes skipped ({exc})"]
+        fin_notes += spare_notes
         for n_ in fin_notes:
             LOG.info("%s %s", TAG, n_)
         LOG.info("%s keyframes at %s s (close-ups skipped)", TAG, [round(frames[i]["at"], 2) for i, _ in moments])
+        moments = sorted(list(moments) + [(i, "spare") for i in spare_idx], key=lambda m: frames[m[0]]["at"])
         try:   # 0.5.9: tracking data next to the sources, so the moment rules can be checked again without a run
             import json as _json
             dbg = os.path.join(folder_paths.get_input_directory(), KF_SUBDIR, SOURCES_SUBDIR,
@@ -903,8 +933,9 @@ class H3MDKeyframePrepare:
                 items.append({"picture": p, "left": k, "id": pid, "own": ob, "others": others,
                               "others_ids": [q for q, b in allb if q != pid], "rank": rank, "n": n_here,
                               "desc": descs[p], "look": looks.get(k, ""), "cut_bottom": bool(K.cut_at_bottom(own))})
-            job_moments.append({"at": t, "kind": "swap" if items else "plain", "items": items,
-                                "boxes": [list(b) for q, b in allb]})
+            job_moments.append(dict({"at": t, "kind": "swap" if items else "plain", "items": items,
+                                     "boxes": [list(b) for q, b in allb]},
+                                    **({"backup": True} if kind == "spare" else {})))
             pbar.update(1)
         if slivers:
             LOG.info("%s only a strip at the frame edge, not recast there: %s", TAG, ", ".join(slivers))
@@ -929,7 +960,8 @@ class H3MDKeyframePrepare:
                           "picture": next((p for p, k, _ in chosen if k == n), None)}
                          for n, a in enumerate(people, 1)],
                 "mapping": [{"picture": p, "person": k} for p, k, _ in chosen],
-                "keyframes": [{"at": m["at"], "recast": [it["picture"] for it in m["items"]]} for m in job_moments],
+                "keyframes": [dict({"at": m["at"], "recast": [it["picture"] for it in m["items"]]},
+                                   **({"spare": True} if m.get("backup") else {})) for m in job_moments],
                 "place_changes": [{"from": a, "to": b} for a, b, pr in changes if pr],
                 "cuts": cuts,
                 "recasts": len(pictures), "warnings": warnings, "reid": reid_joins}
@@ -997,10 +1029,11 @@ class H3MDKeyframeAssemble:
             fr = int(round(m["at"] * K.FPS))
             fn = f"kf_{fr:04d}.png"
             Image.fromarray(out).save(os.path.join(kdir, fn))
-            kfs.append((f"kf{mi + 1}", f"{rel}/{fn}", m["at"], sorted({int(i["left"]) for i in m["items"]})))
+            kfs.append((f"kf{mi + 1}", f"{rel}/{fn}", m["at"], sorted({int(i["left"]) for i in m["items"]}),
+                        bool(m.get("backup"))))
             imgs.append(out)
             label = f"{m['at']:.2f} s  " + ("pic " + ", ".join(str(i["picture"]) for i in m["items"])
-                                             if m["items"] else "source frame")
+                                             if m["items"] else "source frame") + ("  (spare)" if m.get("backup") else "")
             labels.append(label)
         plan = K.build_plan(job["video"], job["duration"], job["has_audio"], (W, H), job["length"], kfs,
                             job["prompt"], name)
@@ -1078,7 +1111,7 @@ class H3MDKeyframeExport:
                 fr = np.ascontiguousarray(job["frames"][m["at"]])
                 z.writestr(kf, _png_bytes(fr))
                 shown.append(fr)
-                labels.append(f"#{k}  {m['at']:.2f} s")
+                labels.append(f"#{k}  {m['at']:.2f} s" + ("  (spare)" if m.get("backup") else ""))
                 files = []
                 for it, r in zip(m["items"], refs):
                     f = f"character_picture_{it['picture']}.png"

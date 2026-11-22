@@ -1144,6 +1144,55 @@ def ensure_cover(frames, moments, chosen_ids, duration, every=COVER_S, min_s=COV
     return sorted(out, key=lambda m: frames[m[0]]["at"]), notes, warns
 
 
+SPARE_GPU_GB = 16.0       # 0.5.91 seams (user 2026-11-21 19:03): the smallest GPU H3MD supports for the swap
+SPARE_LOOK = 0.25         # a spare is picked within this share of the gap around its target moment
+
+
+def spare_gap(max_new_frames: int) -> float:
+    """Longest gap (s) between keyframes that a GPU whose parts carry at most max_new_frames new frames can still
+    start every part on: the Director cuts on 17-frame steps, so one step is kept as margin."""
+    return max(17, (int(max_new_frames) // 17 - 1) * 17) / FPS
+
+
+def add_spares(frames, moments, chosen_ids, duration, max_gap_s, cuts=()):
+    """0.5.91 seams (user 2026-11-21 19:03): spare keyframes.  The Director cuts a long shot so that every part's new
+    frames begin on a keyframe (h3md_autosplit.plan_parts_kf); on a small GPU the parts are short and a long gap
+    between two keyframes holds a part start nobody reaches.  For every gap longer than max_gap_s (from spare_gap of
+    the smallest supported GPU) - also from the last keyframe to the end - spares are spread evenly in it, each the
+    best clear frame near its target (same score as the main picks, no close-up, not just after a cut).  A big GPU
+    never uses them; the plan marks them "backup".  -> (spare frame indices sorted, notes)"""
+    if not moments or max_gap_s <= 0:
+        return [], []
+    last = duration - 2.0 / FPS
+    ts = sorted(frames[i]["at"] for i, _ in moments)
+    taken = set(i for i, _ in moments)
+    spares, notes = [], []
+    bounds = list(zip(ts, ts[1:] + [last]))
+    for a, b in bounds:
+        g = b - a
+        if g <= max_gap_s + 1e-6:
+            continue
+        k = int(math.ceil(g / max_gap_s)) - 1
+        for j in range(1, k + 1):
+            target = a + g * j / (k + 1)
+            win = g / (k + 1) * SPARE_LOOK
+            cand = [i for i, f in enumerate(frames) if abs(f["at"] - target) <= win and i not in taken
+                    and not any(0.0 <= f["at"] - c < SHOT_SETTLE for c in cuts)
+                    and score(frames, i, chosen_ids) is not None]
+            if not cand:
+                notes.append(f"no clear frame for a spare keyframe near {target:.2f} s (close-ups or nobody to "
+                             f"replace) - a small GPU may start a part there without one")
+                continue
+            best = max(cand, key=lambda i: (score(frames, i, chosen_ids)[0], -abs(frames[i]["at"] - target)))
+            spares.append(best)
+            taken.add(best)
+    spares.sort(key=lambda i: frames[i]["at"])
+    if spares:
+        notes.append(f"{len(spares)} spare keyframe(s) at {[round(frames[i]['at'], 2) for i in spares]} s for GPUs "
+                     f"down to {SPARE_GPU_GB:.0f} GB (gaps over {max_gap_s:.2f} s); a bigger GPU does not use them")
+    return spares, notes
+
+
 def place_changes(frames, ids, min_hold=0.5):
     """[(t0, t1, [(a, b), ...])]: moments where the left-to-right order of `ids` changes, with the pairs that swapped.
     Only frames where all of them are seen count; an order has to hold min_hold seconds to count."""
@@ -1516,6 +1565,7 @@ def build_plan(video_file, duration_s, has_audio, size, length, keyframes, promp
                           "audios": [], "audioMode": "locked" if has_audio else "none",
                           **({"locked": {"source": "video:src", "offset": 0}} if has_audio else {}),
                           "keyframes": [dict({"image": kf[0], "at": round(float(kf[2]), 4)},
-                                             **({"people": list(kf[3])} if len(kf) > 3 else {}))
+                                             **({"people": list(kf[3])} if len(kf) > 3 else {}),
+                                             **({"backup": True} if len(kf) > 4 and kf[4] else {}))
                                         for kf in keyframes],
                           "prompt": prompt}]}
