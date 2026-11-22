@@ -295,6 +295,9 @@ videos or audio; untick **prompts** to leave the prompts out. It is only saved o
   refine step and a few convenience nodes.
 * `H3MD Director Remake.json` + `H3MD_Keyframe_MultiSwap_0.6.0.json` - the multi-person swap: the second
   makes the keyframes (with an AI, see "Multi-person swap") and the plan .zip, the first runs it.
+* `example_plans/H3MD_multiswap_3dancers_0.6.0_plan.zip` - a finished **multi-person swap** plan (three dancers,
+  28.5 s, two place changes, a blackout; source clip and 14 recast keyframes included): open `H3MD Director
+  Remake.json`, click **Import plan…** in the Director, pick the zip and run.
 
 | Node pack | What it does in the workflows | Needed? | Without it |
 |---|---|---|---|

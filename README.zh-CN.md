@@ -214,6 +214,8 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
   导演台点 **Import plan…**，选这个 zip，选"只导入计划"。配合总控台"高动态"风格（每条线只开一个 weapon LoRA）。
 * `H3MD Director.json`（完整版）——样片用的完整设置，多了修脸、RIFE 补帧到 48 fps、多 1 步精修和几个方便的小工具。
 * `H3MD Director Remake.json` + `H3MD_Keyframe_MultiSwap_0.6.0.json`:多人换人。后一个做关键帧(配 AI,见「多人换人」)和计划包,前一个跑视频。
+* `example_plans/H3MD_multiswap_3dancers_0.6.0_plan.zip`:做好的**多人换人**计划包(三人舞蹈,28.5 秒,两次换位、一次熄灯,
+  原片和 14 张换好的关键帧都在里面):打开 `H3MD Director Remake.json`,导演台点 **Import plan…** 选这个 zip,直接跑。
 
 | 节点包 | 在工作流里做什么 | 要不要装 | 不装会怎样 |
 |---|---|---|---|

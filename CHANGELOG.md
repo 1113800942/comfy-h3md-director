@@ -11,8 +11,8 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   3. **Keyframe Import**: the new **H3MD Keyframe Import** (Import package button; group 1 can stay bypassed) -> **H3MD Keyframe Recast** (MiniMax H3 Image, int8, 4 MP, the tuned 6-step sigmas, ~25 s a keyframe; shows original | new, numbered) -> the new **H3MD Keyframe Redo** (one button per keyframe: only the chosen ones are made again) -> **H3MD Keyframe Assemble** (`output/H3MD_plans/<name>_multiswap_plan_<date>_<no>.zip`).
   Packages get a date and a number and are never overwritten. Reading the keyframes is the slow and decisive part (H3 Image draws what the text says), so it is done once by the AI; the skill says what to read and get right for every person (orientation, each hand, legs as a still pose, head, expression, place, size, overlaps, crop; image left/right) and how to check before answering.
   多人换人关键帧新流程:**一个工作流两组,全用按钮**。第 1 组导出关键帧包,AI 按新 skill `skills/h3md-keyframe` 读图写 H3 Image 提示词回包(.h3kf / .json),第 2 组按钮导入、出图(每张约 25 秒)、原图 | 新图对比、单张重做按钮、打计划包。包名带日期和序号,不覆盖。
-- Example: `example_plans/H3MD_multiswap_3dancers_0.5.91.zip` - the three-dancer swap (17 s): the export package, the AI's answer, the plan and the result.
-  示例:三人舞蹈换人(17 秒)的导出包、AI 回包、计划包和成片。
+- Example: `example_plans/H3MD_multiswap_3dancers_0.6.0_plan.zip` - the three-dancer swap (28.5 s, three performers, two place changes, a blackout): the source clip, the 14 recast keyframes (2 of them spares) and the prompt - import it in the Director and run.
+  示例:三人舞蹈换人(28.5 秒,三个人、两次换位、一次熄灯)的计划包:原片、14 张换好的关键帧(其中 2 张备用)和提示词,导演台导入就能跑。
 - README: what the multi-person swap can and cannot do - works well with a fixed or steady camera; many people crossing close to the lens, faces against the lens and people walking in and out are not perfect (a person can get the wrong picture); music videos with edited-in morph effects (clothes changing between two frames, a face morphing into another person) are not supported.
   说明里写清多人换人的上限:固定机位、镜头稳的效果好;人多贴脸交叉换位、频繁进出不完美,可能换错;后期加了变形特效(一帧换衣服、脸渐变换人)的 MV 不支持。
 
