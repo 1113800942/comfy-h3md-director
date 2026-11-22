@@ -3,6 +3,7 @@
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
 ## [0.6.1] - 2026-11-22
+- Keyframe skill and README_for_AI: first reverse-read the keyframe (which parts of each person show), then map to the new people; a person who shows a little is written as that little in the new person's own colours, never as a whole person.
 
 ### Changed / 变更
 - Multi-person swap keyframes **only where the picture needs one** - not by seconds, parts or GPU. Keyframe Prepare

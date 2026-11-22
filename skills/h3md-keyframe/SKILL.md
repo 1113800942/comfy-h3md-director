@@ -82,6 +82,17 @@ assume they are the ones at the end, and check each one in the picture before yo
 
 ## 4. Write each prompt
 
+**First reverse-read, then map.** Before writing anything, describe `<Picture 1>` as it is, person by person, the way
+a captioning model would: for each person exactly which parts are visible (whole body, from the waist up, only the
+top of the head, only one arm and a bit of sleeve, one leg and a shoe) and what hides or cuts the rest. Then map each
+original person to the new one and write **only the same visible parts, in the new person's looks**: where the
+original shows the top of a head, write the new person's hair only; where it shows a bit of sleeve, write a bit of the
+new person's own sleeve in its own colour. Every person in the frame is replaced unless `keeps_people_from_left` says
+otherwise, so no clothing colour of the original people may stay. **A person who shows a little is written as a
+little, never as a whole person**: a whole-body description makes H3 Image draw the whole person (measured: four
+people and the top of a head became five or six whole people). Say the count plainly: how many people are seen whole
+and who shows only a small part.
+
 Write in English, in the structure of the official H3 Image prompt enhancer:
 
 a. **Define every character picture as a Subject** with its sentence from 2b: positive and complete, head to toe -
@@ -104,8 +115,10 @@ c. **Body parts the frame cuts off are not mentioned.** When the feet are outsid
      and one bare arm come in from the right edge, the hand open, palm down; his head is outside the top right
      corner". Written like this the model does not pull the whole person into the frame (measured).
    - **A person almost hidden behind another**: write exactly which part shows (the top of the head and the eyes
-     beside the front man's head, on the left side of it) and that everything else is hidden by whom. The model tends
-     to show more of a hidden person than the original does; the clearer the text, the less it adds.
+     beside the front man's head, on the left side of it) in the new person's looks, and that everything else is
+     hidden by whom. Do not give this person the full head-to-toe sentence: only the visible parts (hair colour and
+     style, the colour of the bit of garment). The model tends to show more of a hidden person than the original
+     does; the clearer and shorter the text, the less it adds.
    - **A far shot with small people** (everyone well under half the frame height, a lot of floor or sky): say how many
      people the frame holds and that nobody else is added, that every person keeps the same small size and place, and
      that the camera does not move closer, the people are not enlarged or pushed together and the empty floor / sky stay
@@ -163,6 +176,7 @@ original. Typical misses:
 - a head tilt to the wrong side, or a clear tilt / lean not written at all (it comes out straight);
 - a half-hidden person put on the wrong side of the person in front (check `people_from_left`);
 - a person mostly outside the frame or almost hidden written as a whole person (the model then shows all of him);
+- a hidden person's visible bit left in the original person's clothing colour instead of the new person's;
 - a character's clothes written differently from one keyframe to the next;
 - a kept person left undescribed (the model turns them into one of the new characters), including a narrow strip at
   the frame edge that stays.
