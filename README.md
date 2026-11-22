@@ -173,24 +173,40 @@ Replace several people in a real video with your own characters ("picture 1 repl
 keeping the motion, camera, lip movement and soundtrack. The Director runs Viggle Remake's swap model in the low-res
 pass and its own high-res pass on top.
 
-1. **Keyframes + plan, locally in one run**: open `example_workflows/Qwen Image 2.1 Keyframe.json`. Drag the source
-   video into its Load Video node (optional `start_s` / `end_s` on Prepare: recast only that part, cut with its
-   sound), connect the character pictures, write the mapping ("图1换左二" / "picture 1 ->
-   left 2"; people are numbered left to right in the first clear frame - check the people sheet) and one description
-   line per picture: race, age, face, hair, every garment, **shoes and legwear, and what she does not wear** ("bare
-   legs and black stiletto heels; no socks, no boots, no apron") - otherwise the editor copies the original's.
-   **H3MD Keyframe 1: Prepare** tracks the people (core SAM3.1), finds the source's cuts and picks keyframe moments:
-   **at least one in every shot** (0.5.8), at most about 5 s apart, where the people stand apart.
-   **H3MD Keyframe 1b: Recast** (0.5.7) redraws them with Qwen Image 2.1 Edit (2-step LoRA), **one person after
-   another**: each crop is cut from the keyframe where the people before her are already recast, so nothing of the
-   originals is pasted back. Raise its `mask_grow` (default 0.25) to 0.3-0.35 when bits of a big original (wig, ears,
-   tail, wide skirt) are still left around the new person. **H3MD Keyframe 2: Assemble** writes the Remake plan and
-   saves a plan .zip to `output/H3MD_plans/`. Check the keyframe sheet; redo with another seed if a pose or hand is off.
-   Instead of this workflow, an agent can paint the keyframes and write the plan (`skills/h3md-prompt`, section 12d).
-   Remake follows the keyframes closely, so their quality decides the result.
+1. **Keyframes + plan** (0.6.0): open `example_workflows/H3MD_Keyframe_MultiSwap_0.6.0.json` - one workflow, two
+   groups, everything by buttons.
+   - **Group 1 - Keyframe Export.** Drag the source video into *Source video* (optional `start_s` / `end_s` on Prepare:
+     recast only that part, cut with its sound), the characters into *Picture 1/2/3*, leave
+     *mapping* empty - picture 1 goes to the first person who appears in the clip, picture 2 to the next, and so on (people
+     who appear together: left to right); once given, a person keeps his picture wherever he moves, later people stay
+     themselves. After the run a **cast panel** appears under Prepare: the pictures on one side, the numbered people on
+     the other, joined by lines (the machine's guess). Drag a line from a picture to a person to change it, click a
+     line to remove it. **One picture can take several numbers**: if the tracker split one person into two numbers
+     (after a cut, a turn, a crossing), drag a second line from the same picture - both numbers become one person.
+     Numbers without a line stay themselves. Run again - the tracking is reused, so it takes seconds. *Descriptions*
+     are optional: the AI describes each character from the picture and asks you what the picture does not show (a
+     half-body picture: trousers and shoes). **H3MD Keyframe Prepare** tracks the people (core SAM3.1), finds the cuts
+     and picks the keyframe moments (at least one per shot, every replaced person at least every 3 s; never a close-up
+     the edit model cannot redraw, never a frame where the people are too dark to read; a person lost after a
+     blackout, a cut or a spin is found again), plus **spare keyframes** where the gap is too long for a 16 GB GPU
+     (a bigger GPU ignores them). **H3MD Keyframe Export** writes
+     `output/H3MD_keyframes/<name>_keyframe_export_<date>_<no>.zip` (never overwritten) and previews its keyframes.
+   - **Give the zip to an AI** (Claude, ChatGPT, Gemini ... - one that reads pictures well) with the skill
+     `skills/h3md-keyframe` (the package also carries a short version). It reads every keyframe - who goes where, both
+     hands, legs, head, overlaps, crop - and answers with `<name>_keyframe_import_<date>_<no>.h3kf` (or a `.json`
+     if it cannot make files). This reading decides the result: MiniMax H3 Image draws what the text says.
+   - **Group 2 - Keyframe Import** (bypass group 1). Click **Import package** on H3MD Keyframe Import and pick the
+     answer. **H3MD Keyframe Recast** redraws every keyframe with MiniMax H3 Image (int8, 4 MP, the tuned 6-step
+     sigmas; ~25 s a keyframe on a 5090) and shows **Compare** - original | new, numbered. A keyframe that clearly
+     differs: tell the AI its number and what is wrong, import its new answer, click that number on **H3MD Keyframe
+     Redo** and run - only that one is made again. **H3MD Keyframe Assemble** writes
+     `output/H3MD_plans/<name>_multiswap_plan_<date>_<no>.zip`; its global prompt is the LMS trigger words.
+   Remake follows the keyframes closely: nothing in a keyframe may differ visibly from the source (person, place,
+   clothes, body turn, both hands, overlaps); small differences are pulled back by Remake.
 2. **Plan**: import the .zip in the Director (locally or on RunningHub).
 3. **Run**: open `example_workflows/H3MD Director Remake.json` (Control Panel style **多人换人**, the Loop's
-   `remake_model` wired to the Remake model). Run the first part, low-res only, before the whole clip.
+   `remake_model` wired to the Remake model; the style switches on only the LMS LoRA). Try the first part
+   (试镜 1) before the whole clip.
    **Both models stay on - they do not conflict**: the low-res pass uses the Remake model (the swap happens there),
    the high-res pass uses the usual H3 base (it only adds detail). They take turns on the GPU; turning either one off
    breaks the run. The simple and full workflows have the same Remake model node, already wired to the Loop: the
@@ -201,9 +217,23 @@ Needs (install yourself): the node pack **ComfyUI-Viggle-Remake** and the model
 [Viggle/Viggle-Remake](https://huggingface.co/Viggle/Viggle-Remake) (see its model card for the licence). Limits:
 output 1664x960 or 960x1664 (or 2560x1472) - the Director switches to it by itself if the Control Panel says otherwise; 90-345 frames per part (autosplit does it); up to 4 keyframes per part;
 window mode is off for these plans. Works best when each recast person and their character are close in hair length,
-build and gender; with big differences it is not perfect, but usable. The keyframe workflow tracks people by position:
-someone who leaves the frame and comes back may be taken for a new person (the info output warns). Thanks to Viggle
-for releasing Remake.
+build and gender; with big differences it is not perfect, but usable. Thanks to Viggle for releasing Remake.
+
+**What it can and cannot do.** The keyframe workflow has to know who is who in every moment (people tracking plus
+faces), so the source decides how far it goes:
+- **Works well:** a fixed or steady camera (a stage, a dance or band performance, a group singing), people who may
+  move around and be briefly hidden but soon show their faces again. Shot cuts between such shots are fine.
+- **Not perfect - check the cast panel and the keyframes, sometimes a person gets the wrong picture:** many people
+  crossing and changing places close to the camera, faces right up against the lens, people walking in and out all the
+  time. The tracker can split one person into two numbers or lose someone for a moment; Prepare never uses such frames
+  as keyframes, but a wrong match can remain.
+- **Not supported:** music videos with edited-in effects - a person changing clothes from one frame to the next, a face
+  morphing into another person's, transitions that blend two people. There the source frame itself holds two people at
+  once, so no keyframe can say who it is.
+- **GPU: 16 GB VRAM or more.** The Director cuts the video into parts that fit your GPU and starts every part on a
+  keyframe; Prepare adds spare keyframes ("(spare)" on the sheets) so that a 16 GB GPU finds one at every cut, and a
+  bigger GPU simply leaves them out. Below 16 GB it is not supported. A stretch made only of close-ups cannot hold a
+  keyframe at all; if a part has to start there, the Director names the second in its notes.
 
 ## Reporting a problem
 
@@ -263,8 +293,11 @@ videos or audio; untick **prompts** to leave the prompts out. It is only saved o
   motion" style (one weapon LoRA per pass).
 * `H3MD Director.json` — the full setup used for the samples; adds face refine, RIFE interpolation to 48 fps, one extra
   refine step and a few convenience nodes.
-* `H3MD Director Remake.json` + `Qwen Image 2.1 Keyframe.json` — the multi-person swap (0.5.0): the second
-  makes the keyframes and the plan .zip, the first runs it (see "Multi-person swap").
+* `H3MD Director Remake.json` + `H3MD_Keyframe_MultiSwap_0.6.0.json` - the multi-person swap: the second
+  makes the keyframes (with an AI, see "Multi-person swap") and the plan .zip, the first runs it.
+* `example_plans/H3MD_multiswap_3dancers_0.6.0_plan.zip` - a finished **multi-person swap** plan (three dancers,
+  28.5 s, two place changes, a blackout; source clip and 14 recast keyframes included): open `H3MD Director
+  Remake.json`, click **Import plan…** in the Director, pick the zip and run.
 
 | Node pack | What it does in the workflows | Needed? | Without it |
 |---|---|---|---|

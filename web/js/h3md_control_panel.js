@@ -14,7 +14,7 @@ const STYLE_TIP = {
   motion_copy: "dance / motion transfer from a reference video · 动作复刻",
   remake: "多人互换：低清用 Remake 换人模型，高清照常用主模型（两个都要开，不冲突）。工作流里的「Remake model 换人模型」节点已接好，选这个风格会自动打开；切回其他风格会自动关闭它，关键帧仍保留。不会自动下载模型。 · Low-res pass on the Remake model, high-res on the usual base (both stay on). The workflow's Remake model node is wired and switched on by this style, off by the others; no download.",
 };
-export function appliesLoraPresets(style) { return style !== REMAKE_STYLE; }
+export function appliesLoraPresets(style) { return !!style; }   // 0.5.91: multi-person swap too (LMS only)
 let presetCache = null;
 async function presets() {
   if (presetCache) return presetCache;
@@ -200,6 +200,23 @@ function syncPlanRemake(on) {
       w.callback?.(w.value);
     } catch { /* leave a broken plan for the Director to report */ }
   }
+}
+// 0.5.91 (user 00:54): Import plan -> the Control Panel takes the plan's width / height (a portrait plan imported
+// into a landscape panel ran at the wrong size). Returns the number of panels changed.
+export function setPanelsSize(w, h) {
+  w = Math.round(Number(w) || 0); h = Math.round(Number(h) || 0);
+  if (w < 64 || h < 64) return 0;
+  let n = 0;
+  for (const node of app.graph?._nodes || []) {
+    if (node.type !== NODE || node.mode === 2 || node.mode === 4) continue;
+    const ww = W(node, "width"), hw = W(node, "height");
+    if (!ww || !hw || (ww.value === w && hw.value === h)) continue;
+    ww.value = w; ww.callback?.(w);
+    hw.value = h; hw.callback?.(h);
+    node.setDirtyCanvas?.(true, true);
+    n++;
+  }
+  return n;
 }
 // Director checkbox -> control panel style, without rewriting the plan a second time.
 export function setPanelsFromRemake(on) {
@@ -467,9 +484,13 @@ class Panel {
     const old = this.root.querySelector(".hint");
     if (!old) return;
     const h = hintText(W(this.node, "segments_to_run")?.value);
-    if (old.firstChild?.textContent !== "↑ " + h.t) old.replaceWith(this.hintEl(h));
+    let changed = false;
+    if (old.firstChild?.textContent !== "↑ " + h.t) { old.replaceWith(this.hintEl(h)); changed = true; }
     const sig = JSON.stringify(trialParts()) + (W(this.node, "segments_to_run")?.value || "");
-    if (sig !== this.trialSig) { this.trialSig = sig; this.root.querySelector(".trials")?.replaceWith(this.trialsEl()); }
+    if (sig !== this.trialSig) { this.trialSig = sig; this.root.querySelector(".trials")?.replaceWith(this.trialsEl()); changed = true; }
+    // 0.5.91 (user 15:18): after Import plan the trial buttons (试镜 1-4) arrive here, a second later - the panel grew
+    // but the node kept its old height, so the last LoRA rows hung out below it until another style was clicked
+    if (changed) this.fit();
   }
 
   render() {
@@ -488,15 +509,23 @@ class Panel {
   }
 
   // the node grows / shrinks with the LoRA tables (+ / ✕ rows), keeping its width
-  fit() {
+  fit(tries = 0) {
     requestAnimationFrame(() => {
       // content height (not scrollHeight: the root is stretched to the widget area, so it never shrinks)
       const last = this.root.lastElementChild, first = this.root.firstElementChild;
-      const need = last && first ? Math.ceil(last.offsetTop + last.offsetHeight - first.offsetTop) + 14 : 360;
-      if (!need || need === this.minH) return;
+      if (!last || !first || !last.offsetHeight) {      // not laid out yet (node off screen, panel just built)
+        if (tries < 20) setTimeout(() => this.fit(tries + 1), 150);
+        return;
+      }
+      const need = Math.ceil(last.offsetTop + last.offsetHeight - first.offsetTop) + 14;
+      const grew = need !== this.minH;
       this.minH = need;
       const size = this.node.computeSize?.();
-      if (size && this.node.setSize) this.node.setSize([this.node.size[0], size[1]]);
+      // the content changed, or the node is shorter than its content (a plan import / a restored layout changed it
+      // behind our back); a node the user made taller is left alone
+      if (size && this.node.setSize && (grew || (this.node.size?.[1] || 0) < size[1] - 1)) {
+        this.node.setSize([this.node.size[0], size[1]]);
+      }
       this.node.setDirtyCanvas?.(true, true);
     });
   }

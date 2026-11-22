@@ -261,7 +261,7 @@ def check(plan: dict, seg: dict, lowres_scale: float = 0.5) -> int:
     return se
 
 
-def _pins_for_segment(keyframes: list, n: int, seg_index: int) -> list:
+def _pins_for_segment(keyframes: list, n: int, seg_index: int, start: int = 0) -> list:
     """Segment-local pins in [0, n). Drops duplicates; errors on out-of-range (no silent cross-segment drift)."""
     valid, seen = [], set()
     for kf in keyframes:
@@ -277,10 +277,42 @@ def _pins_for_segment(keyframes: list, n: int, seg_index: int) -> list:
         seen.add(f)
         valid.append(kf)
     if len(valid) > MAX_REFS:
-        LOG.warning("%s segment %d: %d keyframes, Remake takes %d - the first %d are used", _TAG, seg_index + 1,
-                    len(valid), MAX_REFS, MAX_REFS)
-        valid = valid[:MAX_REFS]
+        valid, missing = pick_keyframes(valid, MAX_REFS, start)
+        LOG.info("%s segment %d: %d keyframes in this part, Remake takes %d: frames %s%s", _TAG, seg_index + 1,
+                 len(keyframes), MAX_REFS, [int(k["frame"]) for k in valid],
+                 f" - people {missing} are in none of them (they may get another character's look)" if missing
+                 else " (every replaced person of the part is shown)" if any("people" in k for k in valid) else "")
     return valid
+
+
+def pick_keyframes(kfs: list, k: int = MAX_REFS, start: int = 0):
+    """0.5.91 (user 03:31): the Director splits a shot by the token budget of the GPU it runs on, so a part can hold
+    more keyframes than Remake takes.  Pick k: first the earliest keyframe at or after `start` (the end of the
+    carried overlap of a continued part - user 08:15: a part whose first pin came 3 s after the seam drifted and
+    jumped when it reached that pin, 00164 at 9.67 s), then greedily the ones that show the most replaced people not
+    shown yet ("people" from the plan), then the rest spread over the part (largest gap to the picked ones).  Without
+    "people" (older plans) this is a time spread too.  -> (picked sorted by frame, people shown by none)"""
+    kfs = sorted(kfs, key=lambda x: int(x["frame"]))
+    need = set().union(*[set(x.get("people") or ()) for x in kfs]) if kfs else set()
+    picked, have = [], set()
+    if kfs and k > 0:
+        first = next((x for x in kfs if int(x["frame"]) >= int(start)), kfs[-1])
+        picked.append(first)
+        have |= set(first.get("people") or ())
+    while len(picked) < k and need - have:
+        best = max((x for x in kfs if x not in picked),
+                   key=lambda x: (len(set(x.get("people") or ()) - have), len(x.get("people") or ())), default=None)
+        if best is None or not (set(best.get("people") or ()) - have):
+            break
+        picked.append(best)
+        have |= set(best.get("people") or ())
+    while len(picked) < k and len(picked) < len(kfs):
+        rest = [x for x in kfs if x not in picked]
+        if not picked:
+            picked.append(rest[len(rest) // 2])
+            continue
+        picked.append(max(rest, key=lambda x: min(abs(int(x["frame"]) - int(p["frame"])) for p in picked)))
+    return sorted(picked, key=lambda x: int(x["frame"])), sorted(need - have)
 
 
 def encode(plan: dict, seg: dict, picked: dict, prompt: str, clip, vae, audio_vae, keyframes: list, load_keyframe,
@@ -292,7 +324,7 @@ def encode(plan: dict, seg: dict, picked: dict, prompt: str, clip, vae, audio_va
     if not picked["videos"]:
         raise ValueError(f"{_TAG} segment {seg['index'] + 1}: no source video (<Video 1>) - the swap needs one")
     n = int(seg["length"])
-    keyframes = _pins_for_segment(list(keyframes or ()), n, int(seg["index"]))
+    keyframes = _pins_for_segment(list(keyframes or ()), n, int(seg["index"]), int(seg.get("overlapIn") or 0))
     pinned = True
     if not keyframes and seg.get("keyframesNear"):
         # 2026-11-15 review: an autosplit part with no keyframe of its own uses the shot's nearest keyframe as a

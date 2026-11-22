@@ -243,6 +243,83 @@ def plan_parts(content: int, ov0: int, lmax: int, motion=None):
     return [r0 + 17 * us[0]] + [17 * u for u in us[1:]]
 
 
+SEAM_WINDOW = 17     # 0.5.91 seams: a part's new frames must start with a keyframe within this many frames (0.7 s)
+REMAKE_MIN, REMAKE_MAX = 90, 345   # Remake renders 90-345 frames per part (h3md_remake_engine.check)
+
+
+def plan_parts_kf(content: int, ov0: int, lmax: int, kpos, min_len: int = 0):
+    """0.5.91 (user 2026-11-21 18:12, gloves back at 22.2-24.5 s of plan 017): cut points ON keyframes.
+    Equal parts put a seam 1.6-3 s before the next keyframe; the new frames after the seam had nothing pinned and the
+    source's look (gloves) came back.  Here the cuts are chosen so that every part's new frames begin with a keyframe
+    (within SEAM_WINDOW frames), using the plan's main keyframes first and its spare ("backup") keyframes only where
+    no main one can start a part on this GPU.  Order of preference: fewest uncovered seams, fewest parts, fewest spare
+    keyframes used, keyframe closest to the seam, then parts as equal as possible.  Exact (dynamic programming over
+    the 17-frame units).  kpos = [(content frame, is_spare)].  min_len = shortest part allowed (Remake 90).
+    -> (contents, uncovered seams as content frames) or None when no split fits."""
+    r0 = content % 17
+    min_u = int(math.ceil(MIN_PART_CONTENT / 17))
+    min_u1 = max(min_u, int(math.ceil((min_len - ov0 - r0) / 17))) if min_len else min_u
+    min_un = max(min_u, int(math.ceil((min_len - AUTO_OVERLAP) / 17))) if min_len else min_u
+    cap1_u = (lmax - ov0 - r0) // 17
+    capn_u = (lmax - AUTO_OVERLAP) // 17
+    units = (content - r0) // 17
+    if cap1_u >= units:
+        return [content], []
+    if cap1_u < min_u1 or capn_u < min_un:
+        return None
+    main = sorted(int(p) for p, spare in kpos if not spare)
+    spares = sorted(int(p) for p, spare in kpos if spare)
+
+    def seam_cost(U):
+        b = r0 + 17 * U
+        m = [p - b for p in main if 0 <= p - b < SEAM_WINDOW]
+        if m:
+            return 0, 0, min(m)
+        s = [p - b for p in spares if 0 <= p - b < SEAM_WINDOW]
+        if s:
+            return 0, 1, min(s)
+        return 1, 0, 0
+
+    best, back = {0: (0, 0, 0, 0, 0)}, {}
+    for U in range(units + 1):
+        if U not in best:
+            continue
+        lo, hi = (min_u1, cap1_u) if U == 0 else (min_un, capn_u)
+        for u in range(lo, hi + 1):
+            V = U + u
+            if V > units:
+                break
+            un, sp, off = (0, 0, 0) if V == units else seam_cost(V)
+            c = best[U]
+            new = (c[0] + un, c[1] + 1, c[2] + sp, c[3] + off, c[4] + u * u)
+            if V not in best or new < best[V]:
+                best[V], back[V] = new, U
+    if units not in best:
+        return None
+    us, V = [], units
+    while V:
+        us.append(V - back[V])
+        V = back[V]
+    us.reverse()
+    acc, uncovered = 0, []
+    for u in us[:-1]:
+        acc += u
+        if seam_cost(acc)[0]:
+            uncovered.append(r0 + 17 * acc)
+    return [r0 + 17 * us[0]] + [17 * u for u in us[1:]], uncovered
+
+
+def drop_spares(seg: dict) -> dict:
+    """A shot that is not split (or not by keyframes) uses only its main keyframes."""
+    if seg.get("keyframes") and any(k.get("backup") for k in seg["keyframes"]):
+        main = [k for k in seg["keyframes"] if not k.get("backup")]
+        if main:
+            seg["keyframes"] = main
+        else:
+            seg.pop("keyframes", None)
+    return seg
+
+
 def split_segment(D, seg: dict, media: dict, contents: list) -> list:
     """seg (a parsed shot) -> its parts.  contents = new frames per part (plan_parts)."""
     s0, ov0, fps = int(seg["startFrame"]), int(seg["overlapIn"]), D.FPS
@@ -267,8 +344,18 @@ def split_segment(D, seg: dict, media: dict, contents: list) -> list:
             base = dict(p.get("audioStarts") or {})
             p["audioStarts"] = {a: round(float(base.get(a, 0.0)) + (start - s0) / fps, 6) for a in p["audios"]}
         if seg.get("keyframes"):   # 0.4.9: part frame 0 = shot frame (start - s0); keep the part's own new frames
-            kfs = [{"image": k["image"], "frame": int(k["frame"]) - (start - s0)} for k in seg["keyframes"]]
+            kfs = [dict(k, frame=int(k["frame"]) - (start - s0)) for k in seg["keyframes"]]   # keeps "people"
             kfs = [k for k in kfs if ov <= k["frame"] < p["length"]]
+            # 0.5.91 seams: spare keyframes only where no main one starts the part's new frames (or the part has
+            # no main one at all); the other spares are not used
+            main = [k for k in kfs if not k.get("backup")]
+            spare = [k for k in kfs if k.get("backup")]
+            take = []
+            if spare and not main:
+                take = [min(spare, key=lambda k: k["frame"])]
+            elif ov > 0 and not any(k["frame"] < ov + SEAM_WINDOW for k in main):
+                take = [k for k in spare if k["frame"] < ov + SEAM_WINDOW][:1]
+            kfs = sorted(main + take, key=lambda k: k["frame"])
             if kfs:
                 p["keyframes"] = kfs
                 p.pop("keyframesNear", None)
@@ -277,7 +364,8 @@ def split_segment(D, seg: dict, media: dict, contents: list) -> list:
                 # 2026-11-15 review: a part without a keyframe of its own keeps the shot's nearest one, so the swap
                 # engine can use it as a plain (un-pinned) reference instead of stopping the whole run
                 mid = (start - s0) + p["length"] / 2.0
-                near = min(seg["keyframes"], key=lambda k: abs(int(k["frame"]) - mid))
+                near = min([k for k in seg["keyframes"] if not k.get("backup")] or seg["keyframes"],
+                           key=lambda k: abs(int(k["frame"]) - mid))
                 p["keyframesNear"] = [{"image": near["image"], "frame": int(near["frame"]) - (start - s0)}]
         p["shotIndex"] = seg["index"]
         p["autoPart"], p["autoParts"] = j, len(contents)
@@ -294,7 +382,7 @@ def apply(D, segments: list, media: dict, raw: dict, width: int, height: int, mo
     extra_tokens: per raw shot (RefMods).  budget: tokens (None = token_budget(raw)).  Returns the new segment list
     (re-indexed); notes get one line per split shot."""
     if raw.get("autoSplit", True) is False:
-        return segments
+        return [drop_spares(s) for s in segments]
     if budget is None:
         b = token_budget(raw, D.REF_VIDEO_AUTO_TOKEN_LIMIT)
         budget = b["tokens"]
@@ -312,24 +400,40 @@ def apply(D, segments: list, media: dict, raw: dict, width: int, height: int, mo
                  "parts": [int(seg["length"])], "status": "ok", "light": is_light(seg, extra)}
         if report is not None:
             report.append(entry)
-        if est <= budget:
-            out.append(seg)
+        # 0.5.91: Remake renders at most 345 frames a part - a big GPU (48 GB: 379 f) must still split there
+        remake = raw.get("swapEngine") == "remake"
+        if est <= budget and not (remake and int(seg["length"]) > REMAKE_MAX):
+            out.append(drop_spares(seg))
             continue
         lmax = max_length(D, seg, sizes or {}, width, height, mode, budget, extra, prefer=prefer)
+        if remake and lmax:
+            lmax = min(lmax, REMAKE_MAX)
         content = int(seg["length"]) - int(seg["overlapIn"])
         prof = None
-        if motion is not None:
-            try:
-                prof = motion(seg, content)
-            except Exception:
-                prof = None
-        contents = plan_parts(content, int(seg["overlapIn"]), lmax, prof) if lmax else None
+        uncovered = None
+        ov0 = int(seg["overlapIn"])
+        if seg.get("keyframes") and lmax:
+            # 0.5.91 seams: cut on the keyframes (spare ones where needed) instead of evenly + motion
+            kpos = [(int(k["frame"]) - ov0, bool(k.get("backup"))) for k in seg["keyframes"]
+                    if int(k["frame"]) >= ov0]
+            got = plan_parts_kf(content, ov0, lmax, kpos, REMAKE_MIN if remake else 0)
+            contents, uncovered = got if got else (None, None)
+        else:
+            if motion is not None:
+                try:
+                    prof = motion(seg, content)
+                except Exception:
+                    prof = None
+            contents = plan_parts(content, ov0, lmax, prof) if lmax else None
         n = seg["index"] + 1
+        if contents and len(contents) == 1 and est <= budget:   # Remake cap only, fits whole after all
+            out.append(drop_spares(seg))
+            continue
         if not contents or len(contents) == 1:
             entry.update(status="over", maxPart=lmax)
             notes.append(f"WARNING segment {n}: estimated {est:,} tokens > budget {budget:,}, but it cannot be split "
                          f"usefully (max part {lmax} f); lower the resolution or the reference count")
-            out.append(seg)
+            out.append(drop_spares(seg))
             continue
         if is_light(seg, extra):
             notes.append(f"WARNING segment {n}: a shot without a reference video is split automatically - every part "
@@ -347,7 +451,19 @@ def apply(D, segments: list, media: dict, raw: dict, width: int, height: int, mo
                      f"{' + '.join(str(p['length']) for p in parts)} f (overlap {AUTO_OVERLAP}, each <= "
                      f"{max(part_tokens(D, p, sizes or {}, width, height, mode, p['length'], extra, prefer) for p in parts):,} tokens; "
                      f"cuts at {', '.join(cuts)} of the shot's new content"
-                     f"{', cut points checked against the reference motion' if prof else ''})")
+                     f"{', cut points checked against the reference motion' if prof else ''}"
+                     f"{', every part starts on a keyframe' if uncovered == [] else ''})")
+        if uncovered is not None:
+            spares = sum(1 for p in parts[1:] if any(k.get("backup") for k in p.get("keyframes") or ()))
+            if spares:
+                notes.append(f"segment {n}: {spares} spare keyframe(s) used so that every part starts on a keyframe "
+                             f"(this GPU's parts are short)")
+            for f in uncovered:
+                t = (ov0 + f) / D.FPS
+                notes.append(f"WARNING segment {n}: the part starting at {t:.2f} s has no keyframe at its start (none "
+                             f"there, no spare one either): the source look may come back there for a moment. Add a "
+                             f"keyframe near {t:.1f} s. 第 {t:.1f} 秒开始的那一段开头没有关键帧，可能露出原片的样子，"
+                             f"请在这里补一张关键帧。")
         out.extend(parts)
     for i, seg in enumerate(out):
         seg["index"] = i

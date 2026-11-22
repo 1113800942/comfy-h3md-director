@@ -1,16 +1,20 @@
 """H3MD Keyframe nodes (2026-11-17, H3MD 0.5.0): keyframes + plan package for the multi-person swap (Remake).
 
-  H3MD Keyframe 1: Prepare  - source video + character pictures + "图1换左二" -> one crop per person per moment, the
-                              matching character picture and an edit prompt (lists: the edit nodes in between run once
-                              per crop).  Any image-edit model works there (example: Qwen Image 2.1).
-  H3MD Keyframe 2: Assemble - edited crops -> colour-matched and pasted back -> keyframes saved -> H3MD plan + plan zip
-                              for the Director's "Import plan" (H3MD Director Remake.json).
+  H3MD Keyframe 1: Prepare  - source video + character pictures (picture 1 = first person to appear ...) -> who is who, keyframe moments, where
+                              every person to recast stands then.
+  H3MD Keyframe 1b: Recast  - 0.5.91: in layers, one person at a time, with Qwen Image 2.1: (1) erase the people
+                              to recast -> clean background, (2) make every new character alone in her pose,
+                              (3) put them back far to near, face on face.
+  H3MD Keyframe 2: Assemble - keyframes saved -> H3MD plan + plan zip for the Director's "Import plan"
+                              (H3MD Director Remake.json).
 
 Pure logic in h3md_keyframe.py.  People are tracked with ComfyUI's core SAM3.1 (models/checkpoints/
 sam3.1_multiplex_fp16.safetensors, the same file the depth / pose control uses)."""
 from __future__ import annotations
 
 import gc
+import io
+import copy
 import json
 import logging
 import math
@@ -27,7 +31,7 @@ SAM3_CKPT = "sam3.1_multiplex_fp16.safetensors"
 SAMPLE_FPS = 6.0          # tracking / moment search rate
 TRACK_SHORT = 480         # tracking frames: short side in pixels
 WINDOW_S = 5.0            # SAM3 tracking window (consecutive windows share one frame)
-PICTURE_MP = 1.0          # character pictures are scaled down to about this before the edit
+PICTURE_MP = 4.0          # character pictures are scaled down to at most this
 KF_SUBDIR = "H3MD_keyframes"
 PLANS_SUBDIR = "H3MD_plans"
 TAG = K.TAG
@@ -47,6 +51,27 @@ def _plan_io():
     except ImportError:
         import h3md_plan_io
     return h3md_plan_io
+
+
+SPARE_GPU_AVAIL_GIB = 15.99 - 0.68   # a 16 GB card with ComfyUI's default reserve (no --vram-headroom)
+
+
+def spare_new_frames(size, src_size) -> int:
+    """New frames a Director part carries at most on the smallest supported GPU (16 GB), for this swap plan: the
+    Director's own token budget and part-length search (Remake size, the source as the auto-tier reference video,
+    Remake's 345-frame cap), minus the 39 carried frames."""
+    try:
+        from . import h3md_director as D, h3md_autosplit as AS
+    except ImportError:
+        import h3md_director as D
+        import h3md_autosplit as AS
+    w, h = int(size[0]), int(size[1])
+    raw = {"swapEngine": "remake", "refVideoHeight": "auto"}
+    budget = AS.token_budget(raw, D.REF_VIDEO_AUTO_TOKEN_LIMIT, int(SPARE_GPU_AVAIL_GIB * AS.GIB))["tokens"]
+    seg = {"videos": [{"id": "src", "depth": False}], "images": []}
+    lmax = AS.max_length(D, seg, {("videos", "src"): (int(src_size[0]), int(src_size[1]))}, w, h, "auto", budget)
+    lmax = min(lmax, AS.REMAKE_MAX)
+    return max(17, lmax - AS.AUTO_OVERLAP)
 
 
 # ------------------------------------------------------------------------------------------------- video
@@ -187,6 +212,81 @@ def sample_frames(path, duration, size, fps=SAMPLE_FPS):
 
 
 
+FACE_EVERY = 1            # 0.5.91: faces are read on every tracking frame (6 per second), at the full size - a
+                          # person swap at a crossing must be caught where it happens (~3 s per 20 s of video)
+FACE_MIN_PX = 20          # ... a face narrower than this (pixels) is too small to compare
+FACE_MIN_SCORE = 0.5
+_FACE_APP = {}
+_TRACK_CACHE = {}         # 0.5.91: last clip's tracking (one entry: small frames + boxes)
+
+
+def face_app():
+    """InsightFace FaceAnalysis (antelopev2, else buffalo_l) from ComfyUI's models/insightface, or None - the common
+    ComfyUI setup (ReActor, PuLID, InstantID).  None: re-identification uses hair / clothes only."""
+    if "app" in _FACE_APP:
+        return _FACE_APP["app"]
+    app = None
+    try:
+        import folder_paths
+        from insightface.app import FaceAnalysis
+        roots = []
+        try:
+            roots += list(folder_paths.get_folder_paths("insightface"))
+        except Exception:
+            pass
+        roots.append(os.path.join(folder_paths.models_dir, "insightface"))
+        for root in roots:
+            for name in ("antelopev2", "buffalo_l"):
+                if os.path.isdir(os.path.join(root, "models", name)):
+                    try:
+                        app = FaceAnalysis(name=name, root=root, allowed_modules=["detection", "recognition"],
+                                           providers=["CUDAExecutionProvider", "CPUExecutionProvider"])
+                        app.prepare(ctx_id=0, det_size=(640, 640))
+                        LOG.info("%s faces: InsightFace %s from %s", TAG, name, root)
+                        break
+                    except Exception as exc:
+                        LOG.warning("%s InsightFace %s in %s could not be loaded: %s", TAG, name, root, exc)
+                        app = None
+            if app is not None:
+                break
+    except Exception as exc:
+        LOG.info("%s InsightFace not available (%s): people are told apart by hair / clothes colour only", TAG, exc)
+    _FACE_APP["app"] = app
+    return app
+
+
+def face_observations(path, times, per_frame, size, every=FACE_EVERY, boxes_out=None):
+    """[(frame index, id, L2-normalised ArcFace embedding)] of every face in the full-size frames (every `every`-th
+    tracking frame); each face goes to the person whose box holds it in its upper part.  [] without InsightFace."""
+    import numpy as np
+    app = face_app()
+    if app is None:
+        return []
+    idx = list(range(0, len(times), max(1, int(every))))
+    frames = read_frames(path, [times[i] for i in idx], size)
+    W, H = size
+    obs = []
+    for i in idx:
+        img = frames[times[i]]
+        try:
+            faces = app.get(np.ascontiguousarray(img[..., ::-1]))
+        except Exception:
+            continue
+        for f in faces:
+            x0, y0, x1, y1 = [float(v) for v in f.bbox]
+            if (x1 - x0) < FACE_MIN_PX or float(getattr(f, "det_score", 1.0)) < FACE_MIN_SCORE:
+                continue
+            if boxes_out is not None:     # 0.5.91: where faces are, for clean_frames (a half-hidden person)
+                boxes_out.setdefault(i, []).append((x0 / W, y0 / H, x1 / W, y1 / H))
+            emb = getattr(f, "normed_embedding", None)
+            if emb is None:
+                continue
+            pid = K.assign_face((x0 / W, y0 / H, x1 / W, y1 / H), per_frame[i])
+            if pid is not None:
+                obs.append((i, pid, np.asarray(emb, np.float32), x1 - x0))   # + width: bigger faces count more
+    return obs
+
+
 def detect_cuts(path, w=96, h=54):
     """0.5.8: the source's shot cuts (seconds), every decoded frame compared with the one before (PyAV)."""
     import av
@@ -215,24 +315,28 @@ def detect_cuts(path, w=96, h=54):
 
 
 # ------------------------------------------------------------------------------------------------- SAM3
+def load_sam3():
+    """ComfyUI's core SAM3.1 (model, its text encoder)"""
+    import folder_paths
+    import comfy.sd
+    path = folder_paths.get_full_path("checkpoints", SAM3_CKPT)
+    if not path:
+        raise FileNotFoundError(f"{TAG} SAM3 checkpoint '{SAM3_CKPT}' not found in models/checkpoints (ComfyUI's core "
+                                "SAM3.1, used to find and follow the people). 缺 SAM3.1 模型。")
+    out = comfy.sd.load_checkpoint_guess_config(path, output_vae=False, output_clip=True,
+                                                embedding_directory=folder_paths.get_folder_paths("embeddings"))
+    return out[0], out[1]
+
+
 def track_people(frames_u8, prompt="person", threshold=0.4, max_people=8, fps=SAMPLE_FPS, window_s=WINDOW_S):
     """Core SAM3.1 video tracking in windows (consecutive windows share one frame) -> [{local id: box}] per window
     per frame (boxes normalised).  Model + text encoder are unloaded afterwards."""
     import numpy as np
     import torch
-    import folder_paths
-    import comfy.sd
     import comfy.model_management as mm
-    path = folder_paths.get_full_path("checkpoints", SAM3_CKPT)
-    if not path:
-        raise FileNotFoundError(f"{TAG} SAM3 checkpoint '{SAM3_CKPT}' not found in models/checkpoints (ComfyUI's core "
-                                "SAM3.1, used to find and follow the people). 缺 SAM3.1 模型。")
     from comfy_extras.nodes_sam3 import _extract_text_prompts
     from comfy.ldm.sam3.tracker import unpack_masks
-    out = comfy.sd.load_checkpoint_guess_config(path, output_vae=False, output_clip=True,
-                                                embedding_directory=folder_paths.get_folder_paths("embeddings"))
-    model, clip = out[0], out[1]
-    del out
+    model, clip = load_sam3()
     patchers = [model] + ([clip.patcher] if clip is not None and getattr(clip, "patcher", None) is not None else [])
     n = int(frames_u8.shape[0])
     win = max(3, int(round(window_s * fps)))
@@ -304,26 +408,83 @@ def _font(size):
         return ImageFont.load_default()
 
 
-def people_sheet(frame_u8, who, chosen, t):
-    """numbering frame with every person's box: L1, L2 ... (left to right); recast people in orange with 'pic N'"""
-    from PIL import Image, ImageDraw
-    img = Image.fromarray(frame_u8).convert("RGB")
-    W, H = img.size
-    d = ImageDraw.Draw(img)
-    f = _font(max(18, H // 28))
-    pic_of = {pid: p for p, _, pid in chosen}
-    for k, (pid, b) in enumerate(who, 1):
-        col = (255, 140, 0) if pid in pic_of else (80, 200, 255)
-        box = [b[0] * W, b[1] * H, b[2] * W, b[3] * H]
-        d.rectangle(box, outline=col, width=max(3, W // 400))
-        label = f"L{k}" + (f" <- pic {pic_of[pid]}" if pid in pic_of else "")
-        tb = d.textbbox((box[0] + 6, box[1] + 6), label, font=f)
-        d.rectangle([tb[0] - 4, tb[1] - 3, tb[2] + 4, tb[3] + 3], fill=(0, 0, 0))
-        d.text((box[0] + 6, box[1] + 6), label, fill=col, font=f)
-    d.text((10, H - max(18, H // 28) - 12), f"{t:.2f} s  numbered left to right", fill=(255, 255, 255),
-           font=f, stroke_width=2, stroke_fill=(0, 0, 0))
+def cast_sheet(small, frames, people, chosen, tile_h=360, per_row=6):
+    """0.5.91 (user 01:52): the cast - every person seen clearly, numbered in order of first appearance, cut from the
+    frame where he is largest.  '#k  a-b s' and '<- picture N' (orange, recast) or 'kept' (blue)."""
     import numpy as np
-    return np.asarray(img)
+    from PIL import Image, ImageDraw
+    pic_of = {pid: p for p, _, pid in chosen}
+    f = _font(22)
+    tiles, crops = [], []
+    for k, a in enumerate(people, 1):
+        img = Image.fromarray(np.asarray(small[a["best"]])).convert("RGB")
+        W, H = img.size
+        b = next((w[1] for w in frames[a["best"]]["who"] if w[0] == a["id"]), [0, 0, 1, 1])
+        px, py = 0.08 * (b[2] - b[0]), 0.04 * (b[3] - b[1])
+        box = [max(0, int((b[0] - px) * W)), max(0, int((b[1] - py) * H)),
+               min(W, int(math.ceil((b[2] + px) * W))), min(H, int(math.ceil((b[3] + py) * H)))]
+        # this person bright and framed, everybody else dimmed (02:06: neighbours in the crop made '#4' unreadable)
+        inner = [int(b[0] * W), int(b[1] * H), int(math.ceil(b[2] * W)), int(math.ceil(b[3] * H))]
+        dim = Image.blend(img, Image.new("RGB", img.size, (0, 0, 0)), 0.6)
+        dim.paste(img.crop(inner), inner[:2])
+        ImageDraw.Draw(dim).rectangle(inner, outline=(255, 140, 0) if pic_of.get(a["id"]) else (80, 200, 255),
+                                      width=max(3, W // 300))
+        crop = dim.crop(box)
+        crops.append(crop)
+        tw = max(170, int(round(crop.width * tile_h / max(1, crop.height))))
+        crop = crop.resize((min(tw, tile_h), tile_h), Image.LANCZOS)
+        tile = Image.new("RGB", (max(170, crop.width), tile_h + 62), (24, 24, 24))
+        tile.paste(crop, ((tile.width - crop.width) // 2, 0))
+        d = ImageDraw.Draw(tile)
+        p = pic_of.get(a["id"])
+        col = (255, 140, 0) if p else (80, 200, 255)
+        d.rectangle([0, 0, tile.width - 1, tile_h + 61], outline=col, width=4)
+        d.text((8, tile_h + 4), f"#{k}  {a['first']:.1f}-{a['last']:.1f} s", fill=(255, 255, 255), font=f)
+        d.text((8, tile_h + 32), f"<- picture {p}" if p else "kept", fill=col, font=f)
+        tiles.append(tile)
+    rows = [tiles[i:i + per_row] for i in range(0, len(tiles), per_row)] or [[]]
+    width = max(sum(t.width for t in r) + 8 * (len(r) + 1) for r in rows)
+    sheet = Image.new("RGB", (max(width, 64), len(rows) * (tile_h + 70) + 8), (12, 12, 12))
+    y = 8
+    for r in rows:
+        x = 8
+        for t in r:
+            sheet.paste(t, (x, y))
+            x += t.width + 8
+        y += tile_h + 70
+    return np.asarray(sheet), crops
+
+
+def people_places(m):
+    """0.5.91: every person of a keyframe moment, left to right: place, box in % of the frame (left, top, right,
+    bottom), cut by which edges, and who takes the place ("picture N") or "stays"."""
+    boxes = sorted((list(b) for b in m.get("boxes") or ()), key=lambda b: (b[0] + b[2]) / 2)
+    role = {int(it["rank"]): f"picture {j + 2}" for j, it in enumerate(m.get("items") or ())}
+    out = []
+    for r, b in enumerate(boxes, 1):
+        edges = [e for e, hit in (("left", b[0] <= 0.01), ("top", b[1] <= 0.01), ("right", b[2] >= 0.99),
+                                  ("bottom", b[3] >= 0.99)) if hit]
+        out.append({"place": r, "box_percent": [int(round(v * 100)) for v in b], "cut_by_edges": edges,
+                    "role": role.get(r, "stays")})
+    return out
+
+
+def thumb_b64(img, h=180):
+    """PIL image -> small JPEG as a data URL (the cast panel on the Prepare node)"""
+    import base64
+    from PIL import Image
+    w = max(1, int(round(img.width * h / max(1, img.height))))
+    buf = io.BytesIO()
+    img.convert("RGB").resize((w, h), Image.LANCZOS).save(buf, "JPEG", quality=82)
+    return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii")
+
+
+def tensor_pil(t):
+    import numpy as np
+    from PIL import Image
+    a = t[0] if getattr(t, "ndim", 3) == 4 else t
+    a = a.detach().cpu().numpy() if hasattr(a, "detach") else np.asarray(a)
+    return Image.fromarray((np.clip(a[..., :3], 0, 1) * 255).astype(np.uint8))
 
 
 def contact_sheet(images, labels, cols=2, width=1664):
@@ -365,6 +526,168 @@ def _unique_dir(base, name):
     return d
 
 
+EXPORT_KIND, IMPORT_KIND, PLAN_KIND = "keyframe_export", "keyframe_import", "multiswap_plan"
+PKG_MAX = 400 * 1024 * 1024          # bytes read from one member of an imported package
+
+
+def _png_bytes(arr_u8):
+    import io
+    from PIL import Image
+    b = io.BytesIO()
+    Image.fromarray(arr_u8).save(b, "PNG")
+    return b.getvalue()
+
+
+def _png_read(z, member):
+    import io
+    import numpy as np
+    from PIL import Image
+    info = z.getinfo(member)
+    if info.file_size > PKG_MAX:
+        raise K.KeyframeError(f"{TAG} {member} in the package is too large.")
+    return np.asarray(Image.open(io.BytesIO(z.read(member))).convert("RGB"))
+
+
+def _plain(o):
+    """json default: numpy numbers / arrays -> python"""
+    import numpy as np
+    if isinstance(o, np.generic):
+        return o.item()
+    if isinstance(o, np.ndarray):
+        return o.tolist()
+    raise TypeError(type(o).__name__)
+
+
+def job_state(job):
+    """everything of a Prepare job except the frames, as plain JSON (the Import restores the job from it)"""
+    keep = {k: v for k, v in job.items() if k not in ("frames", "recast_frames", "recast")}
+    return json.loads(json.dumps(keep, default=_plain))
+
+
+def fit_frame(out, W, H):
+    """H3 Image picture -> W x H: centred crop to the video's aspect, then scale (no stretching)"""
+    import numpy as np
+    from PIL import Image
+    h, w = out.shape[:2]
+    if (w, h) == (W, H):
+        return out
+    im = Image.fromarray(out).crop(K.crop_to_aspect(w, h, W, H))
+    return np.asarray(im.resize((W, H), Image.LANCZOS))
+
+
+def compare_pages(pairs, labels, people=None, page=(1920, 1080), per_page=1):
+    """0.5.91 (user 06:06: one long strip cannot be shown large enough to check): the Compare output as pages of one
+    size - one keyframe per page (original | new side by side, as large as the page allows), then one page per
+    keyframe with every replaced person cut out large (original above, new below: face, clothes, shoes).
+    `people`: per keyframe a list of (label, box 0-1) of the replaced persons.  -> list of HxWx3 uint8 pages"""
+    import numpy as np
+    from PIL import Image, ImageDraw
+    PW, PH = page
+    f = _font(28)
+    out, kf_pages = [], []
+
+    def fit(im, w, h):
+        im = Image.fromarray(im) if not isinstance(im, Image.Image) else im
+        r = min(w / im.width, h / im.height)
+        return im.resize((max(1, int(im.width * r)), max(1, int(im.height * r))), Image.LANCZOS)
+
+    cols = 2 if per_page > 1 else 1
+    rows = (per_page + cols - 1) // cols
+    for p0 in range(0, len(pairs), per_page):
+        sheet = Image.new("RGB", (PW, PH), (20, 20, 20))
+        d = ImageDraw.Draw(sheet)
+        cw, ch = PW // cols, PH // rows
+        for j, ((a, b), lab) in enumerate(zip(pairs[p0:p0 + per_page], labels[p0:p0 + per_page])):
+            x0, y0 = (j % cols) * cw, (j // cols) * ch
+            for c, im in enumerate((a, b)):
+                t = fit(im, cw // 2 - 6, ch - 40)
+                sheet.paste(t, (x0 + c * (cw // 2) + (cw // 2 - t.width) // 2, y0 + 36))
+            d.text((x0 + 8, y0 + 4), f"{lab}   original | new", fill=(255, 255, 255), font=f)
+        kf_pages.append(np.asarray(sheet))
+    for idx, ((a, b), lab, who) in enumerate(zip(pairs, labels, people or [None] * len(pairs))):
+        if idx < len(kf_pages) and per_page == 1:
+            out.append(kf_pages[idx])
+        if not who:
+            continue
+        sheet = Image.new("RGB", (PW, PH), (20, 20, 20))
+        d = ImageDraw.Draw(sheet)
+        cw = PW // len(who)
+        for j, (name, box) in enumerate(who):
+            crops = []
+            for im in (a, b):
+                h, w = im.shape[:2]
+                x0, y0, x1, y1 = box
+                bw, bh = x1 - x0, y1 - y0
+                X0, X1 = max(0, int((x0 - 0.12 * bw) * w)), min(w, int((x1 + 0.12 * bw) * w))
+                Y0, Y1 = max(0, int((y0 - 0.08 * bh) * h)), min(h, int((y1 + 0.03 * bh) * h))
+                crops.append(Image.fromarray(np.ascontiguousarray(im[Y0:max(Y0 + 2, Y1), X0:max(X0 + 2, X1)])))
+            hh = (PH - 80) // 2
+            for r, cimg in enumerate(crops):
+                t = fit(cimg, cw - 12, hh - 6)
+                sheet.paste(t, (j * cw + (cw - t.width) // 2, 40 + r * hh))
+            d.text((j * cw + 8, 6), name, fill=(255, 255, 255), font=f)
+        d.text((8, PH - 34), f"{lab}   each person: original above, new below", fill=(200, 200, 200), font=f)
+        out.append(np.asarray(sheet))
+    if per_page != 1:
+        out = kf_pages + out
+    return out or [np.zeros((64, 64, 3), np.uint8)]
+
+
+def save_pages(pages, folder):
+    """0.5.91 (user 06:56: pages in the ComfyUI preview are small and hard to move around when zoomed): the Compare
+    pages also as numbered JPEGs, to flip through full screen in any picture viewer (arrow keys).  Old pages of the
+    same video are replaced.  -> folder"""
+    from PIL import Image
+    os.makedirs(folder, exist_ok=True)
+    for f in os.listdir(folder):
+        if f.startswith("page_") and f.endswith(".jpg"):
+            try:
+                os.remove(os.path.join(folder, f))
+            except OSError:
+                pass
+    for i, pg in enumerate(pages, 1):
+        Image.fromarray(pg).save(os.path.join(folder, f"page_{i:03d}.jpg"), quality=92)
+    return folder
+
+
+def pages_tensor(pages):
+    import torch
+    return torch.cat([to_tensor(p) for p in pages])
+
+
+def _read_json(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return None
+
+
+def compare_sheet(pairs, labels, width=1664):
+    """one row per keyframe: the original | the new picture, numbered (what to check before the Director)"""
+    import numpy as np
+    from PIL import Image, ImageDraw
+    if not pairs:
+        return np.zeros((64, 64, 3), np.uint8)
+    h0, w0 = pairs[0][0].shape[:2]
+    cw = width // 2
+    ch = int(round(h0 * cw / w0))
+    sheet = Image.new("RGB", (cw * 2, ch * len(pairs)), (20, 20, 20))
+    f = _font(max(16, ch // 16))
+    for r, ((a, b), lab) in enumerate(zip(pairs, labels)):
+        for c, (im, tag) in enumerate(((a, "original"), (b, "new"))):
+            tile = Image.fromarray(im).resize((cw, ch), Image.LANCZOS)
+            d = ImageDraw.Draw(tile)
+            d.text((8, 6), f"{lab}  {tag}", fill=(255, 255, 255), font=f, stroke_width=2, stroke_fill=(0, 0, 0))
+            sheet.paste(tile, (c * cw, r * ch))
+    return np.asarray(sheet)
+
+
+def _pkg_dir():
+    import folder_paths
+    return os.path.join(folder_paths.get_output_directory(), KF_SUBDIR)
+
+
 # ------------------------------------------------------------------------------------------------- nodes
 class H3MDKeyframePrepare:
     """Who is who, which moments, and a crop + edit prompt per recast person per moment."""
@@ -379,24 +702,28 @@ class H3MDKeyframePrepare:
                                      "Only when no Load Video node is connected to source_video: the source video's "
                                      "path inside ComfyUI's input folder (older workflows). 没接加载视频时才用：原片在 "
                                      "input 里的路径。"}),
-                "mapping": ("STRING", {"multiline": True, "default": "图1换左二\n图2换左四", "tooltip":
-                                       "Which picture replaces which person; people are numbered left to right in the "
-                                       "first clear frame (see people_sheet). '图1换左二' = picture 1 replaces the "
-                                       "second from the left; English: 'picture 1 -> left 2'."}),
+                "mapping": ("STRING", {"multiline": True, "default": "", "tooltip":
+                                       "Empty = automatic (recommended): picture 1 goes to the first person who "
+                                       "appears in the clip, picture 2 to the next, and so on; once given, a person "
+                                       "keeps his picture wherever he moves, and people after the last picture stay "
+                                       "themselves. The cast sheet (people_sheet) shows who got which picture. To "
+                                       "choose yourself: after a run click the people on the buttons below (first "
+                                       "click = picture 1 ...) and run again (the tracking is reused: seconds), or "
+                                       "write '图1换3号' / 'picture 1 -> 3'. 留空 = 自动；跑一次后点下面的人来挑。"}),
                 "descriptions": ("STRING", {"multiline": True, "default": "", "tooltip":
-                                            "One line per picture, in picture order: race, age, face, hair, every "
-                                            "garment (e.g. 'a Black man in his twenties, short black hair, red bomber "
-                                            "jacket, white T-shirt, black jeans'). Used in the edit prompt and the "
-                                            "Remake prompt; English recommended. 每张图一行外貌描述。"}),
+                                            "Optional. Leave empty: the AI that writes the keyframe prompts "
+                                            "describes every character from its picture and asks you what the picture "
+                                            "does not show (a half-body picture: trousers and shoes). Or write a line "
+                                            "per picture, e.g. 'picture 2: a Black man in his twenties, short black "
+                                            "hair, red bomber jacket, black jeans, white sneakers' - the AI uses it as "
+                                            "it is. English."}),
                 "people_at_start": ("STRING", {"multiline": True, "default": "", "tooltip":
-                                    "Optional: one line per person in the source, left to right at the start, what "
+                                    "Optional: one line per person of the cast sheet (#1, #2 ... = order of first appearance), what "
                                     "they look like now (e.g. 'the woman with wavy dark-brown hair in a red crop top'). "
-                                    "Helps the edit model pick the right person and the Remake prompt keep the others. "
-                                    "可选：原片里从左到右每人一行，现在的样子。"}),
+                                    "Helps the Remake prompt keep the others. 可选：原片里从左到右每人一行，现在的样子。"}),
                 "max_gap_s": ("FLOAT", {"default": 5.0, "min": 2.0, "max": 8.0, "step": 0.5, "tooltip":
                                         "Largest distance between two keyframes (Remake splits long videos into "
                                         "parts; each part needs a keyframe)."}),
-                "prompt_language": (["en", "zh"], {"default": "en", "tooltip": "Language of the edit prompt template"}),
                 "threshold": ("FLOAT", {"default": 0.4, "min": 0.05, "max": 0.95, "step": 0.05,
                                         "tooltip": "SAM3 detection threshold for 'person'"}),
                 "max_people": ("INT", {"default": 8, "min": 1, "max": 20}),
@@ -413,25 +740,23 @@ class H3MDKeyframePrepare:
                                                          "its sound and becomes the plan's source. 到这一秒（0 = 片尾）。"})),
         }
 
-    RETURN_TYPES = ("IMAGE", "IMAGE", "STRING", "H3MD_KEYFRAME_JOB", "IMAGE", "STRING")
-    RETURN_NAMES = ("crops", "pictures", "prompts", "job", "people_sheet", "info")
-    OUTPUT_IS_LIST = (True, True, True, False, False, False)
-    OUTPUT_TOOLTIPS = ("One crop per recast person per keyframe, already at the edit size (about 1.6 MP): image 1 "
-                       "of the edit.",
-                       "The matching character picture for every crop: image 2 of the edit.",
-                       "The matching edit prompt for every crop.",
-                       "Everything Assemble needs (connect it there).",
-                       "First clear frame with every person numbered left to right: check the numbers match "
-                       "your mapping.",
+    RETURN_TYPES = ("IMAGE", "H3MD_KEYFRAME_JOB", "IMAGE", "STRING")
+    RETURN_NAMES = ("pictures", "job", "people_sheet", "info")
+    OUTPUT_IS_LIST = (True, False, False, False)
+    OUTPUT_TOOLTIPS = ("The character picture of every recast person at every keyframe, in order (connect to Recast).",
+                       "Everything Recast and Assemble need (connect it there).",
+                       "The cast: every person seen clearly, numbered in order of first appearance, with the "
+                       "picture each one gets (or 'kept').",
                        "Moments, people, warnings (JSON).")
     FUNCTION = "prepare"
     CATEGORY = CATEGORY
-    DESCRIPTION = ("Multi-person swap keyframes, step 1. Finds and numbers the people in the source (left to right "
-                   "at the start), picks keyframe moments at most max_gap_s apart (people standing apart, little "
-                   "motion), and gives one crop + character picture + prompt per recast person per moment. Put any "
-                   "image-edit model after it (lists: it runs once per crop), then H3MD Keyframe 2: Assemble.")
+    DESCRIPTION = ("Multi-person swap keyframes, step 1. Finds and numbers the people in the source (in order of first "
+                   "appearance), gives the pictures to them, picks keyframe moments at most max_gap_s apart (people standing apart, little "
+                   "motion) and notes where every person to recast stands then. Then H3MD Keyframe 1b: Recast "
+                   "(H3 Image AIO chain: plain sentence, official enhancer, one edit per keyframe) and H3MD "
+                   "Keyframe 2: Assemble.")
 
-    def prepare(self, video, mapping, descriptions, people_at_start, max_gap_s, prompt_language, threshold, max_people,
+    def prepare(self, video, mapping, descriptions, people_at_start, max_gap_s, threshold, max_people,
                 source_video=None, start_s=0.0, end_s=0.0, **pics):
         import comfy.utils
         mp = K.parse_mapping(mapping)
@@ -439,7 +764,16 @@ class H3MDKeyframePrepare:
             if pics.get(f"picture_{p}") is None:
                 raise K.KeyframeError(f"{TAG} picture {p} is used in the mapping but picture_{p} is not connected. "
                                       f"图{p} 没接。")
-        descs = K.parse_descriptions(descriptions, mp.keys())
+        # 0.5.91 (user 01:52): no mapping = every connected picture, given out in order of first appearance
+        picset = sorted(mp) if mp else sorted(i for i in range(1, 6) if pics.get(f"picture_{i}") is not None)
+        if not picset:
+            raise K.KeyframeError(f"{TAG} connect at least one character picture (picture_1 ...). 至少接一张角色图。")
+        descs = K.parse_descriptions(descriptions, picset)
+        # 0.5.91 (02:49): an old mapping text left in the box silently dropped pictures 4 and 5
+        unused = [i for i in range(1, 6) if mp and pics.get(f"picture_{i}") is not None and i not in mp]
+        pre_warns = ([f"picture(s) {unused} are connected but not in 'mapping', so they are not used. Clear 'mapping' "
+                      "for automatic, or drag them to people on the cast panel. 有接上但没写进 mapping 的图："
+                      f"{unused}，没有用上。"] if unused else [])
         looks = {k: s for k, s in enumerate(K.parse_people(people_at_start), 1)}
         import folder_paths
         typed = resolve_video(video) if source_video is None else None
@@ -452,36 +786,149 @@ class H3MDKeyframePrepare:
         dur = length / K.FPS
         LOG.info("%s %s: %dx%d %.2f s -> %dx%d, %d frames", TAG, os.path.basename(path), info["width"],
                  info["height"], info["duration"], size[0], size[1], length)
-        times, small = sample_frames(path, dur, size)
-        windows = track_people(small, threshold=threshold, max_people=max_people)
-        per_frame = K.link_windows(windows)[:len(times)]
+        # 0.5.91 (user 02:18): picking people on the cast sheet re-runs Prepare - the tracking (SAM3, faces,
+        # re-identification) of the same clip and settings is reused, so the second run takes seconds
+        tkey = (os.path.abspath(path), os.path.getsize(path), tuple(size), round(float(threshold), 3),
+                int(max_people), round(dur, 3))
+        hit = _TRACK_CACHE.get(tkey)
+        if hit is not None:
+            times, small, per_frame, reid_joins, reid_unsure, face_boxes, cuts = hit
+            K.FRAME_ASPECT = size[0] / float(size[1])
+            LOG.info("%s tracking reused from the last run (same clip and settings)", TAG)
+        else:
+            times, small = sample_frames(path, dur, size)
+            K.FRAME_ASPECT = size[0] / float(size[1])
+            windows = track_people(small, threshold=threshold, max_people=max_people)
+            per_frame = K.link_windows(windows)[:len(times)]
+            try:   # 0.5.8: the shot cuts (one keyframe per shot); 0.5.91: no tracker number goes on across a cut
+                cuts = detect_cuts(path)
+            except Exception as exc:
+                cuts = []
+                LOG.warning("%s cut detection failed (%s): keyframes by max_gap_s only", TAG, exc)
+            # 0.5.91 (user 16:11): who is who - tracker numbers cut at the cuts and where the look changes, then
+            # grouped into people by face + hair + clothes colour, each weighted by how well it tells THIS clip's
+            # people apart (K.identify).  Replaces the 0.5.9 re-identification and the 0.5.91 face clusters.
+            faces, face_boxes = {}, {}
+            try:
+                obs = face_observations(path, times, per_frame, size, boxes_out=face_boxes)
+                faces = {(i, pid): (emb, w) for i, pid, emb, w in obs}
+                LOG.info("%s faces: %d seen", TAG, len(obs))
+            except Exception as exc:
+                LOG.warning("%s face reading failed (%s): hair / clothes colour only", TAG, exc)
+            try:
+                det_looks = K.look_samples(small, per_frame)
+                per_frame, reid_joins, reid_unsure, id_notes = K.identify(per_frame, times, cuts, faces, det_looks)
+                for n_ in id_notes:
+                    LOG.info("%s %s", TAG, n_)
+            except Exception as exc:
+                reid_joins, reid_unsure = [], []
+                LOG.warning("%s identification failed (%s): tracks used as they are", TAG, exc)
+            try:   # diagnostics: every person's time span
+                spans = {}
+                for t_, fr in zip(times, per_frame):
+                    for q in fr:
+                        a = spans.setdefault(q, [t_, t_, 0])
+                        a[1], a[2] = t_, a[2] + 1
+                LOG.info("%s people: %s", TAG,
+                         "; ".join(f"{q}: {a[0]:.1f}-{a[1]:.1f} s ({a[2]} frames)" for q, a in sorted(spans.items())))
+            except Exception:
+                pass
+            for j in reid_joins:
+                LOG.info("%s person found again at %.1f s (piece of track %s -> person %s, %s, look %.2f)", TAG,
+                         j["at"], j["new"], j["into"], j["why"], j["look"])
+            _TRACK_CACHE.clear()
+            _TRACK_CACHE[tkey] = (times, small, per_frame, reid_joins, reid_unsure, face_boxes, cuts)
         frames = K.report(per_frame, times)
-        nf, order = K.number_people(frames)
-        chosen = K.resolve(mp, order)
+        frames, twin_notes = K.merge_twins(frames)   # 0.5.91 (16:11): one person boxed twice = one id, not 2 numbers
+        for n_ in twin_notes:
+            LOG.info("%s %s", TAG, n_)
+        frames, clean_notes = K.clean_frames(frames, face_boxes)   # 0.5.91: double / wide / hidden boxes
+        LOG.info("%s %s", TAG, clean_notes[0])
+        try:   # 0.5.91 (user 23:15): frames where the people are too dark to read are no keyframes
+            at_i = {round(float(t_), 3): j for j, t_ in enumerate(times)}
+            light = {}
+            for i_, f_ in enumerate(frames):
+                j = at_i.get(round(float(f_["at"]), 3))
+                bx = [b for _, b in K.visible(f_)]
+                if j is not None and bx:
+                    light[i_] = K.people_light(small[j], bx)
+            for n_ in K.mark_dark(frames, light):
+                LOG.info("%s %s", TAG, n_)
+        except Exception as exc:
+            LOG.warning("%s brightness check skipped (%s)", TAG, exc)
+        people = K.cast(frames)
+        if not mp:
+            mp = K.auto_cast(people, picset)
+        links = K.resolve(mp, people)
+        LOG.info("%s cast (order of first appearance): %s", TAG, "; ".join(
+            f"#{n} {a['first']:.1f}-{a['last']:.1f} s {a['side']}"
+            + next((f" <- picture {p}" for p, k, _ in links if k == n), " kept") for n, a in enumerate(people, 1)))
+        # 0.5.91 (user 22:11): numbers the user linked to the same picture are one person from here on; the cast
+        # sheet / panel keep showing every number (that is where the user links them)
+        frames_cast = copy.deepcopy(frames)
+        chosen, merged_away, merge_notes = K.merge_cast(frames, links)
+        for n_ in merge_notes:
+            LOG.info("%s %s", TAG, n_)
+        order = [a["id"] for a in people if a["id"] not in merged_away]
         ids = {pid for _, _, pid in chosen}
         moments = K.pick_moments(frames, ids, dur, max_gap_s)
-        try:   # 0.5.8: one keyframe in every shot
-            cuts = detect_cuts(path)
-        except Exception as exc:
-            cuts = []
-            LOG.warning("%s cut detection failed (%s): keyframes by max_gap_s only", TAG, exc)
         n_before = len(moments)
         moments = K.ensure_per_shot(frames, moments, ids, cuts, dur)
         LOG.info("%s shot cuts at %s s: %d keyframe(s) added so every shot has one", TAG, cuts,
                  len(moments) - n_before)
+        moments, full_notes = K.prefer_full(frames, moments, ids, cuts, dur, max_gap_s)
+        # 0.5.91: every replaced person gets one large, clear keyframe (else Remake has no face for the close-ups)
+        moments, id_keep, id_notes, id_warns = K.ensure_identity(frames, moments, chosen, dur)
+        moments, fin_notes = K.finish_moments(frames, moments, ids, dur, max_gap_s, cuts=cuts, keep=id_keep)
+        # 0.5.91 (_009 trial, user 03:31): the Director's parts depend on the GPU it runs on - every replaced person
+        # gets a keyframe at least every COVER_S s, and the Director picks 4 per real part that show everybody
+        moments, cov_notes, cov_warns = K.ensure_cover(frames, moments, ids, dur)
+        id_warns = list(id_warns) + cov_warns
+        fin_notes = full_notes + id_notes + fin_notes + cov_notes
+        # 0.5.91 seams (user 19:03): spare keyframes for small GPUs - the Director cuts on keyframes and takes a spare
+        # only where its parts are too short to reach the next main one; a 16 GB GPU is the smallest supported
+        try:
+            gap_s = K.spare_gap(spare_new_frames(size, (info["width"], info["height"])))
+            spare_idx, spare_notes = K.add_spares(frames, moments, ids, dur, gap_s, cuts)
+        except Exception as exc:
+            spare_idx, spare_notes = [], [f"spare keyframes skipped ({exc})"]
+        fin_notes += spare_notes
+        for n_ in fin_notes:
+            LOG.info("%s %s", TAG, n_)
+        LOG.info("%s keyframes at %s s (close-ups skipped)", TAG, [round(frames[i]["at"], 2) for i, _ in moments])
+        moments = sorted(list(moments) + [(i, "spare") for i in spare_idx], key=lambda m: frames[m[0]]["at"])
+        try:   # 0.5.9: tracking data next to the sources, so the moment rules can be checked again without a run
+            import json as _json
+            dbg = os.path.join(folder_paths.get_input_directory(), KF_SUBDIR, SOURCES_SUBDIR,
+                               os.path.splitext(os.path.basename(path))[0] + "_tracks.json")
+            with open(dbg, "w", encoding="utf-8") as fh:
+                _json.dump({"frames": frames, "cuts": cuts, "chosen": sorted(ids), "duration": dur,
+                            "aspect": K.FRAME_ASPECT, "max_gap": max_gap_s}, fh)
+        except Exception:
+            pass
         changes = K.place_changes(frames, order)
-        warnings = []
+        warnings = pre_warns + list(id_warns)
+        if reid_unsure and face_app() is None:
+            warnings.append("people were lost after cuts and InsightFace is not installed: with it (models/insightface/"
+                            "models/antelopev2 or buffalo_l, as for ReActor / PuLID) people are told apart by their "
+                            "faces. 装上 InsightFace 可以按人脸认人。")
+        for u in reid_unsure:
+            warnings.append(f"at {u['at']:.1f} s a person came back (after a cut, a blackout or a turn) who could be "
+                            f"any of tracks {[c[0] for c in u['candidates']]} (look {[c[1] for c in u['candidates']]}): "
+                            "not joined. Move start_s / end_s past this moment if someone is then missed. "
+                            "这里有人重新出现但认不出是谁，没有接上。")
         seen_last = {pid: max([f["at"] for f in frames if any(w[0] == pid for w in f["who"])] or [0.0])
                      for pid in ids}
         for p, k, pid in chosen:
             if seen_last[pid] < dur - max_gap_s:
-                warnings.append(f"picture {p} (left {k}) is followed only up to {seen_last[pid]:.1f} s: after that "
+                warnings.append(f"picture {p} (person #{k}) is followed only up to {seen_last[pid]:.1f} s: after that "
                                 "the tracker lost them (left the frame or hidden?). Later keyframes miss this person.")
-        sheet = people_sheet(small[frames.index(nf)], K.visible(nf), chosen, nf["at"])
+        sheet, cast_crops = cast_sheet(small, frames_cast, people, links)
         full = read_frames(path, [frames[i]["at"] for i, _ in moments], size)
         W, H = size
-        crops, pictures, prompts, job_moments = [], [], [], []
+        pictures, job_moments = [], []
         pic_t = {p: fit_picture(pics[f"picture_{p}"]) for p in mp}
+        slivers = []
         pbar = comfy.utils.ProgressBar(len(moments))
         for i, kind in moments:
             f = frames[i]
@@ -493,28 +940,32 @@ class H3MDKeyframePrepare:
                 own = next((b for q, b in vis if q == pid), None)
                 if own is None:
                     continue
+                if K.sliver(own):          # 0.5.91: only a strip at the edge - left as it is, not recast
+                    slivers.append(f"{t:.2f} s picture {p}")
+                    continue
                 ob = [own[0] * W, own[1] * H, own[2] * W, own[3] * H]
-                cb = K.crop_box(ob, W, H)
                 others = [[b[0] * W, b[1] * H, b[2] * W, b[3] * H] for q, b in allb if q != pid]
-                gw, gh = K.gen_size(cb[2] - cb[0], cb[3] - cb[1])
-                crop = full[t][cb[1]:cb[3], cb[0]:cb[2]]
-                ct = comfy.utils.common_upscale(to_tensor(crop).movedim(-1, 1), gw, gh, "lanczos",
-                                                "disabled").movedim(1, -1)
-                crops.append(ct.clamp(0, 1))
+                rank, n_here = K.frame_rank(ob, others)
                 pictures.append(pic_t[p])
-                prompts.append(K.edit_prompt(descs[p], prompt_language, looks.get(k, "")))
-                items.append({"picture": p, "left": k, "id": pid, "crop": cb, "own": ob, "others": others,
-                              "others_ids": [q for q, b in allb if q != pid],
-                              "inner": [ob[0] - cb[0], ob[1] - cb[1], ob[2] - cb[0], ob[3] - cb[1]]})
-            job_moments.append({"at": t, "kind": "swap" if items else "plain", "items": items})
+                # 0.5.91: where she stands in THIS keyframe + what she looked like at the start (the prompt names
+                # her by both), and her own / the others' boxes for the automatic checks
+                items.append({"picture": p, "left": k, "id": pid, "own": ob, "others": others,
+                              "others_ids": [q for q, b in allb if q != pid], "rank": rank, "n": n_here,
+                              "desc": descs[p], "look": looks.get(k, ""), "cut_bottom": bool(K.cut_at_bottom(own))})
+            job_moments.append(dict({"at": t, "kind": "swap" if items else "plain", "items": items,
+                                     "boxes": [list(b) for q, b in allb]},
+                                    **({"backup": True} if kind == "spare" else {})))
             pbar.update(1)
-        names = {pid: (None if pid in ids else (looks.get(n) or
-                                                f"the unchanged performer who starts {K.ordinal(n)} from the left"))
-                 for n, pid in enumerate(order, 1)}
-        if looks and len(looks) != len(order):
-            warnings.append(f"people_at_start has {len(looks)} line(s) but {len(order)} people were found at the start; "
-                            "check the people sheet.")
-        prompt = K.swap_prompt(length, chosen, descs, len(order), changes, names, looks)
+        if slivers:
+            LOG.info("%s only a strip at the frame edge, not recast there: %s", TAG, ", ".join(slivers))
+        names = {a["id"]: (None if a["id"] in ids else (looks.get(n) or
+                                                        f"the unchanged performer #{n} (first seen at "
+                                                        f"{a['first']:.1f} s on the {a['side']})"))
+                 for n, a in enumerate(people, 1) if a["id"] not in merged_away}
+        if looks and len(looks) != len(people):
+            warnings.append(f"people_at_start has {len(looks)} line(s) but the cast has {len(order)} people; "
+                            "check the cast sheet.")
+        prompt = K.swap_prompt(length, chosen, descs, len(order), changes, names, looks, people=people)
         job = {"video": plan_path(video, path), "video_abs": path, "duration": info["duration"],
                "has_audio": info["audio"], "size": list(size), "length": length, "moments": job_moments,
                "frames": full, "prompt": prompt, "chosen": chosen, "order": order}
@@ -523,49 +974,51 @@ class H3MDKeyframePrepare:
             st = round(max(0.0, float(start_s or 0.0)), 3)
             job["source_trim"] = {"start": st, "end": round(st + float(info["duration"]), 3)}
         text = {"video": job["video"], "size": list(size), "frames": length, "seconds": round(dur, 2),
-                "people_at_start": len(order), "numbered_at": nf["at"],
-                "mapping": [{"picture": p, "left": k} for p, k, _ in chosen],
-                "keyframes": [{"at": m["at"], "recast": [it["picture"] for it in m["items"]]} for m in job_moments],
+                "people": len(order),
+                "cast": [{"person": n, "first_s": a["first"], "last_s": a["last"], "side": a["side"],
+                          "picture": next((p for p, k, _ in links if k == n), None)}
+                         for n, a in enumerate(people, 1)],
+                "mapping": [{"picture": p, "person": k} for p, k, _ in links],
+                "keyframes": [dict({"at": m["at"], "recast": [it["picture"] for it in m["items"]]},
+                                   **({"spare": True} if m.get("backup") else {})) for m in job_moments],
                 "place_changes": [{"from": a, "to": b} for a, b, pr in changes if pr],
                 "cuts": cuts,
-                "edits": len(crops), "warnings": warnings}
+                "recasts": len(pictures), "warnings": warnings, "reid": reid_joins}
         info_s = json.dumps(text, ensure_ascii=False, indent=1)
         for w in warnings:
             LOG.warning("%s %s", TAG, w)
-        LOG.info("%s %d keyframes, %d edits", TAG, len(job_moments), len(crops))
-        if not crops:
+        LOG.info("%s %d keyframes, %d people to recast", TAG, len(job_moments), len(pictures))
+        if not pictures:
             raise K.KeyframeError(f"{TAG} none of the chosen people was found at any keyframe. 一个要换的人都没找到。")
-        return {"ui": {"text": [info_s]},
-                "result": (crops, pictures, prompts, job, to_tensor(sheet), info_s)}
+        cast_ui = {"pictures": picset, "people": [
+            {"person": n, "first": round(a["first"], 1), "last": round(a["last"], 1),
+             "picture": next((p for p, k, _ in links if k == n), None)} for n, a in enumerate(people, 1)]}
+        try:   # 02:20: thumbnails for the drag-a-line cast panel
+            cast_ui["tiles"] = [thumb_b64(c) for c in cast_crops]
+            cast_ui["thumbs"] = {str(p): thumb_b64(tensor_pil(pics[f"picture_{p}"])) for p in picset}
+            cast_ui["desc"] = {str(p): descs.get(p, "")[:80] for p in picset}
+        except Exception as exc:
+            LOG.warning("%s cast panel pictures failed: %s", TAG, exc)
+        return {"ui": {"text": [info_s], "h3md_cast": [json.dumps(cast_ui)]},
+                "result": (pictures, job, to_tensor(sheet), info_s)}
 
 
 class H3MDKeyframeAssemble:
-    """Edited crops -> keyframes -> H3MD plan + plan zip."""
+    """Recast keyframes -> saved keyframes -> H3MD plan + plan zip."""
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "job": ("H3MD_KEYFRAME_JOB", {"tooltip": "From H3MD Keyframe 1: Prepare"}),
-                "edited": ("IMAGE", {"tooltip": "The edited crops, in the order Prepare gave them (the edit model's "
-                                                "output)."}),
-                "name": ("STRING", {"default": "multiswap", "tooltip": "Plan name: keyframes go to input/"
-                                    "H3MD_keyframes/<name>/, the zip to output/H3MD_plans/<name>.zip"}),
+                "job": ("H3MD_KEYFRAME_JOB", {"tooltip": "From H3MD Keyframe 1b: Recast (the job with the keyframes)"}),
+                "name": ("STRING", {"default": "multiswap", "tooltip": "Plan name (English, no spaces): keyframes go to input/"
+                                    "H3MD_keyframes/<name>/, the zip to output/H3MD_plans/<name>_multiswap_plan_"
+                                    "<date>_<number>.zip (never overwritten)"}),
                 "save_zip": ("BOOLEAN", {"default": True, "tooltip": "Also write the plan zip (source video + "
                                          "keyframes + plan) for the Director's Import plan / RunningHub."}),
-                "mask_grow": ("FLOAT", {"default": K.OWN_GROW, "min": 0.0, "max": 0.5, "step": 0.05, "tooltip":
-                              "How far each recast person's own area reaches past her box (share of its width; half of "
-                              "it up and down). Raise it (0.25-0.35) when bits of the original (wig, ears, tail, wide "
-                              "skirt) are left around the new person. \u906e\u7f69\u6269\u5927\uff1a\u539f\u89d2\u8272\u8fb9\u7f18\u6e05\u4e0d\u5e72\u51c0\u5c31\u8c03\u5927\uff080.25-0.35\uff09\u3002"}),
-                "protect_others": ("FLOAT", {"default": K.PROTECT_PAD, "min": -0.3, "max": 0.3, "step": 0.05,
-                                   "tooltip": "How much of the people around is kept from the source while pasting "
-                                   "(share of their box; below 0 = only their body core). Raise it toward 0 or above "
-                                   "when a neighbour that was already recast gets damaged. \u4fdd\u62a4\u65c1\u4eba\uff1a"
-                                   "\u65c1\u8fb9\u5df2\u6362\u597d\u7684\u4eba\u88ab\u753b\u574f\u5c31\u8c03\u5927\u3002"}),
             }
         }
 
-    INPUT_IS_LIST = True
     RETURN_TYPES = ("IMAGE", "STRING", "STRING")
     RETURN_NAMES = ("keyframes_sheet", "plan_json", "zip_path")
     OUTPUT_TOOLTIPS = ("All keyframes with their times: check them before running the Director.",
@@ -574,49 +1027,33 @@ class H3MDKeyframeAssemble:
     OUTPUT_NODE = True
     FUNCTION = "assemble"
     CATEGORY = CATEGORY
-    DESCRIPTION = ("Multi-person swap keyframes, step 2. Colour-matches every edited crop to the source, pastes it "
-                   "back (the people around keep their source pixels), saves the keyframes and writes the Remake "
-                   "plan + plan zip. Then: Director workflow 'H3MD Director Remake.json' -> Import plan.")
+    DESCRIPTION = ("Multi-person swap keyframes, step 2. Saves Recast's keyframes and writes the Remake plan + plan "
+                   "zip. Then: Director workflow 'H3MD Director Remake.json' -> Import plan.")
 
-    def assemble(self, job, edited, name, save_zip, mask_grow=None, protect_others=None):
-        import numpy as np
+    def assemble(self, job, name, save_zip):
         import folder_paths
         from PIL import Image
-        job = job[0]
-        name = _plan_io().safe_name((name or ["multiswap"])[0], "multiswap")
-        save_zip = bool(save_zip[0]) if isinstance(save_zip, list) else bool(save_zip)
-        mask_grow = float((mask_grow or [K.OWN_GROW])[0] if isinstance(mask_grow, list) else (K.OWN_GROW if mask_grow is None else mask_grow))
-        protect_others = float((protect_others or [K.PROTECT_PAD])[0] if isinstance(protect_others, list) else (K.PROTECT_PAD if protect_others is None else protect_others))
-        flat = [to_u8(e[b:b + 1]) for e in edited for b in range(int(e.shape[0]))]
-        need = sum(len(m["items"]) for m in job["moments"])
-        if len(flat) != need:
-            raise K.KeyframeError(f"{TAG} {len(flat)} edited image(s) for {need} crop(s): connect the edit model's "
-                                  "output for all crops (one image each). 修好的图数量和裁块数量不一致。")
+        if not job.get("recast_frames"):
+            raise K.KeyframeError(f"{TAG} no keyframes in the job: connect H3MD Keyframe 1b: Recast's job output. "
+                                  "请接 Recast 的 job 输出。")
+        name = _plan_io().safe_name(name or "multiswap", "multiswap")
         W, H = job["size"]
         inp = folder_paths.get_input_directory()
         kdir = _unique_dir(os.path.join(inp, KF_SUBDIR), name)
         os.makedirs(kdir, exist_ok=True)
         rel = os.path.relpath(kdir, inp).replace("\\", "/")
-        n, kfs, imgs, labels = 0, [], [], []
+        kfs, imgs, labels = [], [], []
         for mi, m in enumerate(job["moments"]):
-            src = job["frames"][m["at"]]
-            out = src.copy()
-            if job.get("recast_frames") and m["at"] in job["recast_frames"]:   # 0.5.7: done by Recast
-                out = job["recast_frames"][m["at"]].copy()
-                n += len(m["items"])
-            for it in ([] if job.get("recast_frames") and m["at"] in job["recast_frames"] else m["items"]):
-                x0, y0, x1, y1 = it["crop"]
-                e = Image.fromarray(flat[n]).resize((x1 - x0, y1 - y0), Image.LANCZOS)
-                n += 1
-                patch = K.colour_match(np.asarray(e), src[y0:y1, x0:x1], it["inner"])
-                K.paste(out, patch, it["crop"], K.paste_alpha(it["crop"], W, H, it["own"], it["others"], mask_grow, protect_others))
+            out = job["recast_frames"].get(m["at"], job["frames"][m["at"]])
             fr = int(round(m["at"] * K.FPS))
             fn = f"kf_{fr:04d}.png"
             Image.fromarray(out).save(os.path.join(kdir, fn))
-            kfs.append((f"kf{mi + 1}", f"{rel}/{fn}", m["at"]))
+            kfs.append((f"kf{mi + 1}", f"{rel}/{fn}", m["at"], sorted({int(i["left"]) for i in m["items"]}),
+                        bool(m.get("backup"))))
             imgs.append(out)
-            labels.append(f"{m['at']:.2f} s  " + ("pic " + ", ".join(str(i["picture"]) for i in m["items"])
-                                                   if m["items"] else "source frame"))
+            label = f"{m['at']:.2f} s  " + ("pic " + ", ".join(str(i["picture"]) for i in m["items"])
+                                             if m["items"] else "source frame") + ("  (spare)" if m.get("backup") else "")
+            labels.append(label)
         plan = K.build_plan(job["video"], job["duration"], job["has_audio"], (W, H), job["length"], kfs,
                             job["prompt"], name)
         if job.get("source_trim"):
@@ -624,6 +1061,10 @@ class H3MDKeyframeAssemble:
         plan_s = json.dumps(plan, ensure_ascii=False, indent=2)
         with open(os.path.join(kdir, "plan.json"), "w", encoding="utf-8") as fh:
             fh.write(plan_s)
+        report = (job.get("recast") or {}).get("report")
+        if report:
+            with open(os.path.join(kdir, "recast_report.txt"), "w", encoding="utf-8") as fh:
+                fh.write(report)
         zip_path = ""
         if save_zip:
             data, man = _plan_io().export_plan(plan, None, inp, with_media=True, include_big_videos=True, name=name)
@@ -632,10 +1073,7 @@ class H3MDKeyframeAssemble:
                 LOG.warning("%s not packed: %s", TAG, missing)
             odir = os.path.join(folder_paths.get_output_directory(), PLANS_SUBDIR)
             os.makedirs(odir, exist_ok=True)
-            zip_path, k = os.path.join(odir, f"{name}.zip"), 2
-            while os.path.exists(zip_path):
-                zip_path = os.path.join(odir, f"{name}_{k}.zip")
-                k += 1
+            zip_path = K.stamp_name(odir, name, PLAN_KIND, ".zip")
             with open(zip_path, "wb") as fh:
                 fh.write(data)
             LOG.info("%s plan zip: %s (%.1f MB)", TAG, zip_path, len(data) / 1e6)
@@ -644,10 +1082,263 @@ class H3MDKeyframeAssemble:
         return {"ui": {"text": [msg]}, "result": (to_tensor(sheet), plan_s, zip_path)}
 
 
+class H3MDKeyframeExport:
+    """0.5.91: the keyframes, the character pictures and what each keyframe must become, as one package for the AI
+    that writes the H3 Image prompts (+ everything the Import needs to go on without this group)."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "job": ("H3MD_KEYFRAME_JOB", {"tooltip": "From H3MD Keyframe Prepare"}),
+                "pictures": ("IMAGE", {"tooltip": "Prepare's pictures output"}),
+                "name": ("STRING", {"default": "multiswap", "tooltip":
+                                    "Package name (English, no spaces): output/H3MD_keyframes/"
+                                    "<name>_keyframe_export_<date>_<number>.zip - never overwritten."}),
+            }
+        }
+
+    INPUT_IS_LIST = True
+    RETURN_TYPES = ("STRING", "IMAGE")
+    RETURN_NAMES = ("package", "keyframes")
+    OUTPUT_TOOLTIPS = ("The export package: give it to the AI.",
+                       "The keyframes in the package, numbered #1, #2 ...")
+    OUTPUT_NODE = True
+    FUNCTION = "export"
+    CATEGORY = CATEGORY
+    DESCRIPTION = ("Multi-person swap, group 1 (Keyframe Export): writes the keyframes, the character pictures and "
+                   "what each keyframe must become as one package for the AI that writes the H3 Image prompts. The "
+                   "AI answers with a .h3kf (or .json) file: load it with H3MD Keyframe Import.")
+
+    def export(self, job, pictures, name):
+        import zipfile
+        import numpy as np
+        one = lambda v: v[0] if isinstance(v, list) else v
+        job, name = one(job), _plan_io().safe_name(str(one(name)) or "multiswap", "multiswap")
+        pics = [p[b:b + 1] for p in pictures for b in range(int(p.shape[0]))]
+        todo = [m for m in job["moments"] if m["items"]]
+        zp = K.stamp_name(_pkg_dir(), name, EXPORT_KIND, ".zip")
+        stem = os.path.splitext(os.path.basename(zp))[0]
+        imp = stem.replace("_" + EXPORT_KIND + "_", "_" + IMPORT_KIND + "_")
+        os.makedirs(os.path.dirname(zp), exist_ok=True)
+        req, saved, n, shown, labels = [], {}, 0, [], []
+        with zipfile.ZipFile(zp, "w", zipfile.ZIP_DEFLATED) as z:
+            for k, m in enumerate(todo, 1):
+                refs = pics[n:n + len(m["items"])]
+                n += len(m["items"])
+                kf = f"keyframe_{k}.png"
+                fr = np.ascontiguousarray(job["frames"][m["at"]])
+                z.writestr(kf, _png_bytes(fr))
+                shown.append(fr)
+                labels.append(f"#{k}  {m['at']:.2f} s" + ("  (spare)" if m.get("backup") else ""))
+                files = []
+                for it, r in zip(m["items"], refs):
+                    f = f"character_picture_{it['picture']}.png"
+                    if it["picture"] not in saved:
+                        z.writestr(f, _png_bytes(to_u8(r)))
+                        saved[it["picture"]] = f
+                    files.append(f)
+                n_people = max(int(it.get("n") or 0) for it in m["items"])
+                req.append({"keyframe": k, "at_seconds": round(m["at"], 2), "picture_1": kf,
+                            "pictures": [{"picture": j + 2, "file": f, "description": it.get("desc", ""),
+                                          "replaces_person_from_left": it["rank"]}
+                                         for j, (it, f) in enumerate(zip(m["items"], files))],
+                            "people_in_frame": n_people,
+                            # 0.5.91 (user 00:54): who stays, counted from the left in THIS keyframe - write them too
+                            "keeps_people_from_left": [r for r in range(1, n_people + 1)
+                                                       if r not in {it["rank"] for it in m["items"]}],
+                            # 0.5.91 (03:15): where each person stands, to check left / right / in front by numbers
+                            "people_from_left": people_places(m),
+                            "sentence": K.swap_sentence([(it["rank"], j + 2) for j, it in enumerate(m["items"])],
+                                                        n_people)})
+            # 0.5.91 (user 16:53): every character once - an empty description = the AI describes the picture and
+            # asks the user what it does not show; its sentences come back as "characters"
+            descs_of = {}
+            for m in todo:
+                for it in m["items"]:
+                    descs_of.setdefault(int(it["picture"]), it.get("desc", ""))
+            chars = [{"picture": p, "file": saved.get(p, f"character_picture_{p}.png"), "description": d,
+                      "describe_it": not d} for p, d in sorted(descs_of.items())]
+            z.writestr("request.json", json.dumps({"package": stem, "answer_file": imp + ".h3kf",
+                                                   "video": job.get("video"), "characters": chars,
+                                                   "keyframes": req},
+                                                  ensure_ascii=False, indent=1))
+            z.writestr("README_for_AI.md", K.AI_README.format(package=stem, answer_file=imp + ".h3kf",
+                                                              answer_json=imp + ".json"))
+            # for the Import (group 2 runs with group 1 bypassed): the job and every keyframe moment's frame
+            z.writestr("_h3md/job.json", json.dumps(job_state(job), ensure_ascii=False))
+            for i, m in enumerate(job["moments"]):
+                z.writestr(f"_h3md/frame_{i:03d}.png", _png_bytes(np.ascontiguousarray(job["frames"][m["at"]])))
+        msg = (f"{len(todo)} keyframes -> {zp}\nGive this zip to the AI. It answers with {imp}.h3kf (or .json): "
+               "load it with H3MD Keyframe Import.")
+        LOG.info("%s %s", TAG, msg)
+        return {"ui": {"text": [msg], "h3md_kf_count": [len(todo)]},
+                "result": (zp, to_tensor(contact_sheet(shown, labels)))}
+
+
+def read_package(path):
+    """an imported answer -> (job, pictures, prompts text, request).  .h3kf / .zip: the export package with the AI's
+    prompts.json added; .json: the AI's prompts.json alone, the export package is found by its "package" name in
+    output/H3MD_keyframes/"""
+    import zipfile
+    import numpy as np
+    ext = os.path.splitext(path)[1].lower()
+    prompts = ""
+    if ext == ".json":
+        prompts = open(path, encoding="utf-8").read()
+        try:
+            stem = str(json.loads(prompts).get("package") or "")
+        except (ValueError, AttributeError):
+            stem = ""
+        if not stem:
+            raise K.KeyframeError(f"{TAG} {os.path.basename(path)} does not say which export package it answers "
+                                  '("package": "<name>_keyframe_export_<date>_<number>"). Ask the AI for the .h3kf '
+                                  "file, or add the package name.")
+        zpath = os.path.join(_pkg_dir(), os.path.basename(stem) + ".zip")
+        if not os.path.isfile(zpath):
+            raise K.KeyframeError(f"{TAG} export package {stem}.zip not found in output/{KF_SUBDIR}/. Import the "
+                                  ".h3kf file the AI made, or run Keyframe Export again.")
+    else:
+        zpath = path
+    with zipfile.ZipFile(zpath) as z:
+        names = set(z.namelist())
+        if "_h3md/job.json" not in names:
+            raise K.KeyframeError(f"{TAG} {os.path.basename(zpath)} is not an H3MD keyframe package (no _h3md/job.json): "
+                                  "import the file made from a Keyframe Export package.")
+        if not prompts:
+            cand = [n for n in names if n.lower().endswith(".json") and "/" not in n and n != "request.json"]
+            cand.sort(key=lambda n: (n.lower() != "prompts.json", n))
+            if not cand:
+                raise K.KeyframeError(f"{TAG} {os.path.basename(zpath)} has no prompts.json: the AI must add its "
+                                      "answer to the package.")
+            prompts = z.read(cand[0]).decode("utf-8")
+        job = json.loads(z.read("_h3md/job.json").decode("utf-8"))
+        request = json.loads(z.read("request.json").decode("utf-8")) if "request.json" in names else {}
+        job["frames"] = {m["at"]: _png_read(z, f"_h3md/frame_{i:03d}.png") for i, m in enumerate(job["moments"])}
+        chars = {}
+        pictures = []
+        for m in job["moments"]:
+            for it in m["items"]:
+                p = it["picture"]
+                if p not in chars:
+                    chars[p] = to_tensor(_png_read(z, f"character_picture_{p}.png"))
+                pictures.append(chars[p])
+    job["size"] = list(job["size"])
+    return job, pictures, prompts, request
+
+
+class H3MDKeyframeImport:
+    """0.5.91 (user 22:47): loads the AI's answer (.h3kf = the export package + prompts.json, or the prompts .json)
+    with a button; restores the job, so this group runs with the Export group bypassed."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "package": ("STRING", {"default": "", "tooltip":
+                                       "The AI's answer: click 'Import package' and pick the .h3kf (or .json) file. "
+                                       "It is copied to input/H3MD_keyframes/imports/."}),
+            }
+        }
+
+    RETURN_TYPES = ("H3MD_KEYFRAME_JOB", "IMAGE", "STRING", "IMAGE", "STRING")
+    RETURN_NAMES = ("job", "pictures", "prompts", "keyframes", "info")
+    OUTPUT_IS_LIST = (False, True, False, False, False)
+    OUTPUT_TOOLTIPS = ("The job (connect to Recast).", "The character pictures (connect to Recast).",
+                       "The AI's prompts (connect to Recast).", "The original keyframes, numbered.",
+                       "What was loaded.")
+    FUNCTION = "load"
+    CATEGORY = CATEGORY
+    DESCRIPTION = ("Multi-person swap, group 2 (Keyframe Import): loads the AI's answer to a Keyframe Export package "
+                   "and gives Recast the job, the pictures and the prompts. Group 1 can stay bypassed.")
+
+    @classmethod
+    def IS_CHANGED(cls, package):
+        try:
+            p = cls._path(package)
+            return f"{p}:{os.path.getmtime(p)}"
+        except Exception:
+            return package
+
+    @staticmethod
+    def _path(package):
+        import folder_paths
+        p = str(package or "").strip().strip('"')
+        if not p:
+            raise K.KeyframeError(f"{TAG} no package: click 'Import package' and pick the AI's .h3kf / .json file.")
+        for cand in (p, os.path.join(folder_paths.get_input_directory(), p)):
+            if os.path.isfile(cand):
+                return cand
+        raise K.KeyframeError(f"{TAG} package not found: {p}")
+
+    def load(self, package):
+        path = self._path(package)
+        job, pictures, prompts, request = read_package(path)
+        todo = [m for m in job["moments"] if m["items"]]
+        given = K.parse_prompts(prompts, len(todo))
+        # 0.5.91 (user 16:53): the AI's character sentences go into the Director's video prompt; kept next to the
+        # export package so a later answer that only redoes some keyframes still has them
+        stem = str(request.get("package") or "")
+        store = os.path.join(_pkg_dir(), os.path.basename(stem) + "_characters.json") if stem else ""
+        chars = {}
+        if store and os.path.isfile(store):
+            try:
+                chars = {int(k): v for k, v in json.load(open(store, encoding="utf-8")).items()}
+            except (ValueError, OSError):
+                chars = {}
+        new_chars = K.parse_characters(prompts)
+        if new_chars and store:
+            chars.update(new_chars)
+            with open(store, "w", encoding="utf-8") as fh:
+                json.dump({str(k): v for k, v in sorted(chars.items())}, fh, ensure_ascii=False, indent=1)
+        job["prompt"], missing = K.fill_characters(job.get("prompt", ""), chars)
+        if missing:
+            raise K.KeyframeError(
+                f"{TAG} the answer does not describe character picture(s) {missing}: ask the AI to add "
+                '"characters": {"N": "one sentence, head to toe"} to prompts.json (the numbers of '
+                "character_picture_N.png), or write their descriptions on Prepare. 回包里缺角色图 "
+                f"{missing} 的描述，请让 AI 在 prompts.json 里补上 characters。")
+        shown = [job["frames"][m["at"]] for m in todo]
+        labels = [f"#{k}  {m['at']:.2f} s" for k, m in enumerate(todo, 1)]
+        info = (f"{os.path.basename(path)}: {len(todo)} keyframes, prompts for {sorted(given)}"
+                + (f" (package {request.get('package')})" if request.get("package") else ""))
+        LOG.info("%s %s", TAG, info)
+        return {"ui": {"text": [info], "h3md_kf_count": [len(todo)]},
+                "result": (job, pictures, prompts, to_tensor(contact_sheet(shown, labels)), info)}
+
+
+class H3MDKeyframeRedo:
+    """0.5.91 (user 22:47): one button per keyframe; the chosen ones are made again, the others are kept."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "redo": ("STRING", {"default": "", "tooltip": "Set by the buttons: the keyframes to make again "
+                                    "(empty = all)."}),
+                "count": ("INT", {"default": 0, "min": 0, "max": 999, "tooltip": "Number of keyframes (set by the "
+                                  "last Export / Import run)."}),
+            }
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("redo",)
+    OUTPUT_TOOLTIPS = ("The chosen keyframes (connect to Recast's redo).",)
+    FUNCTION = "pick"
+    CATEGORY = CATEGORY
+    DESCRIPTION = ("Multi-person swap: click the keyframes to make again (the others are taken from the last run). "
+                   "None chosen = make every keyframe.")
+
+    def pick(self, redo, count):
+        sel = K.parse_redo(redo, max(int(count or 0), 999))
+        return (",".join(str(k) for k in sel) if sel else "",)
+
+
 class H3MDKeyframeRecast:
-    """0.5.7: the edit, one person after another. Every crop is cut from the keyframe where the people before her are
-    already recast, so the neighbours in it are the new characters, never the originals; a bigger original (wig,
-    ears, tail, wide skirt) can then be covered without the originals being pasted back."""
+    """0.5.91: one MiniMax H3 Image edit per keyframe (<Picture 1> = the keyframe, 2... = the new people, the H3 Image
+    AIO v1.01 model chain, tuned 6-step sigmas), with the prompts an AI wrote from the Export package (user 21:56:
+    the reading of the pictures - the slow local enhancer - is done once, by the AI).  'redo' makes single keyframes
+    again (another seed); the others come from the last run of the video."""
 
     @classmethod
     def INPUT_TYPES(cls):
@@ -655,92 +1346,155 @@ class H3MDKeyframeRecast:
             "required": {
                 "job": ("H3MD_KEYFRAME_JOB", {"tooltip": "From H3MD Keyframe 1: Prepare"}),
                 "pictures": ("IMAGE", {"tooltip": "Prepare's pictures output"}),
-                "prompts": ("STRING", {"forceInput": True, "tooltip": "Prepare's prompts output"}),
-                "model": ("MODEL", {"tooltip": "The image-edit model (Qwen Image 2.1 + its LoRA / sampling patch)"}),
-                "clip": ("CLIP",),
-                "vae": ("VAE",),
-                "sampler": ("SAMPLER",),
-                "sigmas": ("SIGMAS",),
+                "model": ("MODEL", {"tooltip": "MiniMax H3 Image (+ LoRA), as in the H3 Image AIO workflow"}),
+                "clip": ("CLIP", {"tooltip": "qwen3vl_32b_minimax_h3 (type minimax)"}),
+                "vae": ("VAE", {"tooltip": "minimax_h3_image_vae"}),
+                "sampler": ("SAMPLER", {"tooltip": "euler"}),
+                "sigmas": ("SIGMAS", {"tooltip": "the tuned exact 6-step PDD sigmas"}),
+                "prompts": ("STRING", {"forceInput": True, "tooltip": "From H3MD Keyframe Import"}),
+                "megapixels": ("FLOAT", {"default": K.EDIT_MP, "min": 0.5, "max": 8.0, "step": 0.1,
+                                         "tooltip": "Edit canvas, keyframe aspect, multiple of 32 (AIO: 4.0)"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xffffffffffffffff, "control_after_generate": True}),
-                "cfg": ("FLOAT", {"default": 1.0, "min": 0.0, "max": 20.0, "step": 0.1}),
-                "mask_grow": ("FLOAT", {"default": 0.25, "min": 0.0, "max": 0.6, "step": 0.05, "tooltip":
-                              "How far each recast person's own area reaches past her box (share of its width; half "
-                              "of it up and down). Cosplay-sized originals: 0.25-0.35. 遮罩扩大"}),
-                "protect_others": ("FLOAT", {"default": -0.05, "min": -0.3, "max": 0.3, "step": 0.05, "tooltip":
-                                   "Protection of the OTHER recast people while pasting (share of their box; below 0 "
-                                   "= only their body core). People who are not recast always keep +0.06. "
-                                   "保护旁人（只管要换的人；不换的人始终保护）"}),
+            },
+            "optional": {
+                "redo": ("STRING", {"forceInput": True, "tooltip": "From H3MD Keyframe Redo: only these keyframes are "
+                                    "made again, the others come from the last run (none = all)."}),
             }
         }
 
     INPUT_IS_LIST = True
-    RETURN_TYPES = ("IMAGE", "H3MD_KEYFRAME_JOB")
-    RETURN_NAMES = ("edited", "job")
-    OUTPUT_IS_LIST = (True, False)
-    OUTPUT_TOOLTIPS = ("The edited crops in Prepare's order (connect to Assemble 'edited').",
-                       "The job with the finished keyframes (connect to Assemble 'job').")
+    RETURN_TYPES = ("IMAGE", "H3MD_KEYFRAME_JOB", "STRING", "IMAGE")
+    RETURN_NAMES = ("keyframes", "job", "report", "compare")
+    OUTPUT_IS_LIST = (True, False, False, False)
+    OUTPUT_TOOLTIPS = ("The finished keyframes, one per swap moment (whole frames).",
+                       "The job with the keyframes (connect to Assemble).",
+                       "Per keyframe (#1, #2 ...): the prompt and the time.",
+                       "Original | new, one row per keyframe (#1, #2 ...): check them, redo the ones that differ.")
     FUNCTION = "recast"
     CATEGORY = CATEGORY
-    DESCRIPTION = ("Multi-person swap keyframes, step 1b (0.5.7): runs the image edit itself, one person after "
-                   "another, each crop cut from the frame where the people before her are already recast. Replaces "
-                   "the Text Encode / Sampler / VAE Decode chain between Prepare and Assemble.")
+    DESCRIPTION = ("Multi-person swap keyframes, step 1b: one H3 Image edit per keyframe with the prompts "
+                   "the AI wrote from H3MD Keyframe 1a: Export. Then H3MD Keyframe 2: Assemble.")
 
-    def recast(self, job, pictures, prompts, model, clip, vae, sampler, sigmas, seed, cfg, mask_grow,
-               protect_others):
+    METHOD = "H3 Image, prompts written by an AI from the Export package"
+    CACHE_TAG = ""      # the last run's keyframes (kept ones of a redo) live in input/H3MD_keyframes/_recast<tag>/
+
+    def _edit(self, frame, refs, prompt, model, clip, vae, sampler, sigmas, seed, gw, gh):
+        """one edit of a whole keyframe -> (image [1,H,W,3] 0-1, canvas size)"""
+        import nodes
+        from comfy_extras.nodes_minimax_h3 import MiniMaxH3ImageConditioning
+        from comfy_extras.nodes_custom_sampler import BasicGuider, RandomNoise, SamplerCustomAdvanced
+        enc = MiniMaxH3ImageConditioning.execute(clip=clip, prompt=prompt, width=gw, height=gh, vae=vae,
+                                                 images={f"image_{j}": im for j, im in enumerate([frame] + refs)})
+        guider = BasicGuider.execute(model=model, conditioning=enc.result[0]).result[0]
+        noise = RandomNoise.execute(noise_seed=seed).result[0]
+        res = SamplerCustomAdvanced.execute(noise=noise, guider=guider, sampler=sampler, sigmas=sigmas,
+                                            latent_image=enc.result[1])
+        img = nodes.VAEDecode().decode(vae, res.result[0])[0]
+        return img.reshape(-1, img.shape[-3], img.shape[-2], img.shape[-1])[:1].clamp(0, 1), (gw, gh)
+
+    def recast(self, job, pictures, model, clip, vae, sampler, sigmas, prompts, megapixels, seed, redo=""):
+        import time
         import numpy as np
         import comfy.utils
         import nodes
+        import folder_paths
         from PIL import Image
-        from comfy_extras.nodes_qwen import TextEncodeQwenImage21
-        from comfy_extras.nodes_custom_sampler import SamplerCustom
+        from comfy_extras.nodes_minimax_h3 import MiniMaxH3ImageConditioning
+        from comfy_extras.nodes_custom_sampler import BasicGuider, RandomNoise, SamplerCustomAdvanced
         one = lambda v: v[0] if isinstance(v, list) else v
         job, model, clip, vae, sampler, sigmas = (one(job), one(model), one(clip), one(vae), one(sampler),
                                                   one(sigmas))
-        seed, cfg = int(one(seed)), float(one(cfg))
-        grow, prot = float(one(mask_grow)), float(one(protect_others))
+        mp, seed = float(one(megapixels)), int(one(seed))
         pics = [p[b:b + 1] for p in pictures for b in range(int(p.shape[0]))]
         need = sum(len(m["items"]) for m in job["moments"])
-        if len(pics) != need or len(prompts) != need:
-            raise K.KeyframeError(f"{TAG} {len(pics)} picture(s) / {len(prompts)} prompt(s) for {need} crop(s): "
-                                  "connect Prepare's pictures and prompts. 请接上 Prepare 的 pictures 和 prompts。")
+        if len(pics) != need:
+            raise K.KeyframeError(f"{TAG} {len(pics)} picture(s) for {need} recast person(s): connect Prepare's "
+                                  "pictures. 请接上 Prepare 的 pictures。")
         W, H = job["size"]
-        pbar = comfy.utils.ProgressBar(max(1, need))
-        edited, done, n = [], {}, 0
-        for m in job["moments"]:
-            src = job["frames"][m["at"]]
-            cur = src.copy()
-            swapped = {it["id"] for it in m["items"]}
-            for it in m["items"]:
-                x0, y0, x1, y1 = it["crop"]
-                gw, gh = K.gen_size(x1 - x0, y1 - y0)
-                ct = comfy.utils.common_upscale(to_tensor(cur[y0:y1, x0:x1]).movedim(-1, 1), gw, gh, "lanczos",
-                                                "disabled").movedim(1, -1).clamp(0, 1)
-                enc = TextEncodeQwenImage21.execute(clip=clip, prompt=prompts[n], negative_prompt="", vae=vae,
-                                                    resolution=0, images={"image_1": ct, "image_2": pics[n]})
-                pos, neg, lat = enc.result[0], enc.result[1], enc.result[2]
-                out = SamplerCustom.execute(model=model, add_noise=True, noise_seed=seed, cfg=cfg, positive=pos,
-                                            negative=neg, sampler=sampler, sigmas=sigmas, latent_image=lat)
-                img = nodes.VAEDecode().decode(vae, out.result[0])[0]
-                if img.dim() == 5:
-                    img = img.reshape(-1, img.shape[-3], img.shape[-2], img.shape[-1])
-                img = img[:1].clamp(0, 1)
-                edited.append(img)
-                e = Image.fromarray(to_u8(img)).resize((x1 - x0, y1 - y0), Image.LANCZOS)
-                patch = K.colour_match(np.asarray(e), src[y0:y1, x0:x1], it["inner"])
-                ids = it.get("others_ids") or [None] * len(it["others"])
-                pads = [prot if q in swapped else K.PROTECT_PAD for q in ids]
-                K.paste(cur, patch, it["crop"], K.paste_alpha(it["crop"], W, H, it["own"], it["others"],
-                                                              own_grow=grow, protects=pads))
-                n += 1
-                pbar.update(1)
-            done[m["at"]] = cur
-        job = dict(job, recast_frames=done, recast={"mask_grow": grow, "protect_others": prot, "seed": seed})
-        LOG.info("%s recast one by one: %d edit(s), mask_grow %.2f, protect_others %.2f", TAG, n, grow, prot)
-        return (edited, job)
+        gw, gh = K.h3_size(W, H, mp=mp)
+        todo = [m for m in job["moments"] if m["items"]]
+        sel = K.parse_redo(one(redo), len(todo))
+        given = K.parse_prompts(one(prompts), len(todo))
+        cache = os.path.join(folder_paths.get_input_directory(), KF_SUBDIR, "_recast" + self.CACHE_TAG,
+                             os.path.splitext(os.path.basename(str(job.get("video_abs") or job.get("video"))))[0])
+        kept = {}                       # keyframe number -> image from the last run (only the chosen ones are redone)
+        if sel:
+            for k, m in enumerate(todo, 1):
+                f = os.path.join(cache, f"kf_{int(round(m['at'] * K.FPS)):04d}.png")
+                if k not in sel and os.path.isfile(f):
+                    kept[k] = np.asarray(Image.open(f).convert("RGB").resize((W, H), Image.LANCZOS))
+        missing = [k for k in range(1, len(todo) + 1) if k not in kept and k not in given]
+        if missing:
+            raise K.KeyframeError(f"{TAG} no prompt for keyframe(s) {missing}: run H3MD Keyframe Export, give the "
+                                  "package to the AI and load its answer with H3MD Keyframe Import.")
+        pbar = comfy.utils.ProgressBar(max(1, len(todo) - len(kept)))
+        lines, done, made, out_imgs, n, t_all = [], {}, {}, [], 0, time.time()
+        for k, m in enumerate(todo, 1):
+            refs = pics[n:n + len(m["items"])]
+            n += len(m["items"])
+            if k in kept:
+                continue
+            frame = to_tensor(np.ascontiguousarray(job["frames"][m["at"]]))
+            prompt = given[k]
+            stem = os.path.join(cache, f"kf_{int(round(m['at'] * K.FPS)):04d}")
+            # 0.5.91 (user 06:06): a redo with the same prompt and the same (fixed) seed made the same picture again -
+            # a keyframe made again with an unchanged prompt gets the next seed after the one it was made with
+            k_seed = seed
+            last = _read_json(stem + ".json")
+            if sel and k in sel and last and last.get("prompt") == prompt and int(last.get("seed", -1)) >= seed:
+                k_seed = int(last["seed"]) + 1
+            t0 = time.time()
+            img, (gw, gh) = self._edit(frame, refs, prompt, model, clip, vae, sampler, sigmas, k_seed, gw, gh)
+            out = to_u8(img)
+            out = fit_frame(out, W, H)          # crop H3 Image's 32-px rounding, then scale: no stretching
+            lines.append(f"#{k} {m['at']:.2f} s: {time.time() - t0:.1f} s ({gw}x{gh}), seed {k_seed}"
+                         + (" (same prompt as last time: next seed)" if k_seed != seed else
+                            (" (new prompt)" if last and last.get("prompt") != prompt else "")))
+            lines.append("  prompt: " + prompt)
+            made[k] = out
+            os.makedirs(cache, exist_ok=True)
+            Image.fromarray(out).save(stem + ".png")
+            with open(stem + ".json", "w", encoding="utf-8") as fh:
+                json.dump({"prompt": prompt, "seed": k_seed}, fh, ensure_ascii=False)
+            pbar.update(1)
+        for k, m in enumerate(todo, 1):
+            out = made.get(k)
+            if out is None:
+                out = kept[k]
+                lines.append(f"#{k} {m['at']:.2f} s: kept from the last run (not in redo) 沿用上次")
+            done[m["at"]] = out
+            out_imgs.append(to_tensor(out))
+        lines.append(f"seed {seed}; total {time.time() - t_all:.1f} s, {len(made)} of {len(todo)} keyframe(s) made"
+                     + (f" (redo {sel})" if sel else ""))
+        report = "\n".join(lines)
+        pairs = [(np.ascontiguousarray(job["frames"][m["at"]]), done[m["at"]]) for m in todo]
+        who = []
+        for m in todo:
+            boxes = sorted((list(b) for b in m.get("boxes") or ()), key=lambda b: (b[0] + b[2]) / 2)
+            # the Prepare picture number (the user's picture_1 .. picture_N), not the number inside the prompt
+            who.append([(f"place {it['rank']} from left: picture_{it['picture']}", boxes[int(it["rank"]) - 1])
+                        for it in sorted(m["items"], key=lambda x: int(x["rank"]))
+                        if 0 < int(it["rank"]) <= len(boxes)])
+        cmp = compare_pages(pairs, [f"#{k}  {m['at']:.2f} s" for k, m in enumerate(todo, 1)], who)
+        try:
+            cdir = save_pages(cmp, os.path.join(folder_paths.get_output_directory(), KF_SUBDIR, "compare" + self.CACHE_TAG,
+                                                os.path.basename(cache)))
+            report += f"\nCompare pages (open page_001.jpg, arrow keys to flip): {cdir}"
+        except OSError as e:
+            LOG.warning("%s compare pages not saved: %s", TAG, e)
+        LOG.info("%s recast report:\n%s", TAG, report)
+        job = dict(job, recast_frames=done,
+                   recast={"method": self.METHOD, "seed": seed, "report": report})
+        return {"ui": {"text": [report], "h3md_kf_count": [len(todo)]},
+                "result": (out_imgs, job, report, pages_tensor(cmp))}
 
 
-NODE_CLASS_MAPPINGS = {"H3MDKeyframePrepare": H3MDKeyframePrepare, "H3MDKeyframeRecast": H3MDKeyframeRecast,
-                       "H3MDKeyframeAssemble": H3MDKeyframeAssemble}
-NODE_DISPLAY_NAME_MAPPINGS = {"H3MDKeyframePrepare": "H3MD Keyframe 1: Prepare 准备关键帧",
-                              "H3MDKeyframeRecast": "H3MD Keyframe 1b: Recast 串行换人",
-                              "H3MDKeyframeAssemble": "H3MD Keyframe 2: Assemble 打包计划"}
+NODE_CLASS_MAPPINGS = {"H3MDKeyframePrepare": H3MDKeyframePrepare, "H3MDKeyframeExport": H3MDKeyframeExport,
+                       "H3MDKeyframeImport": H3MDKeyframeImport, "H3MDKeyframeRecast": H3MDKeyframeRecast,
+                       "H3MDKeyframeRedo": H3MDKeyframeRedo, "H3MDKeyframeAssemble": H3MDKeyframeAssemble}
+NODE_DISPLAY_NAME_MAPPINGS = {"H3MDKeyframePrepare": "H3MD Keyframe Prepare",
+                              "H3MDKeyframeExport": "H3MD Keyframe Export",
+                              "H3MDKeyframeImport": "H3MD Keyframe Import",
+                              "H3MDKeyframeRecast": "H3MD Keyframe Recast",
+                              "H3MDKeyframeRedo": "H3MD Keyframe Redo",
+                              "H3MDKeyframeAssemble": "H3MD Keyframe Assemble"}

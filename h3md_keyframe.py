@@ -1,9 +1,11 @@
 """H3MD Keyframe - pure logic for the multi-person swap keyframes (2026-11-17, H3MD 0.5.0).
 
-The two nodes in h3md_keyframe_nodes.py wrap this file:
-  1 Prepare: who is who (numbered left to right at the start), which moments become keyframes, and for every person to
-    recast at every moment a crop + an edit prompt for ANY image-edit model (Qwen Image 2.1, Flux, ...).
-  2 Assemble: the edited crops are colour-matched and pasted back, and the Remake plan is written.
+The nodes in h3md_keyframe_nodes.py wrap this file:
+  1 Prepare: who is who (numbered in order of first appearance), which moments become keyframes, where every person to
+    recast stands at every moment.
+  1b Recast (0.5.91): the user's H3 Image AIO chain - one plain sentence (who at which place becomes which
+    picture), the official H3 Image prompt enhancer writes the prompt, one H3 Image edit redraws the keyframe.
+  2 Assemble: the keyframes are saved and the Remake plan is written.
 
 Method = skill 12d, line A, measured in demo5 (2026-11-16: our own 26 s five-person clip, 4 keyframes, Remake swapped
 3 people correctly the whole time).  Numbering rule and mapping text from the exp MultiSwap pack (11-14/15).
@@ -17,22 +19,20 @@ MIN_FRAMES = 90           # Remake: 90-345 frames per autosplit part
 MIN_H = 0.06              # a person shorter than this (fraction of the frame height) does not count as seen
 MAX_TOP = 0.85            # ... nor one whose box starts below this (only a head peeking in at the bottom)
 LINK_IOU = 0.3            # same person in two tracking windows: boxes on the shared frame overlap at least this
-LOOK_S = 3.0              # the numbering moment is searched in the first seconds
+CAST_MIN_S = 1.0          # 0.5.91 (user 01:52): a person counts (gets a number, can take a picture) when seen clearly
+                          # this long - a passer-by or a sliver at the edge does not use up a picture
+CAST_TOGETHER_S = 1.0     # 0.5.91: people first seen within this many seconds of each other appear "together"
+SLIVER_W = 0.08           # 0.5.91: a person cut off by a side edge and narrower than this share of the width is not
+                          # recast at that keyframe (2026-11-21 _004: picture 3 was put on a 26 px strip)
 CLEAR_IOU = 0.2
 COVERED = 0.3
-PAD_X, PAD_TOP, PAD_BOTTOM = 0.45, 0.12, 0.08   # skill 12d step 4: crop = person box + 45 % left/right, 12 % up, 8 % down
-GEN_MP = 1.6              # edit size (megapixels), multiples of 32
 SPACING = 0.7            # keyframes are picked in (prev + 0.7 * max_gap, prev + max_gap]: as few as the gap allows
-FEATHER = 0.08            # paste feather, share of the crop width
-PROTECT_PAD = 0.06        # other people's boxes grown by this (share of their size) are kept from the source
-                          # (0.5.7 test: -0.05 made it worse - every crop is cut from the SOURCE frame, so its
-                          # neighbours are the originals and less protection pastes them back)
-OWN_GROW = 0.0            # 0.5.7 (default off = 0.5.6): this person's own box grown by this (share of its width; half of it up/down) is never
-                          # protected, so wigs, tails, ears and wide skirts of the original sticking out get covered
+EDIT_MP = 4.0             # 0.5.91: H3 Image canvas (megapixels), as the user's AIO v1.01 (4.0, multiple 32)
 
 CN = {"一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
 ORDINAL = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"]
-_PAT = re.compile(r"(?:图片|圖片|图|圖|picture|pic|image|img)\s*(\d+)[^\d\n,，;；。]*?(?:左|left)\s*(?:第|no\.?|#)?\s*"
+# 0.5.91: '图1换3号' / 'picture 1 -> 3' / 'pic 1 -> #3': the person's number on the cast sheet (order of appearance)
+_PAT = re.compile(r"(?:图片|圖片|图|圖|picture|pic|image|img)\s*(\d+)[^\d\n,，;；。一二两三四五六七八九十]*?"
                   r"([0-9]+|[一二两三四五六七八九十]+)", re.I)
 TAG = "[H3MD Keyframe]"
 
@@ -56,35 +56,80 @@ def cn_number(s: str) -> int:
 
 
 def parse_mapping(text: str) -> dict:
-    """'图1换左二，图2换左四' / 'picture 1 -> left 2' -> {1: 2, 2: 4} (picture -> left number)."""
+    """optional override of the automatic cast: '图1换3号，图2换1号' / 'picture 1 -> 3' -> {1: [3], 2: [1]} (picture
+    -> person numbers on the cast sheet = order of first appearance).  Empty -> {} = automatic.
+    0.5.91 (user 22:11): ONE picture may take SEVERAL numbers ('图1换2号' + '图1换4号'): the tracker cut one person
+    into pieces (a new number after a cut, a turn, a crossing) - the user links every piece to the picture and they
+    become one person (merge_cast).  The user's links are final; the machine does not second-guess them."""
     out = {}
+    if not (text or "").strip():
+        return out
     for m in _PAT.finditer(text or ""):
         p, k = int(m.group(1)), cn_number(m.group(2))
         if p < 1 or k < 1:
             raise KeyframeError(f"{TAG} '{m.group(0)}': pictures and people are counted from 1")
-        if p in out and out[p] != k:
-            raise KeyframeError(f"{TAG} picture {p} is given twice (left {out[p]} and left {k}). 图{p}写了两次。")
-        out[p] = k
+        ks = out.setdefault(p, [])
+        if k not in ks:
+            ks.append(k)
     if not out:
-        raise KeyframeError(f"{TAG} write which picture replaces which person, e.g. 图1换左二，图2换左四 or "
-                            "'picture 1 -> left 2' (people are numbered left to right at the start). "
-                            "请写清楚：图1换左几。")
-    ks = list(out.values())
+        raise KeyframeError(f"{TAG} mapping: leave it empty (automatic: picture 1 = the first person to appear, "
+                            "picture 2 = the next ...) or write e.g. 图1换3号 / 'picture 1 -> 3' with the numbers of "
+                            "the cast sheet. 留空 = 自动；或写 图1换3号（演员表上的编号）。")
+    ks = [k for v in out.values() for k in v]
     dup = sorted({k for k in ks if ks.count(k) > 1})
     if dup:
-        raise KeyframeError(f"{TAG} left {dup} is given to two pictures. 同一个人对了两张图：左{dup}。")
-    return dict(sorted(out.items()))
+        raise KeyframeError(f"{TAG} person {dup} is given to two pictures. 同一个人对了两张图：{dup} 号。")
+    return {p: sorted(v) for p, v in sorted(out.items())}
+
+
+_DESC_NO = re.compile(r"^(?:图|圖|picture|pic)?\s*(\d+)\s*[:：.、)]\s*", re.I)
 
 
 def parse_descriptions(text: str, pictures) -> dict:
-    """one line per picture (empty lines skipped) -> {picture: description}; every mapped picture needs one."""
+    """0.5.91 (user 16:53): optional.  -> {picture: description or ""}.  Lines 'picture 3: ...' / '图3：...' go to
+    that picture; lines without a number go to the pictures in order.  A picture without a line is described by
+    the AI that writes the prompts, from the picture itself (it asks the user what the picture does not show)."""
     lines = [l.strip() for l in (text or "").splitlines() if l.strip()]
-    lines = [re.sub(r"^(?:图|picture|pic)?\s*\d+\s*[:：.、)]\s*", "", l, flags=re.I) for l in lines]
     need = sorted(pictures)
-    if len(lines) < max(need):
-        raise KeyframeError(f"{TAG} write one description line per picture (race, age, face, hair, every garment); "
-                            f"{len(lines)} line(s) for pictures up to {max(need)}. 每张角色图写一行外貌描述。")
-    return {p: lines[p - 1] for p in need}
+    out = {p: "" for p in need}
+    numbered = [(_DESC_NO.match(l), l) for l in lines]
+    if any(m for m, _ in numbered):
+        for m, l in numbered:
+            if m and int(m.group(1)) in out:
+                out[int(m.group(1))] = l[m.end():].strip()
+    else:
+        for p, l in zip(need, lines):
+            out[p] = l
+    return out
+
+
+DESC_SLOT = "{{character picture %d}}"   # in the Remake prompt until the AI's answer gives that description
+
+
+def parse_characters(text):
+    """the AI's answer -> {picture: description} from "characters": {"3": "...", ...} (the numbers of
+    character_picture_N.png); {} when the answer has none"""
+    import json
+    try:
+        d = json.loads(str(text or ""))
+    except ValueError:
+        return {}
+    ch = d.get("characters") if isinstance(d, dict) else None
+    out = {}
+    if isinstance(ch, dict):
+        for k, v in ch.items():
+            m = re.search(r"\d+", str(k))
+            if m and isinstance(v, str) and v.strip():
+                out[int(m.group())] = v.strip()
+    return out
+
+
+def fill_characters(prompt, chars):
+    """put the AI's character descriptions into the Remake prompt -> (prompt, pictures still missing)"""
+    for p, d in (chars or {}).items():
+        prompt = prompt.replace(DESC_SLOT % int(p), d.rstrip("."))
+    left = sorted({int(x) for x in re.findall(r"\{\{character picture (\d+)\}\}", prompt)})
+    return prompt, left
 
 
 # ---------------------------------------------------------------------------------------------------- boxes
@@ -140,6 +185,495 @@ def link_windows(windows):
     return out
 
 
+def _hsv_hist(px):
+    """px: [n, 3] uint8 RGB -> normalised histogram: 12 hues x 3 saturations x 3 values for coloured pixels plus 6
+    grey levels for pixels with little saturation (black, white, grey hair or clothes)."""
+    import numpy as np
+    if px.size == 0:
+        return None
+    a = px.astype(np.float32) / 255.0
+    mx, mn = a.max(1), a.min(1)
+    d = mx - mn
+    sat = np.where(mx > 1e-6, d / np.maximum(mx, 1e-6), 0.0)
+    r, g, b = a[:, 0], a[:, 1], a[:, 2]
+    dd = np.maximum(d, 1e-6)
+    h = np.where(mx == r, ((g - b) / dd) % 6, np.where(mx == g, (b - r) / dd + 2, (r - g) / dd + 4)) / 6.0
+    grey = (sat < 0.18) | (mx < 0.12)
+    hist = np.zeros(12 * 3 * 3 + 6, np.float64)
+    c = ~grey
+    if c.any():
+        hb = np.minimum((h[c] * 12).astype(int), 11)
+        sb = np.minimum(((sat[c] - 0.18) / 0.82 * 3).astype(int), 2)
+        vb = np.minimum((mx[c] * 3).astype(int), 2)
+        np.add.at(hist, hb * 9 + sb * 3 + vb, 1)
+    if grey.any():
+        np.add.at(hist, 108 + np.minimum((mx[grey] * 6).astype(int), 5), 1)
+    return hist / hist.sum()
+
+
+def assign_face(face_box, boxes):
+    """face box (x0, y0, x1, y1, 0-1) -> the person id whose box holds it in its upper part, or None.
+    boxes: {id: box}.  Several: the one whose head height fits best."""
+    cx, cy = (face_box[0] + face_box[2]) / 2, (face_box[1] + face_box[3]) / 2
+    cand = []
+    for pid, b in boxes.items():
+        h = b[3] - b[1]
+        if b[0] <= cx <= b[2] and b[1] - 0.02 <= cy <= b[1] + 0.4 * h:
+            cand.append((abs(cy - (b[1] + 0.1 * h)) / max(h, 1e-6), pid))
+    return min(cand)[1] if cand else None
+
+
+DUP_IOU = 0.7                    # two boxes of one person overlapping this much are one detection
+WIDE_BOX = 1.6                   # 0.5.91: a box this much wider than the person's usual box spans two people
+HIDDEN_COVER, HIDDEN_AREA = 0.8, 0.35   # a box this much inside a bigger one (and this small) = a hidden person
+TALL_RATIO = 6.0                 # 0.5.91 (_017 #2): a box taller than this x its width (pixels, not at a side edge) is
+                                 # no person (a box from the ceiling to the floor) - the frame is never a keyframe
+TINY_REL = 0.2                   # 0.5.91 (_017 #15): a box lower than this x the others' median height, not at an
+                                 # edge, is a stray detection (a spot on a truck), not a person - dropped
+GAP_S = 1.5                      # 0.5.91 (_017 #1): a person seen within this before AND after a frame but missing in
+                                 # it was missed by the tracker there (five men walking, one not boxed) - never a
+                                 # keyframe (he would be neither replaced nor described)
+
+
+def face_of_hidden(b, q_box, faces):
+    """0.5.91 (user 07:00, keyframe #4: the man peeking out behind the front man was dropped as 'hidden', so nobody
+    replaced him and H3 Image drew a copy of the front man there): is a face of its own visible in the small box `b`
+    that lies inside the bigger box `q_box`?  Yes when a face's centre is inside `b` and another face sits in the
+    head part of `q_box` (the front person's own face).  faces: face boxes (0-1) of this frame."""
+    def inside(f, box, top=1.0):
+        cx, cy = (f[0] + f[2]) / 2, (f[1] + f[3]) / 2
+        return box[0] <= cx <= box[2] and box[1] - 0.02 <= cy <= box[1] + top * (box[3] - box[1])
+    mine = [f for f in faces if inside(f, b)]
+    if not mine:
+        return False
+    return any(inside(g, q_box, 0.4) and not any(g is f for f in mine) for g in faces)
+
+
+def clean_frames(frames, face_boxes=None):
+    """0.5.91 (_012 keyframes 4-6, 8, 15): mark what the tracker got wrong, before any keyframe is chosen.
+    - a box much wider than that person's usual box (WIDE_BOX x the median width) spans two people (a hidden man and
+      the one in front): the frame gets "bad": [id] and is never a keyframe (score() is None);
+    - a small box almost entirely inside another person's bigger box is someone hidden behind him: he does not count
+      as seen in that frame (dropped from "who") - unless his own face shows there (face_boxes: {frame index: [face
+      boxes 0-1]}, face_of_hidden): then he is in the picture and must be replaced like everyone else.
+    -> the same frames, changed in place, and notes"""
+    import statistics
+    widths = {}
+    for f in frames:
+        for pid, b in f.get("who") or ():
+            widths.setdefault(pid, []).append(b[2] - b[0])
+    med = {pid: statistics.median(ws) for pid, ws in widths.items() if len(ws) >= 3}
+    n_wide = n_hidden = 0
+    heights = {}
+    for f in frames:
+        for pid, b in f.get("who") or ():
+            heights.setdefault(pid, []).append(b[3] - b[1])
+    med_h = {pid: statistics.median(hs) for pid, hs in heights.items() if len(hs) >= 3}
+    n_face = n_odd = n_stray = n_gap = 0
+    for fi, f in enumerate(frames):
+        who = f.get("who") or []
+        keep = []
+        faces = (face_boxes or {}).get(fi) or []
+        for pid, b in who:
+            area = (b[2] - b[0]) * (b[3] - b[1])
+            cover = [c for q, c in who if q != pid and covered(b, c) >= HIDDEN_COVER
+                     and area < HIDDEN_AREA * (c[2] - c[0]) * (c[3] - c[1])]
+            hidden = bool(cover)
+            if hidden and faces and any(face_of_hidden(b, c, faces) for c in cover):
+                hidden = False      # his face shows beside the front person: he is seen
+                n_face += 1
+            if hidden:
+                n_hidden += 1
+                continue
+            keep.append([pid, b])
+        if len(keep) >= 3:      # a stray small box among people (not at an edge) is not a person
+            hs = sorted(b[3] - b[1] for _, b in keep)
+            mid = hs[len(hs) // 2]
+            stray = [pid for pid, b in keep if (b[3] - b[1]) < TINY_REL * mid and b[0] > 0.01 and b[2] < 0.99]
+            if stray:
+                n_stray += len(stray)
+                keep = [w for w in keep if w[0] not in stray]
+        f["who"] = keep
+        bad = [pid for pid, b in keep if pid in med and (b[2] - b[0]) > WIDE_BOX * med[pid]
+               and any(iou(b, c) > CLEAR_IOU for q, c in keep if q != pid)]
+        if bad:
+            n_wide += 1
+        odd = [pid for pid, b in keep if b[0] > 0.01 and b[2] < 0.99 and (
+            (b[3] - b[1]) > TALL_RATIO * (b[2] - b[0]) * FRAME_ASPECT
+            or (pid in med_h and (b[3] - b[1]) > WIDE_BOX * med_h[pid]))]
+        if odd:
+            n_odd += 1
+        if bad or odd:
+            f["bad"] = sorted(set(bad) | set(odd))
+    # a face that sits in nobody's box is a person the tracker did not box (_018 #1, #15: one of five walking men,
+    # a head peeking out behind the man in front) - he would be neither replaced nor described
+    n_face_only = 0
+    for fi, f in enumerate(frames):
+        faces = (face_boxes or {}).get(fi) or []
+        boxes = {pid: b for pid, b in f.get("who") or ()}
+        if faces and any(assign_face(fb, boxes) is None for fb in faces):
+            f["bad"] = sorted(set(f.get("bad") or []) | {-1})
+            n_face_only += 1
+    # a person seen shortly before and after a frame but not in it: the tracker missed him there
+    for fi, f in enumerate(frames):
+        here = {pid for pid, _ in f.get("who") or ()}
+        t = float(f.get("at", fi))
+        def near(rng):
+            out = set()
+            for j in rng:
+                tj = float(frames[j].get("at", j))
+                if abs(tj - t) > GAP_S:
+                    break
+                out |= {pid for pid, b in frames[j].get("who") or () if b[0] > 0.01 and b[2] < 0.99}
+            return out
+        missed = (near(range(fi - 1, -1, -1)) & near(range(fi + 1, len(frames)))) - here
+        if missed:
+            f["bad"] = sorted(set(f.get("bad") or []) | missed)
+            n_gap += 1
+    return frames, [f"{n_wide} frame(s) with a box spanning two people, {n_odd} with an impossible box (too tall), "
+                    f"{n_gap} with a person the tracker missed, {n_face_only} with a face in nobody's box (never "
+                    f"keyframes); {n_hidden} hidden person box(es) "
+                    f"not counted as seen, {n_face} half-hidden with the face showing kept, {n_stray} stray small "
+                    "box(es) dropped"]
+
+
+# ---------------------------------------------------------------------------------------------------- identity
+# 0.5.91 (user 16:11, H3MD_00154: numbers jumped between two women at the cuts - ArcFace alone could not tell three
+# AI-generated women apart (one person's own faces 0.24-0.39, two people 0.10-0.27), while five men in the same white
+# clothes can be told apart ONLY by their faces).  Identity by tracklets, after Zhang et al., "Tracking Persons-of-
+# Interest via Unsupervised Representation Adaptation" (music videos): the clip teaches itself what tells its people
+# apart - two halves of one tracklet are one person, two tracklets on screen together are two people - so each cue
+# (face, hair colour, clothes colour) counts as much as it separates the people of THIS clip.  Then:
+# 1. tracklets: every tracker id is cut at the shot cuts and where its look changes (the tracker passed it on);
+# 2. tracklets are merged, most alike first; never two seen together, never when another person fits as well;
+# 3. the people are the N biggest groups (N = people on screen together for at least 1 s); a smaller piece joins the
+#    one it is clearly closest to (or the only one it can be), else it stays a person of its own - nothing is guessed.
+# Replaces 0.5.9 reid_merge and 0.5.91 face_clusters / split_by_face (per-face clusters with a fixed threshold).
+ID_MIN_DET = 3          # a tracklet with fewer detections takes no part in learning and merging (only in joining)
+ID_SPLIT_W = 4          # a look change inside a tracklet needs this many detections on each side ...
+ID_SPLIT = 0.0          # ... and the two sides scoring below this (0 = as alike as two different people usually are)
+ID_SPLIT_WIN = 8        # an A-B-A swap (A on both ends): windows of this many detections on each side, faces only ...
+ID_STRONG = 3.0         # ... when faces tell this clip's people apart at least this well (d')
+ID_DARK = 0.1           # a frame darker than this (mean 0-1) gives no colour samples (a blackout: colours are noise)
+ID_MERGE = 0.5          # merge groups scoring this (1 = as alike as one person usually is) ...
+ID_FLOOR = 0.0          # ... or this while there are more groups than people on screen
+ID_AMBIG = 0.3          # ... unless someone seen together with the partner fits within this
+ID_LOOSE, ID_MARGIN = -0.5, 0.8   # a small piece joins the closest person when it scores this and beats the next by this
+ID_TOGETHER = 2         # sampled frames two tracklets may share and still be one person (a ghost box in the dark)
+ID_HANDOFF_IOU = 0.3    # frames where their boxes overlap this much are a hand-over / double box, not "together"
+ID_MIN_CUE = 0.5        # a cue that separates this clip's people less than this (d') is not used
+ID_PRIOR = {"face": (0.10, 0.60, 3.0), "hair": (0.55, 0.80, 0.0), "body": (0.55, 0.80, 0.0)}   # (different, same,
+                        # weight) when the clip has too few samples to learn from (one person, very short): faces
+                        # (ArcFace) only - colours are trusted only where this clip shows they tell its people apart
+                        # (a group in one uniform would all look 'the same')
+PERSON_ID, OTHER_ID = 1000, 5000   # ids given by identify (tracker ids are small numbers)
+
+
+def look_samples(frames_u8, per_frame):
+    """hair / clothes colour histograms of every detection standing clear (not overlapping another box much, not cut
+    by a side edge - part of a person has part of the colours).  -> {(frame index, id): (hair, clothes)}"""
+    import numpy as np
+    out = {}
+    for i, (img, fr) in enumerate(zip(frames_u8, per_frame)):
+        # grey-world white balance per frame: coloured stage light tints everyone the same way
+        f = img.astype(np.float32)
+        m = f.reshape(-1, 3).mean(0)
+        if float(m.mean()) < ID_DARK * 255:
+            continue
+        gain = np.clip(m.mean() / np.maximum(m, 1.0), 1 / 3.0, 3.0)   # capped: a near-black frame is not blown up
+        img = np.clip(f * gain, 0, 255).astype(np.uint8)
+        hh, ww = img.shape[:2]
+        items = list(fr.items())
+        for pid, b in items:
+            if (b[3] - b[1]) < MIN_H or b[0] <= 0.01 or b[2] >= 0.99:
+                continue
+            if any(iou(b, c) > CLEAR_IOU or covered(b, c) > COVERED for q, c in items if q != pid):
+                continue
+            x0, x1 = int(b[0] * ww), int(b[2] * ww)
+            y0, y1 = int(b[1] * hh), int(b[3] * hh)
+            bw, bh = x1 - x0, y1 - y0
+            if bw < 4 or bh < 8:
+                continue
+            hair = _hsv_hist(img[y0:y0 + max(2, int(bh * 0.15)), x0 + int(bw * 0.2):x1 - int(bw * 0.2)].reshape(-1, 3))
+            body = _hsv_hist(img[y0 + int(bh * 0.25):y0 + int(bh * 0.70),
+                                 x0 + int(bw * 0.25):x1 - int(bw * 0.25)].reshape(-1, 3))
+            if hair is not None and body is not None:
+                out[(i, pid)] = (hair, body)
+    return out
+
+
+def _id_feats(pid, idx, faces, looks):
+    import numpy as np
+    fw = [faces[(i, pid)] for i in idx if (i, pid) in faces]
+    face = None
+    if fw:
+        m = sum(np.asarray(e, np.float32) * max(1.0, float(s)) for e, s in fw)
+        face = m / max(float(np.linalg.norm(m)), 1e-6)
+    lk = [looks[(i, pid)] for i in idx if (i, pid) in looks]
+    return {"face": face, "hair": np.mean([l[0] for l in lk], 0) if lk else None,
+            "body": np.mean([l[1] for l in lk], 0) if lk else None}
+
+
+def _id_cues(a, b):
+    import numpy as np
+    out = {}
+    if a["face"] is not None and b["face"] is not None:
+        out["face"] = float(a["face"] @ b["face"])
+    if a["hair"] is not None and b["hair"] is not None:
+        out["hair"] = float(np.minimum(a["hair"], b["hair"]).sum())
+    if a["body"] is not None and b["body"] is not None:
+        out["body"] = float(np.minimum(a["body"], b["body"]).sum())
+    return out
+
+
+def identify(per_frame, times, cuts=(), faces=None, looks=None):
+    """per_frame: [{tracker id: box}]; faces: {(frame index, id): (embedding, face width px)}; looks: look_samples().
+    -> (per_frame with person ids, joins, unsure, notes).  joins: [{"new", "into", "at", "why", "look"}] (a piece
+    joined to a person after a gap); unsure: [{"new", "at", "candidates": [[id, score], ...]}] (not clear: kept apart)."""
+    import numpy as np
+    faces, looks = faces or {}, looks or {}
+    n = len(per_frame)
+    if n == 0:
+        return per_frame, [], [], []
+    times = list(times)
+    step = (times[-1] - times[0]) / (n - 1) if n > 1 else 1.0
+    cuts = sorted(cuts or ())
+
+    def shot(t):
+        return sum(1 for c in cuts if t >= c - 1e-6)
+
+    raw = {}
+    for i, fr in enumerate(per_frame):
+        for pid in fr:
+            raw.setdefault((pid, shot(times[i])), []).append(i)
+
+    # ---- what tells this clip's people apart (before any split: halves of every tracklet, tracklets seen together)
+    def together(ka, ia, kb, ib):
+        sb = set(ib)
+        return sum(1 for i in ia if i in sb and iou(per_frame[i][ka[0]], per_frame[i][kb[0]]) < ID_HANDOFF_IOU)
+
+    feats = {k: _id_feats(k[0], ix, faces, looks) for k, ix in raw.items()}
+    pos, neg = {}, {}
+    big = [k for k, ix in raw.items() if len(ix) >= ID_MIN_DET]
+    for k in big:
+        ix = raw[k]
+        if len(ix) >= 2 * ID_MIN_DET:
+            h = len(ix) // 2
+            for c, s in _id_cues(_id_feats(k[0], ix[:h], faces, looks), _id_feats(k[0], ix[h:], faces, looks)).items():
+                pos.setdefault(c, []).append(s)
+    for a in range(len(big)):
+        for b in range(a + 1, len(big)):
+            ka, kb = big[a], big[b]
+            if together(ka, raw[ka], kb, raw[kb]) > ID_TOGETHER:
+                for c, s in _id_cues(feats[ka], feats[kb]).items():
+                    neg.setdefault(c, []).append(s)
+    cal, notes = {}, []
+    for c in ("face", "hair", "body"):
+        if len(pos.get(c, [])) >= 2 and len(neg.get(c, [])) >= 2:
+            mp, mn = float(np.median(pos[c])), float(np.median(neg[c]))
+            sd = float(np.sqrt((np.std(pos[c]) ** 2 + np.std(neg[c]) ** 2) / 2))
+            cal[c] = (mn, mp, (mp - mn) / max(sd, 1e-3))
+        else:
+            cal[c] = ID_PRIOR[c]
+    notes.append("what tells people apart here: " + ", ".join(
+        f"{c} {'learned' if len(pos.get(c, [])) >= 2 and len(neg.get(c, [])) >= 2 else 'default'} "
+        f"(one person {cal[c][1]:.2f}, two people {cal[c][0]:.2f}, weight {max(0.0, cal[c][2]):.1f})"
+        for c in ("face", "hair", "body")))
+
+    def score(fa, fb):
+        num = den = 0.0
+        for c, v in _id_cues(fa, fb).items():
+            mn, mp, w = cal[c]
+            if w < ID_MIN_CUE or mp <= mn:
+                continue
+            num += w * (v - mn) / (mp - mn)
+            den += w
+        return None if den == 0 else num / den
+
+    # ---- 1. tracklets: cut where the look changes
+    def split(pid, ix):
+        if len(ix) < 2 * ID_SPLIT_W:
+            return [ix]
+        best = None
+        for j in range(ID_SPLIT_W, len(ix) - ID_SPLIT_W + 1):     # everything before vs everything after
+            v = score(_id_feats(pid, ix[:j], faces, looks), _id_feats(pid, ix[j:], faces, looks))
+            if v is not None and v < ID_SPLIT and (best is None or v < best[0]):
+                best = (v, j)
+        if best is None and cal["face"][2] >= ID_STRONG:
+            # an A-B-A swap (two look-alikes crossing) has A at both ends: a short window on each side, faces only -
+            # and only where faces clearly tell this clip's people apart (else the windows only find noise)
+            mn, mp, _ = cal["face"]
+            for j in range(ID_SPLIT_W, len(ix) - ID_SPLIT_W + 1):
+                c = _id_cues(_id_feats(pid, ix[max(0, j - ID_SPLIT_WIN):j], faces, {}),
+                             _id_feats(pid, ix[j:j + ID_SPLIT_WIN], faces, {})).get("face")
+                v = None if c is None else (c - mn) / (mp - mn)
+                if v is not None and v < ID_SPLIT and (best is None or v < best[0]):
+                    best = (v, j)
+        if best is None:
+            return [ix]
+        notes.append(f"track {pid} changes person at {times[ix[best[1]]]:.2f} s (look {best[0]:.2f})")
+        return split(pid, ix[:best[1]]) + split(pid, ix[best[1]:])
+
+    tl = {}
+    for (pid, s), ix in raw.items():
+        for part, p_ix in enumerate(split(pid, ix) if len(ix) >= ID_MIN_DET else [ix]):
+            tl[(pid, s, part)] = p_ix
+    F = {k: _id_feats(k[0], ix, faces, looks) for k, ix in tl.items()}
+    keys = sorted(tl, key=lambda k: tl[k][0])
+    T = {}
+    for a in range(len(keys)):
+        for b in range(a + 1, len(keys)):
+            t = together(keys[a], tl[keys[a]], keys[b], tl[keys[b]])
+            if t:
+                T[(keys[a], keys[b])] = T[(keys[b], keys[a])] = t
+
+    def g_tog(ga, gb):
+        return sum(T.get((a, b), 0) for a in ga for b in gb)
+
+    def g_score(ga, gb):
+        ss = [(score(F[a], F[b]), len(tl[a]) * len(tl[b])) for a in ga for b in gb]
+        ss = [(s, w) for s, w in ss if s is not None]
+        return sum(s * w for s, w in ss) / sum(w for _, w in ss) if ss else None
+
+    size = lambda g: sum(len(tl[k]) for k in g)
+    first = lambda g: min(tl[k][0] for k in g)
+    # people on screen together for at least 1 s (a box on the same person twice counts once)
+    counts = []
+    for fr in per_frame:
+        bs = list(fr.values())
+        counts.append(sum(1 for x, b in enumerate(bs) if not any(iou(b, c) > DUP_IOU for c in bs[:x])))
+    counts.sort(reverse=True)
+    kmax = max(1, counts[min(len(counts) - 1, max(0, int(round(1.0 / max(step, 1e-6))) - 1))])
+
+    # ---- 2. merge, most alike first
+    groups = [[k] for k in keys if len(tl[k]) >= ID_MIN_DET]
+    small = [[k] for k in keys if len(tl[k]) < ID_MIN_DET]
+    n_merge = 0
+    while True:
+        pairs = []
+        for a in range(len(groups)):
+            for b in range(a + 1, len(groups)):
+                if g_tog(groups[a], groups[b]) > ID_TOGETHER:
+                    continue
+                s = g_score(groups[a], groups[b])
+                if s is not None:
+                    pairs.append((s, a, b))
+        pairs.sort(reverse=True)
+        done = False
+        for s, a, b in pairs:
+            if s < ID_MERGE and (len(groups) <= kmax or s < ID_FLOOR):
+                break
+            # someone seen together with the partner fits as well: not clear which - no guess
+            amb = False
+            for x, y in ((a, b), (b, a)):
+                for c in range(len(groups)):
+                    if c in (a, b) or g_tog(groups[c], groups[y]) <= ID_TOGETHER \
+                            or g_tog(groups[c], groups[x]) > ID_TOGETHER:
+                        continue
+                    r = g_score(groups[x], groups[c])
+                    if r is not None and r > s - ID_AMBIG:
+                        amb = True
+            if amb:
+                continue
+            groups[a] += groups[b]
+            del groups[b]
+            n_merge += 1
+            done = True
+            break
+        if not done:
+            break
+
+    # ---- 3. the people = the biggest groups; smaller pieces join the one they clearly are
+    groups.sort(key=lambda g: (-size(g), first(g)))
+    anchors, rest = groups[:kmax], groups[kmax:] + small
+    joins, unsure, left = [], [], []
+    owner = {}
+    for n_, g in enumerate(anchors):
+        for k in g:
+            owner[k] = n_
+    def place(g):
+        """-> (anchor index or None, why, scored candidates) for a group of pieces"""
+        cand = [(g_score(g, a), x) for x, a in enumerate(anchors) if g_tog(g, a) <= ID_TOGETHER]
+        scored = sorted([c for c in cand if c[0] is not None], key=lambda c: -c[0])
+        why, to = None, None
+        if scored and scored[0][0] >= ID_LOOSE and (len(scored) == 1 or scored[0][0] - scored[1][0] >= ID_MARGIN):
+            why, to = "look", scored[0][1]
+        elif len(cand) == 1 and not scored and size(g) >= ID_MIN_DET:
+            why, to = "elimination", cand[0][1]
+        else:
+            # the same track goes on before and after this piece as one person: her at an odd angle, in a crossing
+            # or a blackout (the piece is one or more consecutive parts of that track)
+            tracks = {(k[0], k[1]) for k in g}
+            parts = sorted(k[2] for k in g)
+            if len(tracks) == 1 and parts == list(range(parts[0], parts[-1] + 1)):
+                pid, s_ = tracks.pop()
+                nb = {owner.get((pid, s_, parts[0] - 1)), owner.get((pid, s_, parts[-1] + 1))}
+                if len(nb) == 1 and None not in nb and any(c[1] in nb for c in cand):
+                    why, to = "same track", nb.pop()
+        return to, why, scored
+
+    def join(g, to, why, scored):
+        anchors[to] += g
+        for k in g:
+            owner[k] = to
+        joins.append({"new": g[0][0], "into": anchors[to][0][0], "at": round(times[tl[g[0]][0]], 2), "why": why,
+                      "look": round(scored[0][0], 3) if scored else 0.0})
+
+    for g in sorted(rest, key=size):
+        to, why, scored = place(g)
+        if to is not None:
+            join(g, to, why, scored)
+            continue
+        if len(g) > 1:
+            # 0.5.91 (_040, 21:17): a merged group is blocked as a whole when ONE of its pieces shares frames with a
+            # person (H3MD_00168: the centre woman's 3.0-8.7 s piece was merged with a 8.7-9.3 s piece of the next
+            # shot that sat on her together with her own number; the whole group stayed 'kept' and she was not
+            # replaced at 3-8.7 s).  Each piece then gets its own chance, biggest first; the ones that fit join.
+            keep = []
+            for k in sorted(g, key=lambda k: -len(tl[k])):
+                t2, w2, s2 = place([k])
+                if t2 is not None:
+                    join([k], t2, w2 + ", piece of a blocked group", s2)
+                else:
+                    keep.append(k)
+            if len(keep) < len(g):
+                notes.append(f"a group of {len(g)} pieces was blocked as a whole; {len(g) - len(keep)} joined one by one")
+            if not keep:
+                continue
+            g = sorted(keep, key=lambda k: tl[k][0])
+            to, why, scored = place(g)
+            if to is not None:
+                join(g, to, why, scored)
+                continue
+        left.append(g)
+        if size(g) >= ID_MIN_DET and scored and scored[0][0] >= ID_LOOSE:
+            unsure.append({"new": g[0][0], "at": round(times[tl[g[0]][0]], 2),
+                           "candidates": [[anchors[x][0][0], round(s, 2)] for s, x in scored[:3]]})
+    notes.append(f"{len(raw)} track pieces -> {len(anchors)} people (on screen together at most {kmax}), "
+                 f"{n_merge} merges, {len(joins)} joined after, {len(left)} left apart")
+
+    # ---- new ids; where two pieces of one person share a frame (a ghost box, a hand-over) the newer one wins
+    order = sorted(range(len(anchors)), key=lambda x: first(anchors[x]))
+    new_id = {}
+    for rank, x in enumerate(order):
+        for k in anchors[x]:
+            new_id[k] = PERSON_ID + rank
+    for rank, g in enumerate(left):
+        for k in g:
+            new_id[k] = OTHER_ID + rank
+    at = {}
+    for k, ix in tl.items():
+        for i in ix:
+            at.setdefault(i, []).append(k)
+    out = []
+    for i, fr in enumerate(per_frame):
+        row = {}
+        for k in sorted(at.get(i, []), key=lambda k: tl[k][0]):
+            row[new_id[k]] = fr[k[0]]
+        out.append(row)
+    return out, joins, unsure, notes
+
+
 def report(per_frame, times):
     """{id: box} per sampled frame + times -> [{"at": t, "who": [[id, box], ...] left to right}]"""
     return [{"at": round(t, 4), "who": sorted([[i, list(map(float, b))] for i, b in fr.items()],
@@ -153,36 +687,169 @@ def visible(frame, relaxed=False):
     return sorted(out, key=lambda w: (w[1][0] + w[1][2]) / 2.0)
 
 
-def number_people(frames, look_s=LOOK_S):
-    """-> (frame used, [ids left to right]): the first frame in the first `look_s` seconds that shows the most people,
-    none overlapping much (else the one where the most hidden person is hidden least)."""
-    frames = [f for f in frames if visible(f)]
+def sliver(b, width=SLIVER_W):
+    """0.5.91: only a strip of the person is in the frame (cut off by a side edge and narrow): not recast there"""
+    return (b[0] <= 0.01 or b[2] >= 0.99) and (b[2] - b[0]) < width
+
+
+def side_of(x):
+    return "left" if x < 0.36 else "right" if x > 0.64 else "centre"
+
+
+def cast(frames, min_s=CAST_MIN_S):
+    """0.5.91 (user 01:50/01:52, replaces 'left k in the first clear frame'): everyone in the clip seen clearly for at
+    least min_s, numbered in order of first appearance (same moment: left to right).  A clip cut from the middle,
+    people walking in later, places changing - the number belongs to the person, not to a place.
+    -> [{"id", "first", "last", "side" (where first seen), "seen" s, "presence", "best" (frame index: largest, not
+    at an edge)}]"""
     if not frames:
         raise KeyframeError(f"{TAG} nobody was found in the video. 视频里没找到人。")
-    t0 = frames[0]["at"]
-    look = [f for f in frames if f["at"] - t0 <= look_s] or frames[:1]
-    best = max(len(visible(f)) for f in look)
+    step = (frames[-1]["at"] - frames[0]["at"]) / (len(frames) - 1) if len(frames) > 1 else 1.0
+    acc = {}
+    for i, f in enumerate(frames):
+        for pid, b in visible(f):
+            if sliver(b):
+                continue
+            h = b[3] - b[1]
+            a = acc.get(pid)
+            if a is None:
+                a = acc[pid] = {"id": pid, "first": f["at"], "x": (b[0] + b[2]) / 2, "last": f["at"], "n": 0,
+                                "presence": 0.0, "best": i, "_k": (-1, 0.0)}
+            a["last"], a["n"], a["presence"] = f["at"], a["n"] + 1, a["presence"] + h * step
+            alone = all(iou(b, c) <= CLEAR_IOU and covered(b, c) <= COVERED and covered(c, b) <= COVERED
+                        for q, c in visible(f, relaxed=True) if q != pid)
+            k = (int(b[0] > 0.01 and b[2] < 0.99), int(alone), round(h, 2))
+            if k > a["_k"]:
+                a["_k"], a["best"] = k, i
+    people = [a for a in acc.values() if a["n"] * step >= min_s - 1e-6]
+    if not people:
+        raise KeyframeError(f"{TAG} nobody is seen clearly for {min_s:.0f} s in the video. 视频里没有清楚出现的人。")
+    # people who show up within CAST_TOGETHER_S of each other count as appearing together: left to right (a viewer
+    # sees one opening shot with two men, not "the one detected 0.7 s earlier")
+    people.sort(key=lambda a: a["first"])
+    groups = []
+    for a in people:
+        if groups and a["first"] - groups[-1][0]["first"] <= CAST_TOGETHER_S:
+            groups[-1].append(a)
+        else:
+            groups.append([a])
+    people = [a for g in groups for a in sorted(g, key=lambda a: a["x"])]
+    for a in people:
+        a["seen"] = round(a["n"] * step, 2)
+        a["side"] = side_of(a.pop("x"))
+        a.pop("_k")
+    return people
 
-    def worst(f):
-        bx = [b for _, b in visible(f)]
-        return max([max(iou(bx[i], bx[j]) / CLEAR_IOU, covered(bx[i], bx[j]) / COVERED)
-                    for i in range(len(bx)) for j in range(i + 1, len(bx))] or [0.0])
 
-    cand = [f for f in look if len(visible(f)) == best]
-    clear = [f for f in cand if worst(f) <= 1.0]
-    pick = clear[0] if clear else min(cand, key=worst)
-    return pick, [pid for pid, _ in visible(pick)]
+def auto_cast(people, pictures):
+    """0.5.91 (user 01:52): picture 1 -> the first person to appear, picture 2 -> the next ...; a person, once given
+    a picture, keeps it (the id follows him through the clip); people after the last picture stay themselves.
+    -> {picture: person number}"""
+    pics = sorted(pictures)
+    if len(pics) > len(people):
+        raise KeyframeError(f"{TAG} {len(pics)} pictures but only {len(people)} people are seen clearly in the clip. "
+                            f"接了 {len(pics)} 张角色图，片子里只清楚出现 {len(people)} 个人。")
+    return {p: [n] for n, p in enumerate(pics, 1)}
 
 
-def resolve(mapping: dict, order: list) -> list:
-    """{picture: left number} + ids left to right -> [(picture, left number, person id)]."""
+def resolve(mapping: dict, people: list) -> list:
+    """{picture: [person numbers]} + cast(...) -> [(picture, person number, person id)], one entry per LINK (a
+    picture linked to several numbers has several entries; merge_cast makes them one person)."""
     out = []
-    for p, k in mapping.items():
-        if k > len(order):
-            raise KeyframeError(f"{TAG} only {len(order)} people are seen at the start, left {k} does not exist. "
-                                f"开头只看到 {len(order)} 个人，没有左{k}。")
-        out.append((p, k, order[k - 1]))
+    for p, ks in mapping.items():
+        for k in (ks if isinstance(ks, (list, tuple)) else [ks]):
+            if k > len(people):
+                raise KeyframeError(f"{TAG} only {len(people)} people are on the cast sheet, #{k} does not exist. "
+                                    f"演员表里只有 {len(people)} 个人，没有 {k} 号。")
+            out.append((p, k, people[k - 1]["id"]))
     return out
+
+
+def merge_cast(frames, links):
+    """0.5.91 (user 22:11): the numbers the user linked to one picture are one person.  links = resolve(...) (all
+    links).  In frames every linked id becomes the id of the picture's FIRST number; where two of them are boxed in the
+    same frame (a double box after a cut) the first number's box stays.  frames changed in place.
+    -> (chosen with one entry per picture, ids merged away, notes)"""
+    by_pic = {}
+    for p, k, pid in links:
+        by_pic.setdefault(p, []).append((k, pid))
+    chosen, gone, notes = [], set(), []
+    rename = {}
+    for p in sorted(by_pic):
+        lk = sorted(by_pic[p])
+        k0, pid0 = lk[0]
+        chosen.append((p, k0, pid0))
+        for k, pid in lk[1:]:
+            rename[pid] = pid0
+            gone.add(pid)
+        if len(lk) > 1:
+            notes.append(f"picture {p}: #{', #'.join(str(k) for k, _ in lk)} linked by you = one person (#{k0})")
+    if rename:
+        for f in frames:
+            who, have = [], {w[0] for w in f.get("who") or () if w[0] not in rename}
+            for pid, b in f.get("who") or ():
+                to = rename.get(pid, pid)
+                if pid in rename and to in have:
+                    continue                    # the picture's own number is boxed here already
+                have.add(to)
+                who.append([to, b])
+            f["who"] = sorted(who, key=lambda w: (w[1][0] + w[1][2]) / 2)
+    return chosen, gone, notes
+
+
+TWIN_MIN_S = 1.0       # 0.5.91 (user 16:11, 00154 cast #4 7.0-7.8 s; _022 keyframe 8): two ids seen together this
+TWIN_SHARE = 0.6       # long (or for most of the shorter one's life, at least TWIN_MIN_N frames), with boxes overlapping
+TWIN_MIN_N = 3         # more than DUP_IOU in this share of those frames, are ONE person boxed twice - merged
+
+
+def merge_twins(frames):
+    """one person with two boxes at the same time, for a whole stretch -> one id.  Two real people never keep
+    near-identical boxes for TWIN_MIN_S (one in front of the other: the hidden one's box is smaller or shifted).
+    frames: report() output, changed in place.  -> (frames, notes)"""
+    if len(frames) < 2:
+        return frames, []
+    step = (frames[-1]["at"] - frames[0]["at"]) / (len(frames) - 1) or 1.0
+    count, both, same = {}, {}, {}
+    for f in frames:
+        who = f.get("who") or []
+        for pid, _ in who:
+            count[pid] = count.get(pid, 0) + 1
+        for i in range(len(who)):
+            for j in range(i + 1, len(who)):
+                key = tuple(sorted((who[i][0], who[j][0])))
+                both[key] = both.get(key, 0) + 1
+                if iou(who[i][1], who[j][1]) > DUP_IOU:
+                    same[key] = same.get(key, 0) + 1
+    root = {}
+
+    def find(x):
+        while root.get(x, x) != x:
+            x = root[x]
+        return x
+
+    notes = []
+    for (a, b), n in sorted(both.items(), key=lambda kv: -kv[1]):
+        short = min(count.get(a, 0), count.get(b, 0))
+        k = same.get((a, b), 0)
+        if k < TWIN_MIN_N or (n * step < TWIN_MIN_S - 1e-6 and n < TWIN_SHARE * short) or k < TWIN_SHARE * n:
+            continue
+        ra, rb = find(a), find(b)
+        if ra == rb:
+            continue
+        keep, drop = (ra, rb) if count.get(ra, 0) >= count.get(rb, 0) else (rb, ra)
+        root[drop] = keep
+        notes.append(f"track {drop} is a second box on track {keep} ({n * step:.1f} s together, boxes the same): "
+                     "merged")
+    if not root:
+        return frames, []
+    for f in frames:
+        out = {}
+        for pid, b in f.get("who") or ():
+            r = find(pid)
+            if r not in out or pid == r:
+                out[r] = b
+        f["who"] = sorted([[pid, b] for pid, b in out.items()], key=lambda w: (w[1][0] + w[1][2]) / 2)
+    return frames, notes
 
 
 # ---------------------------------------------------------------------------------------------------- moments
@@ -197,11 +864,89 @@ def _motion(frames, i, pid):
     return max(d) if d else 0.0
 
 
+CLOSE_EDGE = 0.03   # 0.5.9: a chosen person whose box runs from the top edge to the bottom edge (head and legs cut
+                    # off) is an extreme close-up: no keyframe there.  Waist-up / thigh-up shots stay usable - the edit
+                    # prompt then says she is cut off by the bottom edge (tested on the real 11-19 tracks: box shape
+                    # and height cannot tell a waist-up close-up from a thigh-up mid shot of dancers with arms out)
+FRAME_ASPECT = 16 / 9   # frame width / height; Prepare sets it (kept for callers)
+
+
+def closeup(frame, chosen_ids):
+    """a frame the edit model cannot redraw at the right size: a chosen person (1) fills the whole frame height (cut
+    off at the top and the bottom), or (2) is cut off by the bottom AND a side edge - only part of her is in the
+    frame.  The crop is then clipped at the frame edge and the edit model draws a whole, smaller person inside it,
+    with the original's cut-off part left beside her (2026-11-19 run 38, 2.33 s: all three shrunk to full body and a
+    ghost of the original at the left edge; 0.33 s, same framing but nobody at a side edge, kept the size)."""
+    for pid, b in visible(frame):
+        if pid not in chosen_ids:
+            continue
+        if b[1] <= CLOSE_EDGE and b[3] >= 1 - CLOSE_EDGE:
+            return True
+        if b[3] >= 1 - CLOSE_EDGE and (b[0] <= CLOSE_EDGE or b[2] >= 1 - CLOSE_EDGE):
+            return True
+    return False
+
+
+def cut_at_bottom(box):
+    """the person is cut off by the bottom edge (waist-up / thigh-up framing)"""
+    return box[3] >= 1 - CLOSE_EDGE
+
+
+DARK_REL = 0.4           # 0.5.91 (user 23:15, _046 keyframe 9 at 16.83 s: the stage blacked out): a frame whose people
+                         # are lit less than this share of the clip's usual light is no keyframe - the edit model gets
+                         # nothing to read and the keyframe is no guide.  Light = the 90th percentile of the brightness
+                         # inside the people's boxes (their lit parts; dark clothes or a dark backdrop inside the box do
+                         # not count).  Measured on 4 clips: lit frames 0.56-0.77, blackouts 0.10-0.17; compared with
+                         # the clip's own median, so a clip that is dark all through loses nothing.
+
+
+def people_light(img, boxes):
+    """img uint8 [h, w, 3] RGB, boxes (0-1) -> the 90th percentile of the brightness (0-1) inside the boxes"""
+    import numpy as np
+    h, w = img.shape[:2]
+    y = img[..., 0] * 0.299 + img[..., 1] * 0.587 + img[..., 2] * 0.114
+    m = np.zeros((h, w), bool)
+    for b in boxes:
+        x0, y0, x1, y1 = int(b[0] * w), int(b[1] * h), int(round(b[2] * w)), int(round(b[3] * h))
+        m[max(0, y0):max(0, y1), max(0, x0):max(0, x1)] = True
+    v = y[m] if m.any() else y.ravel()
+    return float(np.percentile(v, 90)) / 255.0
+
+
+def mark_dark(frames, light, rel=DARK_REL):
+    """light: {frame index: people_light} for the frames with people.  Frames below rel x the clip's median get
+    f["dark"] = True (score() then skips them, so every keyframe rule takes the nearest lit frame instead).
+    -> notes"""
+    import statistics
+    vals = [v for v in light.values() if v is not None]
+    if len(vals) < 3:
+        return []
+    ref = statistics.median(vals)
+    dark = sorted(i for i, v in light.items() if v is not None and v < rel * ref)
+    for i in dark:
+        frames[i]["dark"] = True
+    if not dark:
+        return []
+    spans, a, b = [], dark[0], dark[0]
+    for i in dark[1:]:
+        if i == b + 1:
+            b = i
+        else:
+            spans.append((a, b)); a = b = i
+    spans.append((a, b))
+    return [f"too dark for a keyframe (people lit below {rel:.0%} of the clip's usual {ref:.2f}): "
+            + ", ".join(f"{frames[x]['at']:.2f}" + ("" if x == y else f"-{frames[y]['at']:.2f}") for x, y in spans)
+            + " s - the nearest lit frames are used. 太暗的帧不当关键帧，取前后最近的亮帧。"]
+
+
 def score(frames, i, chosen_ids):
-    """(chosen people seen, smallest gap of a chosen person to anybody else (capped), -motion, mean height) or None"""
+    """(chosen people seen, smallest gap of a chosen person to anybody else (capped), -motion, mean height) or None
+    (nobody chosen seen, or a close-up)"""
+    if frames[i].get("bad") or frames[i].get("dark"):   # 0.5.91: a box spanning two people (clean_frames);
+        return None                                      # people too dark to read (mark_dark)
     vis = visible(frames[i])
     ch = [w for w in vis if w[0] in chosen_ids]
-    if not ch:
+    if not ch or closeup(frames[i], chosen_ids):
         return None
     g = 0.05
     for pid, b in ch:
@@ -230,13 +975,22 @@ def pick_moments(frames, chosen_ids, duration, max_gap=5.0):
             if s is not None and (bs is None or s > bs):
                 best, bs = i, s
         if best is None:
-            present = [i for i in cand if any(w[0] in chosen_ids for w in frames[i].get("who") or ())]
-            if present:
-                best = max(present, key=lambda i: max(w[1][3] - w[1][1] for w in frames[i]["who"]
-                                                      if w[0] in chosen_ids))
+            present = [i for i in cand if any(w[0] in chosen_ids for w in frames[i].get("who") or ())
+                       and not frames[i].get("dark")]
+            usable = [i for i in present if not closeup(frames[i], chosen_ids)]
+            if present and not usable:
+                # only close-ups here: no keyframe, look further on (the next mid shot carries the swap)
+                lo, hi = hi, min(hi + max_gap, last)
+                if lo >= last:
+                    break
+                continue
+            if usable:
+                best = max(usable, key=lambda i: max(w[1][3] - w[1][1] for w in frames[i]["who"]
+                                                     if w[0] in chosen_ids))
                 out.append((best, "swap"))
             else:
-                best = cand[len(cand) // 2]
+                lit = [i for i in cand if not frames[i].get("dark")] or cand
+                best = lit[len(lit) // 2]
                 out.append((best, "plain"))
         else:
             out.append((best, "swap"))
@@ -293,9 +1047,271 @@ def ensure_per_shot(frames, moments, chosen_ids, cuts, duration, settle=SHOT_SET
                 break
         if scored:
             out.append((max(scored)[1], "swap"))
-        elif cand:
-            out.append((cand[len(cand) // 2], "plain"))
+        elif cand and not any(any(w[0] in chosen_ids for w in frames[i].get("who") or ()) for i in cand):
+            lit = [i for i in cand if not frames[i].get("dark")] or cand
+            out.append((lit[len(lit) // 2], "plain"))
+        # else: the chosen people are there but only in close-ups - no keyframe (an edited close-up does more harm)
     return sorted(out, key=lambda m: frames[m[0]]["at"])
+
+
+
+
+FULL_SHRINK = 0.85        # prefer_full: a frame of the same shot where the people are this much smaller (camera farther)
+
+
+def prefer_full(frames, moments, chosen_ids, cuts, duration, max_gap=5.0):
+    """0.5.9: a keyframe where a chosen person is cut off by the bottom edge (waist-up, chest-up) moves to a frame of
+    the SAME shot where every chosen person seen is whole (feet in the frame), else where they are clearly smaller
+    (camera farther, more of the body in the frame) - if the shot has one and the move keeps
+    every gap <= max_gap (or no worse than before) and nobody changes places in between (the keyframe still pins
+    the same left-to-right order).  The edit model tends to redraw a cut-off person as a smaller
+    full-body one (run 38, 2.33 s: the chest-up woman in the middle shrank although she was at no side edge; the
+    full-body keyframes 6.83/11.17/16.17 kept their size).  -> (moments sorted by time, notes)"""
+    out = sorted(moments, key=lambda m: frames[m[0]]["at"])
+    notes = []
+    bounds = [0.0] + sorted(c for c in cuts if 0.0 < c < duration) + [duration]
+    shot = lambda t_: max(k for k, b0 in enumerate(bounds) if b0 <= t_)
+
+    def cut(i):
+        return any(cut_at_bottom(b) for pid, b in visible(frames[i]) if pid in chosen_ids)
+
+    def seen(i):
+        return sum(1 for pid, _ in visible(frames[i]) if pid in chosen_ids)
+
+    def mh(i):
+        hs = [b[3] - b[1] for pid, b in visible(frames[i]) if pid in chosen_ids]
+        return sum(hs) / max(1, len(hs))
+
+    def worst_gap(ts):
+        pts = [0.0] + sorted(ts) + [duration]
+        return max(b - a for a, b in zip(pts, pts[1:]))
+
+    last = duration - 2.0 / FPS
+    try:
+        changes = place_changes(frames, sorted(chosen_ids))
+    except Exception:
+        changes = []
+    for k, (i, kind) in enumerate(list(out)):
+        if kind != "swap" or not cut(i):
+            continue
+        t, sh = frames[i]["at"], shot(frames[i]["at"])
+        ts = [frames[j]["at"] for j, _ in out]
+        limit = max(max_gap, worst_gap(ts))
+        others = ts[:k] + ts[k + 1:]
+        cand = [j for j, f in enumerate(frames)
+                if f["at"] <= last and shot(f["at"]) == sh and j != i and seen(j) >= seen(i)
+                and (not cut(j) or mh(j) <= FULL_SHRINK * mh(i))
+                and not any(min(t, f["at"]) <= c1 and c0 <= max(t, f["at"]) for c0, c1, _ in changes)
+                and score(frames, j, chosen_ids) is not None and f["at"] not in others
+                and worst_gap(others + [f["at"]]) <= limit]
+        if not cand:
+            continue
+        best = max(cand, key=lambda j: (not cut(j), score(frames, j, chosen_ids), -abs(frames[j]["at"] - t)))
+        out[k] = (best, kind)
+        notes.append(f"keyframe {t:.2f} s -> {frames[best]['at']:.2f} s (same shot, people "
+                     + ("whole instead of cut off by the bottom edge)" if not cut(best) else
+                        f"farther away: {mh(best):.2f} instead of {mh(i):.2f} of the frame height)"))
+    return sorted(out, key=lambda m: frames[m[0]]["at"]), notes
+
+
+ID_MIN_H = 0.4           # 0.5.91: a person this tall (share of the frame height) or more is "large" - a mid shot
+                         # (hangar clip: at 0.25 the face was ~50 px and Remake drew someone else in the close-ups)
+ID_MAX_OVERLAP = 0.5     # ... and "clear" when no other box covers more than this of the smaller one
+ID_MIN_APART = 0.5       # an added keyframe keeps this many seconds from the others
+
+
+def clear_height(frame, pid):
+    """height of person pid in this frame when he is seen whole in width (not at a side edge) and not mostly
+    overlapped by someone else, else 0"""
+    vis = visible(frame)
+    b = next((bb for q, bb in vis if q == pid), None)
+    if b is None or b[0] <= CLOSE_EDGE or b[2] >= 1 - CLOSE_EDGE:
+        return 0.0
+    if any(covered(b, c) > ID_MAX_OVERLAP for q, c in vis if q != pid):
+        return 0.0
+    return b[3] - b[1]
+
+
+def ensure_identity(frames, moments, chosen, duration, min_h=ID_MIN_H, apart=ID_MIN_APART):
+    """0.5.91 (user 01:08): skill 12d 'every replaced person needs at least one large, clear keyframe'.  For every
+    chosen (picture, left, id) whose best keyframe shows him smaller than min_h (or not clear), add the frame where he
+    is largest and clear - no close-up, at least `apart` s from the other keyframes; best: tallest, then most chosen
+    people seen, then least motion.  Without it Remake had no face for him and drew someone else in the close-ups
+    (hangar clip: picture 3 only small in keyframe 1 and a sliver in keyframe 2).
+    -> (moments sorted by time, set of the added times (never thinned out), notes, warnings)"""
+    out = sorted(moments, key=lambda m: frames[m[0]]["at"])
+    ids = {pid for _, _, pid in chosen}
+    last = duration - 2.0 / FPS
+    added, notes, warns = set(), [], []
+    for p, k, pid in chosen:
+        have = max([clear_height(frames[i], pid) for i, kind in out if kind == "swap"] or [0.0])
+        if have >= min_h:
+            continue
+        ts = [frames[i]["at"] for i, _ in out]
+        cand = [i for i, f in enumerate(frames)
+                if f["at"] <= last and clear_height(f, pid) > have and score(frames, i, ids) is not None
+                and all(abs(f["at"] - t) >= apart for t in ts)]
+        if not cand:
+            warns.append(f"picture {p} (person #{k}) is never seen large and clear (best {have:.2f} of the frame height): "
+                         "the video may not look like this character in close-ups. 图{0} 在原片里一直没有大而清楚的"
+                         "镜头，近景可能不像。".format(p))
+            continue
+        best = max(cand, key=lambda i: (round(clear_height(frames[i], pid), 2), score(frames, i, ids)))
+        out.append((best, "swap"))
+        added.add(frames[best]["at"])
+        h = clear_height(frames[best], pid)
+        notes.append(f"picture {p} (person #{k}): keyframe added at {frames[best]['at']:.2f} s where he/she is large and "
+                     f"clear ({h:.2f} of the frame height; the others showed {have:.2f})")
+        if h < min_h:
+            warns.append(f"picture {p} (person #{k}) is at most {h:.2f} of the frame height in the clip: close-ups may not "
+                         "look like this character. 图{0} 在原片里最大也只有 {1:.2f} 画面高，近景可能不像。".format(p, h))
+    return sorted(out, key=lambda m: frames[m[0]]["at"]), added, notes, warns
+
+
+def finish_moments(frames, moments, chosen_ids, duration, max_gap=5.0, cuts=(), keep=()):
+    """0.5.9 cross-check of the moment rules (picks every <= max_gap s, one per shot, none on close-ups):
+    (1) no keyframe at all (only close-ups found) -> the best frame anyway, close-ups allowed - a part without any
+        keyframe is an error;
+    (0.5.91: the old step (2), thinning to 4 keyframes per estimated part, is gone - the parts depend on the GPU;
+    the Director picks 4 per real part, h3md_remake_engine.pick_keyframes.)
+    -> (moments sorted by time, notes)"""
+    notes = []
+    out = sorted(moments, key=lambda m: frames[m[0]]["at"])
+    # 0.5.91 (_013: keyframes at 10.0 and 10.17 s): a keyframe closer than NEAR_S to another that shows the same
+    # replaced people or fewer is a near copy - dropped (never a kept one)
+    j = 0
+    while j < len(out):
+        i = out[j][0]
+        twin = [m for m in out if m is not out[j] and abs(frames[m[0]]["at"] - frames[i]["at"]) < NEAR_S
+                and kf_people(frames, i, chosen_ids) <= kf_people(frames, m[0], chosen_ids)]
+        if twin and frames[i]["at"] not in set(keep):
+            notes.append(f"keyframe at {frames[i]['at']:.2f} s dropped: a near copy of the one at "
+                         f"{frames[twin[0][0]]['at']:.2f} s")
+            out.pop(j)
+            continue
+        j += 1
+    if not out:
+        cand = [i for i, f in enumerate(frames) if any(w[0] in chosen_ids for w in f.get("who") or ())]
+        cand = [i for i in cand if not frames[i].get("dark")] or cand
+        if cand:
+            best = max(cand, key=lambda i: (len([w for w in frames[i]["who"] if w[0] in chosen_ids]),
+                                             -_motion(frames, i, frames[i]["who"][0][0])))
+            out = [(best, "swap")]
+            notes.append(f"only close-ups found: one keyframe at {frames[best]['at']:.2f} s anyway")
+    return out, notes
+
+
+def kf_people(frames, i, chosen_ids):
+    """the chosen people a keyframe really shows (seen, not only a strip at the edge)"""
+    return {pid for pid, b in visible(frames[i]) if pid in chosen_ids and not sliver(b)}
+
+
+COVER_S = 3.0             # 0.5.91 (user 03:31): every replaced person on screen has a keyframe at least every this
+                          # many seconds - the Director's parts depend on the GPU it runs on (token budget), and each
+                          # part takes the look of a person only from its own keyframes
+NEAR_S = 0.5              # 0.5.91: two keyframes closer than this showing the same people are one too many
+COVER_APART = 0.75        # ... and an added keyframe is at least this far from the others (no near copies)
+COVER_MIN_S = 0.5         # ... when he is seen for at least this long in that stretch (a short
+                          # appearance in a part still gets his look from a keyframe)
+
+
+def ensure_cover(frames, moments, chosen_ids, duration, every=COVER_S, min_s=COVER_MIN_S):
+    """0.5.91: for every replaced person, every stretch of `every` seconds in which he is seen clearly for min_s or
+    more holds a keyframe that shows him (a part of any length >= every then has one).  Greedy from the start: the
+    first such stretch without one gets the frame in its first half where he is seen best (most replaced people,
+    then tallest, no close-up), which covers up to `every` s further.  The Director picks 4 per part
+    (h3md_remake_engine.pick_keyframes).  -> (moments sorted by time, notes, warnings)"""
+    out = sorted(moments, key=lambda m: frames[m[0]]["at"])
+    notes, warns, gaps = [], [], {}
+    step = (frames[-1]["at"] - frames[0]["at"]) / (len(frames) - 1) if len(frames) > 1 else 1.0
+    last = duration - 2.0 / FPS
+    half = every / 2.0
+    for pid in sorted(chosen_ids):
+        seen = [(f["at"], i) for i, f in enumerate(frames) if f["at"] <= last and pid in kf_people(frames, i, chosen_ids)]
+        j = 0
+        while j < len(seen):
+            t = seen[j][0]
+            if sum(1 for u, _ in seen if t <= u < t + every) * step < min_s - 1e-6:
+                j += 1
+                continue
+            cov = [frames[i]["at"] for i, _ in out if pid in kf_people(frames, i, chosen_ids)
+                   and abs(frames[i]["at"] - t) <= half]
+            if cov:
+                t_next = max(cov) + half
+            else:
+                cand = [i for u, i in seen if t <= u <= t + half and score(frames, i, chosen_ids) is not None
+                        and all(abs(frames[i]["at"] - frames[m[0]]["at"]) >= COVER_APART for m in out)]
+                if not cand:
+                    gaps[round(t, 1)] = gaps.get(round(t, 1), 0) + 1   # 0.5.91: one line per moment, not per person
+                    t_next = t + half
+                else:
+                    best = max(cand, key=lambda i: (len(kf_people(frames, i, chosen_ids)),
+                                                    round(clear_height(frames[i], pid), 2)))
+                    out.append((best, "swap"))
+                    out.sort(key=lambda m: frames[m[0]]["at"])
+                    notes.append(f"keyframe added at {frames[best]['at']:.2f} s: a replaced person seen around "
+                                 f"{t:.1f} s had none within {half:.1f} s")
+                    t_next = frames[best]["at"] + half
+            while j < len(seen) and seen[j][0] <= t_next:
+                j += 1
+    for t, n in sorted(gaps.items()):
+        who = "a replaced person" if n == 1 else f"{n} replaced people"
+        warns.append(f"{who} seen around {t:.1f} s {'has' if n == 1 else 'have'} no frame clear enough for a keyframe "
+                     f"there (close-ups or too dark): Remake may give {'him' if n == 1 else 'them'} another character's look. "
+                     f"{t:.1f} 秒附近有 {n} 个要换的人没有合适的关键帧（特写或太暗），可能换错。")
+    return sorted(out, key=lambda m: frames[m[0]]["at"]), notes, warns
+
+
+SPARE_GPU_GB = 16.0       # 0.5.91 seams (user 2026-11-21 19:03): the smallest GPU H3MD supports for the swap
+SPARE_MIN_STEP = 0.5      # a spare at least this far after the keyframe before it
+
+
+def spare_gap(max_new_frames: int) -> float:
+    """Longest gap (s) between keyframes that a GPU whose parts carry at most max_new_frames new frames can still
+    start every part on: the Director cuts on 17-frame steps, so one step is kept as margin."""
+    return max(17, (int(max_new_frames) // 17 - 1) * 17) / FPS
+
+
+def add_spares(frames, moments, chosen_ids, duration, max_gap_s, cuts=()):
+    """0.5.91 seams (user 2026-11-21 19:03): spare keyframes.  The Director cuts a long shot so that every part's new
+    frames begin on a keyframe (h3md_autosplit.plan_parts_kf); on a small GPU the parts are short and a long gap
+    between two keyframes holds a part start nobody reaches.  Walking every gap longer than max_gap_s (from spare_gap
+    of the smallest supported GPU; also from the last keyframe to the end): the next spare is the best clear frame in
+    the later 40 % of the reach (as far on as possible, so few are needed), else any clear frame within reach; never a
+    close-up (H3 Image cannot redraw one at the right size), never just after a cut.  Where no clear frame is in reach
+    the gap is named.  A big GPU never uses them; the plan marks them "backup".  -> (spare frame indices, notes)"""
+    if not moments or max_gap_s <= 0:
+        return [], []
+    last = duration - 2.0 / FPS
+    ts = sorted(frames[i]["at"] for i, _ in moments)
+    taken = set(i for i, _ in moments)
+    ok = {i for i, f in enumerate(frames) if i not in taken and f["at"] <= last
+          and not any(0.0 <= f["at"] - c < SHOT_SETTLE for c in cuts) and score(frames, i, chosen_ids) is not None}
+    spares, notes = [], []
+    for a, b in zip(ts, ts[1:] + [last]):
+        cur = a
+        while b - cur > max_gap_s + 1e-6:
+            reach = [i for i in ok if cur + SPARE_MIN_STEP <= frames[i]["at"] <= cur + max_gap_s]
+            late = [i for i in reach if frames[i]["at"] >= cur + 0.6 * max_gap_s]
+            if late:
+                best = max(late, key=lambda i: score(frames, i, chosen_ids))
+            elif reach:
+                best = max(reach, key=lambda i: frames[i]["at"])
+            else:
+                nxt = min((frames[i]["at"] for i in ok if cur + max_gap_s < frames[i]["at"] < b), default=b)
+                notes.append(f"no clear frame for a spare keyframe between {cur:.2f} and {nxt:.2f} s (close-ups or "
+                             f"nobody to replace): a small GPU may start a part there without one")
+                if nxt >= b:
+                    break
+                best = min((i for i in ok if frames[i]["at"] == nxt))
+            spares.append(best)
+            ok.discard(best)
+            cur = frames[best]["at"]
+    spares.sort(key=lambda i: frames[i]["at"])
+    if spares:
+        notes.append(f"{len(spares)} spare keyframe(s) at {[round(frames[i]['at'], 2) for i in spares]} s for GPUs "
+                     f"down to {SPARE_GPU_GB:.0f} GB (gaps over {max_gap_s:.2f} s); a bigger GPU does not use them")
+    return spares, notes
 
 
 def place_changes(frames, ids, min_hold=0.5):
@@ -348,121 +1364,229 @@ def cover_crop(src_w, src_h, tw, th):
     return int(round((src_w - w) / 2)), int(round((src_h - h) / 2)), int(round(w)), int(round(h))
 
 
-def crop_box(b, W, H):
-    """person box in pixels -> crop box in pixels (skill 12d step 4): +45 % left/right, +12 % up, +8 % down,
-    at least 1:2 wide, clipped to the frame"""
-    x0, y0, x1, y1 = b
-    w, h = x1 - x0, y1 - y0
-    cx0, cx1 = x0 - PAD_X * w, x1 + PAD_X * w
-    cy0, cy1 = y0 - PAD_TOP * h, y1 + PAD_BOTTOM * h
-    cw = cx1 - cx0
-    if (cy1 - cy0) > 2 * cw:
-        pad = ((cy1 - cy0) / 2 - cw) / 2
-        cx0, cx1 = cx0 - pad, cx1 + pad
-    return [int(max(0, math.floor(cx0))), int(max(0, math.floor(cy0))),
-            int(min(W, math.ceil(cx1))), int(min(H, math.ceil(cy1)))]
+def fit_size(w, h, mp=EDIT_MP, grid=32):
+    """a canvas of about mp megapixels with the aspect of w x h, multiples of grid"""
+    asp, area = w / float(max(1, h)), mp * 1e6
+    best = None
+    for gh in range(grid, 4096 + grid, grid):
+        for gw in {max(grid, math.floor(gh * asp / grid) * grid), max(grid, math.ceil(gh * asp / grid) * grid)}:
+            if abs(gw * gh - area) <= 0.15 * area:
+                err = abs(gw / float(gh) - asp)
+                if best is None or err < best[0] - 1e-9:
+                    best = (err, gw, gh)
+    if best is None:
+        sc = math.sqrt(area / max(1, w * h))
+        return max(grid, round(w * sc / grid) * grid), max(grid, round(h * sc / grid) * grid)
+    return best[1], best[2]
 
 
-def gen_size(w, h, mp=GEN_MP, grid=32):
-    s = math.sqrt(mp * 1e6 / max(1, w * h))
-    return max(grid, round(w * s / grid) * grid), max(grid, round(h * s / grid) * grid)
+def frame_rank(own, others):
+    """(place from the left, people in the frame) of a person in THIS keyframe, by box centre.  The mapping number
+    (person #k, order of first appearance) is the person's ID; where she stands at a keyframe can differ."""
+    cx = (own[0] + own[2]) / 2.0
+    return 1 + sum(1 for b in others if (b[0] + b[2]) / 2.0 < cx), 1 + len(others)
 
 
 def parse_people(text: str) -> list:
-    """optional: one line per person at the start, left to right (what they look like now) -> [str]"""
+    """optional: one line per person of the cast sheet, #1 #2 ... (what they look like now) -> [str]"""
     lines = [l.strip() for l in (text or "").splitlines() if l.strip()]
     return [re.sub(r"^(?:左|left|L)?\s*\d+\s*[:：.、)]\s*", "", l, flags=re.I).rstrip("。.") for l in lines]
 
 
-def edit_prompt(description: str, lang: str = "zh", original: str = "") -> str:
-    """skill 12d step 4 template (line A: the crop is a part of a photo, the person to replace is in the middle).
-    original: what the person to replace looks like (optional; helps in crowded crops)."""
-    if lang == "en":
-        who = f"the person in the middle of image 1 ({original})" if original else "the person in the middle of image 1"
-        return (f"Image 1 is a part of a photo. Replace {who} with the person from "
-                f"image 2: {description}. The clothes become entirely the clothes of the person in image 2; nothing "
-                "of the original person's clothes stays, and every piece of the original person sticking out around "
-                "her (hair, wig, ears, tail, ribbons, apron, skirt, socks, shoes) is removed and filled with the "
-                "background. Keep the original pose, action, body direction, position, "
-                "size and any covered parts exactly the same; everybody else, their body parts and the background "
-                "in image 1 stay completely unchanged, with the same composition as image 1. No beautifying, no "
-                "colour grading, no filter: a realistic photo exactly like image 1.")
-    who = f"图1正中间的那个人（{original}）" if original else "图1正中间的那个人"
-    return (f"图1是一张照片的局部，把{who}换成图2中的人：{description}。衣服完全换成图2里那个人的衣服，"
-            "原来那个人的衣服一件都不留。原来那个人伸出来的头发、假发、耳朵、尾巴、蝴蝶结、围裙、裙摆、袜子和鞋也全部去掉，补成背景。保持原来的姿势、动作、身体朝向、在图中的位置、大小和被遮挡的部分不变；"
-            "图1里其他人、其他人的身体部分和背景完全不变，画面构图和图1一样。不要美化，不要调色，不加滤镜，"
-            "是和图1一样的写实照片。")
+# ----------------------------------------------- 0.5.91 Recast: the user's H3 Image AIO v1.01 chain (18:31)
+# One plain sentence (the user's own wording, 18:28) -> the official MiniMax H3 Image prompt enhancer writes the
+# prompt -> one H3 Image edit of the whole keyframe.  Test 18:27 (user, 0 s keyframe): all three swapped right, in
+# place, pose kept, whole outfit, no extra people.  Our own long prompt template (17:32/17:47: people added instead
+# of replaced) and the Qwen Image 2.1 path are gone.
+SWAP_KEEP = ("严格保持图1中的对应人物的朝向,姿势,动作,手掌姿势,表情,口型,人物在图片里的位置和所占比例的大小,还有前后遮挡关系不变. "
+             "严格保持{pics}里的人的五官外貌,发型发色,服装等特征不变,")
 
 
-# ---------------------------------------------------------------------------------------------------- paste
-def colour_match(edit, orig, inner):
-    """per-channel mean/std of the ring outside the person box (inner, crop pixels) matched to the source"""
-    import numpy as np
-    m = np.ones(orig.shape[:2], bool)
-    x0, y0, x1, y1 = [int(v) for v in inner]
-    m[max(0, y0):max(0, y1), max(0, x0):max(0, x1)] = False
-    if m.sum() < 64:
-        return edit.astype(np.float32)
-    e, o = edit.astype(np.float32), orig.astype(np.float32)
-    for c in range(3):
-        em, es = e[..., c][m].mean(), e[..., c][m].std() + 1e-6
-        om, osd = o[..., c][m].mean(), o[..., c][m].std() + 1e-6
-        e[..., c] = (e[..., c] - em) * (osd / es) + om
-    return np.clip(e, 0, 255)
+def h3_size(w, h, mp=EDIT_MP, grid=32):
+    """the edit canvas as the AIO workflow's Resolution Selector makes it: the keyframe aspect at mp megapixels, each
+    side rounded to a multiple of grid"""
+    asp = w / float(max(1, h))
+    return (max(grid, int(round(math.sqrt(mp * 1e6 * asp) / grid)) * grid),
+            max(grid, int(round(math.sqrt(mp * 1e6 / asp) / grid)) * grid))
 
 
-def paste_alpha(crop, W, H, own, others, own_grow=None, protect=None, protects=None):
-    """alpha [h, w] for pasting an edited crop: linear feather on the sides inside the frame, and 0 (feathered) over
-    every OTHER person's box (grown by PROTECT_PAD) except where it overlaps this person's own box - so the people
-    around keep their source pixels and an earlier pasted recast stays."""
-    import numpy as np
-    own_grow = OWN_GROW if own_grow is None else max(0.0, float(own_grow))
-    protect = PROTECT_PAD if protect is None else float(protect)
-    x0, y0, x1, y1 = crop
-    w, h = x1 - x0, y1 - y0
-    a = np.ones((h, w), np.float32)
-    f = max(2, int(FEATHER * w))
-    r = np.linspace(0, 1, f + 2, dtype=np.float32)[1:-1]
-    if x0 > 0:
-        a[:, :f] *= r[None]
-    if x1 < W:
-        a[:, w - f:] *= r[::-1][None]
-    if y0 > 0:
-        a[:f, :] *= r[:, None]
-    if y1 < H:
-        a[h - f:, :] *= r[::-1][:, None]
-    keep = np.zeros((h, w), np.float32)
-    for j, b in enumerate(others):
-        bw, bh = b[2] - b[0], b[3] - b[1]
-        pr = protect if protects is None else float(protects[j])   # 0.5.7 sequential: per person
-        px, py = pr * bw, pr * bh
-        bx0, by0 = int(max(x0, b[0] - px)) - x0, int(max(y0, b[1] - py)) - y0
-        bx1, by1 = int(min(x1, b[2] + px)) - x0, int(min(y1, b[3] + py)) - y0
-        if bx1 > bx0 and by1 > by0:
-            keep[by0:by1, bx0:bx1] = 1.0
-    if keep.any():
-        gw, gh = own_grow * (own[2] - own[0]), 0.5 * own_grow * (own[3] - own[1])
-        ox0, oy0 = int(max(x0, own[0] - gw)) - x0, int(max(y0, own[1] - gh)) - y0
-        ox1, oy1 = int(min(x1, own[2] + gw)) - x0, int(min(y1, own[3] + gh)) - y0
-        if ox1 > ox0 and oy1 > oy0:
-            keep[oy0:oy1, ox0:ox1] = 0.0
-        k = max(1, f // 2)                      # soften the protected edges a little
-        from numpy.lib.stride_tricks import sliding_window_view as swv
-        pad = np.pad(keep, k, mode="edge")
-        keep = swv(pad, (2 * k + 1, 2 * k + 1)).mean(axis=(-1, -2)).astype(np.float32)
-        a *= (1.0 - keep)
-    return a
+_CN_COUNT = "零一二三四五六七八九十"
 
 
-def paste(full, patch, crop, alpha):
-    import numpy as np
-    x0, y0, x1, y1 = crop
-    reg = full[y0:y1, x0:x1].astype(np.float32)
-    full[y0:y1, x0:x1] = np.clip(patch * alpha[..., None] + reg * (1 - alpha[..., None]), 0, 255).astype(np.uint8)
-    return full
+def swap_sentence(pairs, n_people) -> str:
+    """the user's plain request (21:32 wording) for the enhancer: pairs [(place from the left in this keyframe,
+    picture number)], n_people in the keyframe.  Everybody recast: '把图1里从左到右的三个人，替换成图3、图4、图2里的人' -
+    the pictures in the order the people stand now; only some: '从左数第2个人替换成图2里的人' + the others kept."""
+    pairs = sorted(pairs)
+    pics = "、".join(f"图{i}" for i in sorted(i for _, i in pairs))
+    if [r for r, _ in pairs] == list(range(1, n_people + 1)):
+        cnt = _CN_COUNT[n_people] if n_people < len(_CN_COUNT) else str(n_people)
+        head = (f"把图1里从左到右的{cnt}个人，替换成" + "、".join(f"图{i}" for _, i in pairs) + "里的人，")
+    else:
+        head = ("把图1里" + "，".join(f"从左数第{r}个人替换成图{i}里的人" for r, i in pairs) + "，图1里其他的人保持不变，")
+    return head + SWAP_KEEP.format(pics=pics)
 
 
-# ---------------------------------------------------------------------------------------------------- plan
+def parse_redo(text, n):
+    """'2' / '2,4' / '2 4' / '第2张' -> the keyframe numbers (1..n) to make again; empty -> None (all of them)"""
+    nums = [int(x) for x in re.findall(r"\d+", str(text or ""))]
+    sel = sorted({k for k in nums if 1 <= k <= n})
+    if nums and not sel:
+        raise KeyframeError(f"{TAG} redo: keyframes are numbered 1 to {n}. 重做的编号是 1 到 {n}。")
+    return sel or None
+
+
+def parse_prompts(text, n):
+    """the AI's answer -> {keyframe number: prompt}: a JSON object {"1": "...", ...} (or {"prompts": {...}}), or
+    lines '#1: ...' / '1: ...' (a prompt may run over several lines until the next number)"""
+    import json
+    t = str(text or "").strip()
+    if not t:
+        return {}
+    out = {}
+    try:
+        d = json.loads(t)
+        if isinstance(d, dict) and isinstance(d.get("prompts"), (dict, list)):
+            d = d["prompts"]
+        if isinstance(d, list):
+            d = {str(i + 1): v for i, v in enumerate(d)}
+        for k, v in d.items():
+            m = re.search(r"\d+", str(k))
+            if m and isinstance(v, str) and v.strip():
+                out[int(m.group())] = v.strip()
+    except ValueError:
+        cur = None
+        for line in t.splitlines():
+            m = re.match(r"^\s*#?\s*(\d+)\s*[:：.)]\s*(.*)$", line)
+            if m:
+                cur = int(m.group(1))
+                out[cur] = m.group(2).strip()
+            elif cur is not None and line.strip():
+                out[cur] = (out[cur] + " " + line.strip()).strip()
+    bad = [k for k in out if not 1 <= k <= n]
+    if bad:
+        raise KeyframeError(f"{TAG} prompts: keyframes are numbered 1 to {n}, got {bad}. 提示词编号应为 1 到 {n}。")
+    return {k: v for k, v in out.items() if v}
+
+
+AI_README = """# H3MD keyframe package - write the H3 Image prompts
+
+You get this package from the H3MD Keyframe Export node. Write one MiniMax H3 Image edit prompt per keyframe, so
+that the people in each keyframe are replaced by the character pictures and nothing else changes.
+
+## 1. Check the package first
+Read request.json. The package must contain: request.json, keyframe_1.png ... keyframe_N.png (one per entry in
+"keyframes"), every character_picture_*.png named in "pictures", and per keyframe a "sentence" and for every picture
+"replaces_person_from_left". "people_in_frame" must match the people you see in the keyframe.
+If something is missing or does not match (a file, the number of people, a person who is not there), stop and tell
+the user exactly what is missing and how to fix it (run Export again, ...). Do not guess.
+
+## 1b. The characters (request.json "characters")
+Every character picture has a "description" - often empty. Where it is empty, YOU describe the person from the
+picture. Before you write any prompt, check what the keyframes need of each character against what the picture
+shows: when a keyframe shows a part the picture does not (the legs and shoes of a half-body picture, the back, a
+hat or bag hidden in the picture), ASK THE USER what the character wears there and wait for the answer - never
+invent it. One question for all characters at once ("Picture 2 shows her only to the waist: what trousers / skirt
+and shoes does she wear?"). A description the user already wrote is right: use it and add only what it lacks.
+Then fix ONE sentence per character, head to toe (face, hair, every garment, shoes, what they do not have - bare
+hands, no hat): it goes into the answer as "characters" and into every keyframe prompt unchanged.
+
+## 2. What the edit model gets
+For keyframe k: <Picture 1> = keyframe_k.png (the original video frame), <Picture 2>, <Picture 3>, ... = the
+character pictures listed for that keyframe in "pictures", in that order. People are counted from the left as they
+stand in THIS keyframe (after a place change the order differs from the start - use replaces_person_from_left).
+The picture numbers change from keyframe to keyframe - take them from that keyframe's "pictures".
+"people_from_left" gives every person's box in % of the frame (left, top, right, bottom), the edges that cut them
+and their role ("picture N" or "stays"): confirm every left/right, front/back and "peeks out on which side" by these
+numbers before you write it.
+H3 Image draws what the text says: the prompt decides the result. Read the keyframe carefully.
+
+## 3. Write each prompt (English, the structure of the official H3 Image prompt enhancer)
+  a. Define every character picture as a Subject with its sentence from 1b (positive and complete, head to toe,
+     incl. what they do NOT have - bare hands, no gloves). Never describe or mention the clothes of the people in
+     <Picture 1>; never write what to remove. The same sentence for a character in every keyframe (leave out only
+     the parts the frame cuts off, see c).
+  b. Define <Picture 1> as a Subject that is partially preserved: background, floor, lighting, camera angle,
+     framing and crop, the places, spacing and sizes of the people, who is in front, the overlaps.
+  c. Body parts the frame cuts off are not mentioned (feet outside the picture: no shoes for that person) - else
+     the model pulls the camera back. Say where the frame cuts each person. A person mostly outside the frame or
+     almost hidden behind someone: write only the part that shows and that the rest is outside / hidden by whom,
+     else the model draws all of him.
+  d. For every replaced person, which Subject takes which place, and every one of these, read from <Picture 1>:
+     - body orientation and how far it is turned; head turn and tilt (towards which side of the image), up/down;
+       a clear tilt or lean must be written plainly, else it comes out straight;
+     - EACH hand separately: where (above the head, beside the head, shoulder, chest, waist, thigh, behind the
+       back, on someone), shape (fist, open, fingers spread or together, pointing, palms together, on the hip,
+       hidden), which way the palm faces, the arm (straight or bent, up, forward, sideways);
+     - legs: how much the knees bend, squat depth, which leg carries the weight, how far apart the feet are, where
+       the toes point. Describe the still pose you see; never write a motion you guess from one frame (walking,
+       stepping, jumping);
+     - expression, eyes and mouth (open, shouting, closed smile, pout);
+     - place and size in the frame; who is in front of / behind whom, which part of whom is hidden, who leans
+       towards whom, standing apart or pressed together.
+     Left and right always mean the sides of the image ("the hand on the left side of the image"), never the
+     person's own left/right.
+  e. People who are NOT replaced ("keeps_people_from_left" in request.json - any positions, different per keyframe,
+     never assume they are the last ones): say how many people the frame holds and which positions stay, describe every
+     kept person positively and completely as they look in <Picture 1> (face, hair, every garment, shoes, place, pose)
+     and that they stay themselves - else H3 Image redraws them as copies of the new characters.
+Write general rules for what to look at; describe only what this keyframe shows.
+
+## 4. Check before you answer
+Put each prompt next to its keyframe and check every person, item by item (orientation, both hands, legs, head,
+expression, mouth, front/back, overlap, crop). The result must not differ visibly from the keyframe: a keyframe that
+starts wrong (one fist instead of two, the wrong turn, the wrong overlap) cannot be pulled back later. If you are not
+sure about something, say so instead of guessing.
+
+## 5. Answer (the user imports it with one button - no copy and paste)
+Best: send back this package as the file  {answer_file}  : the same zip, every file unchanged, with one file
+added at the top: prompts.json = {{"package": "{package}", "characters": {{"2": "sentence for
+character_picture_2", ...}}, "prompts": {{"1": "prompt for keyframe 1", "2": "..."}}}}.
+"characters" uses the numbers of the character_picture_N.png files (not the <Picture N> numbers of a keyframe) and
+holds your sentence from 1b for every character; the Director's video prompt uses them.
+If you cannot make files: give the user the text of that prompts.json and tell them to save it as
+{answer_json}  next to the export package.
+Only redoing some keyframes: put only those numbers in "prompts" (keep "characters"); the user picks the same
+numbers on the Redo node.
+The folder _h3md/ is for the nodes - leave it as it is.
+"""
+
+
+def stamp_name(folder, name, kind, ext, today=None):
+    """0.5.91 (user 22:52): '<name>_<kind>_<YYYYMMDD>_<NNN><ext>' in `folder`, NNN = next free number of that day
+    for that name and kind (any extension), so a package is never overwritten and the export / import / plan of one
+    run share date and number"""
+    import datetime
+    import os
+    day = today or datetime.date.today().strftime("%Y%m%d")
+    pre = f"{name}_{kind}_{day}_"
+    used = []
+    if os.path.isdir(folder):
+        for f in os.listdir(folder):
+            m = re.match(re.escape(pre) + r"(\d{3})(?!\d)", f)
+            if m:
+                used.append(int(m.group(1)))
+    return os.path.join(folder, f"{pre}{max(used, default=0) + 1:03d}{ext}")
+
+
+def crop_to_aspect(w, h, tw, th):
+    """the centred box (x0, y0, x1, y1) of a w x h picture with the aspect of tw x th (H3 Image's canvas is rounded
+    to 32 px: crop the few extra pixels, then scale, instead of stretching)"""
+    if w * th > tw * h:                      # too wide
+        nw = int(round(h * tw / th))
+        x0 = (w - nw) // 2
+        return (x0, 0, x0 + nw, h)
+    nh = int(round(w * th / tw))
+    y0 = (h - nh) // 2
+    return (0, y0, w, y0 + nh)
+
+
+# 0.5.91 (user 23:57): a multi-swap plan's global prompt = the trigger words of the LMS LoRA (the only LoRA the
+# multi-person swap style switches on; Civitai "LMS - A Little More Sharpness", trainedWords)
+LMS_TRIGGER = ("Enhance this video with sharp, crisp details while preserving a natural photorealistic "
+               "appearance.")
+
+
 def plan_length(n_frames: int) -> int:
     """largest 5 + 17n not past the source's end (the Director would round UP and run past it)"""
     if n_frames < MIN_FRAMES:
@@ -475,11 +1599,23 @@ def ordinal(k: int) -> str:
     return ORDINAL[k - 1] if 1 <= k <= len(ORDINAL) else f"number {k}"
 
 
-def swap_prompt(length, chosen, descs, n_people, changes, names, looks=None):
-    """skill 12d step 6 (Remake wording).  chosen [(picture, left, id)], descs {picture: text}, names {id: label} in
-    left-to-right order, looks {left number: what that person looks like at the start} (optional)."""
+def swap_prompt(length, chosen, descs, n_people, changes, names, looks=None, people=None):
+    """skill 12d step 6 (Remake wording).  chosen [(picture, person number, id)], descs {picture: text}, names
+    {id: label} in cast order, looks {person number: what that person looks like} (optional), people = cast(...)
+    (0.5.91: people are named by when and where they first appear, not by a place at the start)."""
     looks = looks or {}
+    people = people or []
+
+    def first_seen(k):
+        if 1 <= k <= len(people):
+            a = people[k - 1]
+            return f"performer #{k}, who first appears at {a['first']:.1f} s on the {a['side']} of the frame"
+        return f"performer #{k}"
     sub = {pid: f"<Subject {n}>" for n, (_, _, pid) in enumerate(chosen, 1)}
+
+    def desc(p):   # 0.5.91 (16:53): no description given - the AI's answer fills it in (fill_characters)
+        d = (descs.get(p) or "").strip().rstrip(".")
+        return d or DESC_SLOT % p
 
     def who(pid):
         return sub.get(pid) or names.get(pid) or "another performer"
@@ -493,8 +1629,7 @@ def swap_prompt(length, chosen, descs, n_people, changes, names, looks=None):
              "performers change places."]
     for n, (p, k, pid) in enumerate(chosen, 1):
         orig = f", {looks[k]}" if looks.get(k) else ""
-        lines.append(f"<Subject {n}> is {descs[p].rstrip('.')}; this subject replaces the {ordinal(k)} performer "
-                     f"counted from the left at the start{orig}.")
+        lines.append(f"<Subject {n}> is {desc(p)}; this subject replaces {first_seen(k)}{orig}.")
     lines.append("In every frame each Subject has the face, hair and clothes described here, never those of the "
                  "performer they replace.")
     rest = n_people - len(chosen)
@@ -502,11 +1637,11 @@ def swap_prompt(length, chosen, descs, n_people, changes, names, looks=None):
     kept_s = (", " + " and ".join(kept) + "," if kept and len(kept) == rest else "")
     keep = (f" The other {rest} performer{'s' if rest != 1 else ''}{kept_s} stay themselves, with their own faces, "
             "hair and outfits from <Video 1> in every frame.") if rest > 0 else ""
-    mp = ", ".join(f"the {ordinal(k)} becomes <Subject {n}>" for n, (_, k, _) in enumerate(chosen, 1))
+    mp = ", ".join(f"#{k} becomes <Subject {n}>" for n, (_, k, _) in enumerate(chosen, 1))
     lines += ["", "summary:",
               f"The target video is an edited version of <Video 1>. [video editing + reference generation + audio "
-              f"reuse] Recast {len(chosen)} of the {n_people} performers with a fixed mapping the whole time, counted "
-              f"from left to right at the start: {mp}.{keep} Every recast person keeps the same replacement through "
+              f"reuse] Recast {len(chosen)} of the {n_people} performers with a fixed mapping the whole time, numbered "
+              f"in order of first appearance: {mp}.{keep} Every recast person keeps the same replacement through "
               "place changes, in the same position, blocking and occlusion order as their performer in every frame; "
               "the motion, timing, performance, singing and lip and jaw movement stay as in <Video 1>.",
               "", "retention_analysis:",
@@ -515,7 +1650,7 @@ def swap_prompt(length, chosen, descs, n_people, changes, names, looks=None):
                                                            else "") +
               "; the face, hair and outfit of the recast performers are not carried over."]
     for n, (p, _, _) in enumerate(chosen, 1):
-        lines.append(f"<Subject {n}>: fully_preserved - {descs[p].rstrip('.')}, identical in every moment.")
+        lines.append(f"<Subject {n}>: fully_preserved - {desc(p)}, identical in every moment.")
     lines.append("Source audio: fully_copy - the original soundtrack and its synchronisation are kept.")
     order = ", ".join(who(pid) for pid in names)
     def move(pr):
@@ -526,7 +1661,7 @@ def swap_prompt(length, chosen, descs, n_people, changes, names, looks=None):
     lines += ["", "detailed_description:",
               "A natural, clean look. [Shot 1] One continuous take matching the framing and camera of <Video 1>. "
               "The setting is the one in <Video 1>, unchanged. Each recast person moves exactly like their performer "
-              f"in <Video 1>, with the same lip movement. At the start, from left to right: {order}.{moves} Each "
+              f"in <Video 1>, with the same lip movement. The performers, in order of first appearance: {order}.{moves} Each "
               "recast subject keeps their own face, hair and clothes the whole time, as in the redrawn frames. Their "
               "hands have five natural fingers each.",
               "", "overall_soundscape:", "Keep the source soundtrack; do not invent dialogue.",
@@ -535,11 +1670,13 @@ def swap_prompt(length, chosen, descs, n_people, changes, names, looks=None):
 
 
 def build_plan(video_file, duration_s, has_audio, size, length, keyframes, prompt, name):
-    """keyframes [(media id, file, seconds)] -> the H3MD plan dict (swapEngine remake, one shot, autosplit)."""
+    """keyframes [(media id, file, seconds[, replaced people shown])] -> the H3MD plan dict (swapEngine remake, one
+    shot, autosplit)."""
     w, h = size
-    return {"version": 1, "fps": FPS, "width": w, "height": h, "name": name, "globalPrompt": "",
+    keyframes = list(keyframes)
+    return {"version": 1, "fps": FPS, "width": w, "height": h, "name": name, "globalPrompt": LMS_TRIGGER,
             "globalMode": "prepend", "refVideoHeight": "auto", "autoSplit": True, "swapEngine": "remake",
-            "media": {"images": [{"id": i, "file": f} for i, f, _ in keyframes],
+            "media": {"images": [{"id": kf[0], "file": kf[1]} for kf in keyframes],
                       "videos": [{"id": "src", "file": video_file, "duration": round(float(duration_s), 3),
                                   "hasAudio": bool(has_audio)}],
                       "audios": [], "refmods": []},
@@ -548,5 +1685,8 @@ def build_plan(video_file, duration_s, has_audio, size, length, keyframes, promp
                                       "useDuration": round(length / FPS, 4)}],
                           "audios": [], "audioMode": "locked" if has_audio else "none",
                           **({"locked": {"source": "video:src", "offset": 0}} if has_audio else {}),
-                          "keyframes": [{"image": i, "at": round(float(t), 4)} for i, _, t in keyframes],
+                          "keyframes": [dict({"image": kf[0], "at": round(float(kf[2]), 4)},
+                                             **({"people": list(kf[3])} if len(kf) > 3 else {}),
+                                             **({"backup": True} if len(kf) > 4 and kf[4] else {}))
+                                        for kf in keyframes],
                           "prompt": prompt}]}

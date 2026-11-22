@@ -119,23 +119,35 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
 
 ## 多人换人(0.5.0,Viggle Remake)
 
-把真人视频里的几个人换成你自己的角色(例如"图1换左二"),动作、镜头、口型和原声都保留。导演台低清这一遍用 Viggle Remake
+把真人视频里的几个人换成你自己的角色(图1 换第一个出场的人,图2 换第二个……),动作、镜头、口型和原声都保留。导演台低清这一遍用 Viggle Remake
 的换人模型,高清这一遍照常用 H3MD 自己的。
 
-1. **关键帧 + 计划包,本地一次跑完**:打开 `example_workflows/Qwen Image 2.1 Keyframe.json`。把原片拖进「加载视频」节点
-   (只换其中一段就在 Prepare 填 `start_s` 起始秒、`end_s` 结束秒,连同原声一起截出来),接上角色图,写"图1换左二"(人按开头第一帧清楚的画面从左到右编号,看「认人表」核对),
-   每张图写一行外貌描述:人种、年龄、长相、发型、每件衣服,**还要写鞋和腿(光腿 / 袜子),以及没有什么**
-   (如 "bare legs and black stiletto heels; no socks, no boots, no apron"),否则修图会照抄原角色的鞋袜。
-   **H3MD Keyframe 1: Prepare 准备关键帧** 用 ComfyUI 自带的 SAM3.1 跟踪每个人,找出原片的剪辑点,挑关键帧时刻:
-   **每个镜头至少一张**(0.5.8),相邻不超过约 5 秒,避开人贴在一起。
-   **H3MD Keyframe 1b: Recast 串行换人**(0.5.7)用 Qwen Image 2.1 编辑 + 2 步 LoRA 重画,**一个人一个人换**:后一个人
-   从已经换好前面人的帧上裁,原角色不会被贴回去。新人物周围还残留原角色的假发、耳朵、尾巴、蓬裙时,把 `mask_grow`
-   (默认 0.25)调到 0.3-0.35。**H3MD Keyframe 2: Assemble 打包计划** 写 Remake 计划,计划包存到 `output/H3MD_plans/`。
-   看「关键帧总览」,姿势或手不对就换种子重跑。也可以不用这个工作流,让智能体画关键帧、写计划(`skills/h3md-prompt`
-   第 12d 节)。Remake 很听关键帧的话,关键帧画得好不好直接决定成片。
+1. **关键帧 + 计划包**(0.6.0):打开 `example_workflows/H3MD_Keyframe_MultiSwap_0.6.0.json`,一个工作流分两组,
+   操作都是点按钮。
+   - **第 1 组 Keyframe Export(导出)**:原片拖进 *Source video*(只换其中一段就在 Prepare 填 `start_s` / `end_s`,连同
+     原声一起截出来),角色图放 *Picture 1/2/3*,*mapping* 留空:图1 给片子里第一个出场的人,图2 给第二个……
+     (同时出场的从左往右),给了谁就一直是谁,图用完以后出场的人保持原样。跑完后 Prepare 下面出现**演员表连线面板**:
+     一边是图,一边是编号的人,中间的线是机器猜的。从图拖线到人就改,点线就删。**一张图可以连多个号**:追踪把同一个人
+     切成两个号(剪辑点后、转身、交错)时,从同一张图再拖一根线,两个号合成一个人;没连线的号保持原样。再跑一次,跟踪
+     结果直接复用,几秒钟。描述可以不填:AI 会照着图描述每个角色,图上看不到的(半身图的裤子和鞋)会先问你。
+     **H3MD Keyframe Prepare** 用 SAM3.1 跟踪每个人、找剪辑点、挑关键帧时刻(每个镜头至少一张,每个要换的人至少每 3 秒
+     一张;不挑修图画不对的特写,也不挑人太暗看不清的帧;黑场、切镜头、转圈后跟丢的人会认回来),关键帧间隔对 16G
+     显卡太长的地方再加**备用关键帧**(大显卡不用)。**H3MD Keyframe Export** 写出
+     `output/H3MD_keyframes/<名字>_keyframe_export_<日期>_<序号>.zip`(不会覆盖旧包),并预览这次是哪几张关键帧。
+   - **把 zip 交给 AI**(Claude、ChatGPT、Gemini 等看图能力强的),配上 skill `skills/h3md-keyframe`(包里也带了一份
+     简版说明)。它逐张读关键帧:谁去哪、两只手、腿、头、前后遮挡、画面裁切,回一个
+     `<名字>_keyframe_import_<日期>_<序号>.h3kf`(不能生成文件的 AI 就回 `.json`)。成片好坏就看这一步读得准不准:
+     MiniMax H3 Image 是照着文字画的。
+   - **第 2 组 Keyframe Import(导入出图)**(旁路第 1 组):在 H3MD Keyframe Import 上点 **Import package** 选 AI 回的
+     文件。**H3MD Keyframe Recast** 用 MiniMax H3 Image(int8、4 MP、调过的 6 步 sigmas;5090 上每张约 25 秒)重画每张
+     关键帧,**Compare** 里原图 | 新图并排、带编号。哪张明显不对:把编号和哪里不对告诉 AI,导入它的新回包,在
+     **H3MD Keyframe Redo** 上点那张再运行,只重做那一张。**H3MD Keyframe Assemble** 写出
+     `output/H3MD_plans/<名字>_multiswap_plan_<日期>_<序号>.zip`,全局提示词是 LMS 的触发词。
+   Remake 很听关键帧的话:关键帧和原片不能有明显偏差(人、位置、衣服、身体朝向、两只手、前后遮挡);小差别 Remake 会
+   按原片拉回来。
 2. **计划**:在导演台(本地或 RunningHub)导入这个 zip。
 3. **运行**:打开 `example_workflows/H3MD Director Remake.json`(总控台风格 **多人换人**,Loop 的 `remake_model`
-   已接好 Remake 模型)。先只跑第一段低清,满意了再跑全片。
+   已接好 Remake 模型;这个风格只开 LMS 一个 LoRA)。先用试镜 1 跑第一段,满意了再跑全片。
    **Remake 模型和原来的主模型都要开着,不冲突**:低清这一遍用 Remake 模型(人在这一遍换掉),高清这一遍用原来的
    H3 主模型(只补细节)。两个轮流用显卡,关掉任何一个都会出错。清爽版和完整版里也有同一个「Remake model 换人模型」节点,
    已接到 Loop:总控台选 **多人互换** 风格会自动打开它,选其他风格自动关闭(平时不会加载这个模型)。
@@ -144,7 +156,18 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
 `models/diffusion_models`),都在 Hugging Face [Viggle/Viggle-Remake](https://huggingface.co/Viggle/Viggle-Remake)(许可见
 其模型卡)。限制:成片 1664x960 或 960x1664(或 2560x1472),总控台填了别的尺寸导演台会自动改过来;每段 90-345 帧(自动分段会处理);每段最多 4 张关键帧;
 这类计划不能开无接缝长视频。被换的人和角色的发型长短、体型、性别接近时效果最好;差很多时(如男换女、长短发差很多)
-不完美,但能用。关键帧工作流按位置跟人:人走出画面再回来可能被当成新的人(info 里会提醒)。感谢 Viggle 开源 Remake。
+不完美,但能用。感谢 Viggle 开源 Remake。
+
+**能做到什么、做不到什么。** 关键帧工作流要在每一刻分清谁是谁(追踪人 + 认脸),所以原片决定了效果的上限:
+- **效果好:** 固定机位或镜头比较稳的视频(舞台、舞蹈或乐队表演、合唱),人可以走位、短暂被挡住,但很快会再露出脸。
+  这类镜头之间有剪辑切换也没问题。
+- **不完美,要看一眼演员表和关键帧,有时会换错人:** 人很多、贴着镜头交叉换位、贴脸大特写、不停有人走进走出。追踪可能把
+  一个人拆成两个号,或者一时跟丢;Prepare 不会拿这些帧当关键帧,但仍可能留下配错的人。
+- **不支持:** 后期剪辑加了特效的 MV,例如上一帧到下一帧人突然换了衣服、一张脸渐变成另一个人的脸、把两个人叠在一起的
+  转场。这种原片的那一帧本身就同时是两个人,关键帧没法定义"这是谁"。
+- **显卡:至少 16G 显存。** 导演台按你的显卡把视频切成几段,每段开头都对准关键帧;Prepare 会补备用关键帧(对比图上标
+  "(spare)"),保证 16G 显卡每个切点都有关键帧,大显卡用不上就不用。16G 以下不支持。全是特写的一段里本来就做不了
+  关键帧,如果某一段必须从那里开始,导演台会在运行说明里写出是第几秒。
 
 ## 反馈问题
 
@@ -190,7 +213,9 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
 * `example_plans/h3md_silver_warrior_1min_v3.zip`——可直接导入的 **1 分钟打斗**示范计划（9 个镜头，1280×704，不带素材）：
   导演台点 **Import plan…**，选这个 zip，选"只导入计划"。配合总控台"高动态"风格（每条线只开一个 weapon LoRA）。
 * `H3MD Director.json`（完整版）——样片用的完整设置，多了修脸、RIFE 补帧到 48 fps、多 1 步精修和几个方便的小工具。
-* `H3MD Director Remake.json` + `Qwen Image 2.1 Keyframe.json`——多人换人(0.5.0):后者出关键帧和计划包,前者出片(见"多人换人")。
+* `H3MD Director Remake.json` + `H3MD_Keyframe_MultiSwap_0.6.0.json`:多人换人。后一个做关键帧(配 AI,见「多人换人」)和计划包,前一个跑视频。
+* `example_plans/H3MD_multiswap_3dancers_0.6.0_plan.zip`:做好的**多人换人**计划包(三人舞蹈,28.5 秒,两次换位、一次熄灯,
+  原片和 14 张换好的关键帧都在里面):打开 `H3MD Director Remake.json`,导演台点 **Import plan…** 选这个 zip,直接跑。
 
 | 节点包 | 在工作流里做什么 | 要不要装 | 不装会怎样 |
 |---|---|---|---|

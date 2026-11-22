@@ -40,7 +40,7 @@ def shipped_files():
     rules = [ln.strip() for ln in open(os.path.join(ROOT, ".comfyignore"), encoding="utf-8")
              if ln.strip() and not ln.startswith("#")]
     files = [f for f in subprocess.run(["git", "ls-files", "-z"], cwd=ROOT, capture_output=True, text=True,
-                                       check=True).stdout.split("\0") if f]
+                                       encoding="utf-8", check=True).stdout.split("\0") if f]
     return [f for f in files if not _ignored(f, rules) and f.endswith(CODE_EXT)]
 
 

@@ -184,15 +184,17 @@ def test_remake_style_panel_button():
     assert types["required"]["style"][1]["default"] == "balanced"
     assert types["required"]["style"][0] == CP.STYLES
     assert CP.applies_lora_presets("balanced") and CP.applies_lora_presets("high_motion") and CP.applies_lora_presets("motion_copy")
-    assert CP.applies_lora_presets("remake") is False
-    # remake preset exists for API/Reset but adds no remake LoRA row
+    assert CP.applies_lora_presets("remake")       # 0.5.91 (user 23:57): multi-person swap = LMS only
+    assert [r["key"] for r in CP.preset_rows("remake", "low") if r["on"]] == []
+    assert [(r["key"], r["strength"]) for r in CP.preset_rows("remake", "high") if r["on"]] == [("lms", 0.2)]
+    # remake preset adds no remake LoRA row
     for which in ("low", "high"):
         keys = [r["key"] for r in CP.preset_rows("remake", which)]
         assert "remake" not in keys
         assert all(r["lora"] != "viggle_remake_swap_comfyui.safetensors" for r in CP.preset_rows("remake", which))
     high_motion_low = CP.apply_style(CP.preset_rows("high_motion", "low"), "high_motion", "low")
-    # applying remake presets would change strengths, but the UI must not do that when entering remake
-    assert CP.applies_lora_presets("remake") is False
+    after = CP.apply_style(high_motion_low, "remake", "low")       # from high motion: weapon switched off
+    assert not any(r["on"] for r in after)
     # plan switch
     plan = {"windowMode": {"length": 243}, "segments": [{"length": 243, "keyframes": [{"image": "kf1", "at": 0}]}]}
     CP.apply_remake_for_style(plan, "remake")

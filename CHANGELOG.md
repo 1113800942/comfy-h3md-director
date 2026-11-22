@@ -2,6 +2,77 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.6.0] - 2026-11-22
+
+### Added / 新增
+- Multi-person swap keyframes, new flow: **one workflow, two groups, all by buttons** (`example_workflows/H3MD_Keyframe_MultiSwap_0.6.0.json`).
+  1. **Keyframe Export**: Prepare + the new **H3MD Keyframe Export** write `output/H3MD_keyframes/<name>_keyframe_export_<date>_<no>.zip` (keyframes, character pictures, who replaces whom, a README for the AI) and preview its keyframes.
+  2. An AI (Claude, ChatGPT, Gemini ...) reads the keyframes with the new skill **`skills/h3md-keyframe`** and answers with `<name>_keyframe_import_<date>_<no>.h3kf` (or a `.json`): one MiniMax H3 Image prompt per keyframe.
+  3. **Keyframe Import**: the new **H3MD Keyframe Import** (Import package button; group 1 can stay bypassed) -> **H3MD Keyframe Recast** (MiniMax H3 Image, int8, 4 MP, the tuned 6-step sigmas, ~25 s a keyframe; shows original | new, numbered) -> the new **H3MD Keyframe Redo** (one button per keyframe: only the chosen ones are made again) -> **H3MD Keyframe Assemble** (`output/H3MD_plans/<name>_multiswap_plan_<date>_<no>.zip`).
+  Packages get a date and a number and are never overwritten. Reading the keyframes is the slow and decisive part (H3 Image draws what the text says), so it is done once by the AI; the skill says what to read and get right for every person (orientation, each hand, legs as a still pose, head, expression, place, size, overlaps, crop; image left/right) and how to check before answering.
+  多人换人关键帧新流程:**一个工作流两组,全用按钮**。第 1 组导出关键帧包,AI 按新 skill `skills/h3md-keyframe` 读图写 H3 Image 提示词回包(.h3kf / .json),第 2 组按钮导入、出图(每张约 25 秒)、原图 | 新图对比、单张重做按钮、打计划包。包名带日期和序号,不覆盖。
+- Example: `example_plans/H3MD_multiswap_3dancers_0.6.0_plan.zip` - the three-dancer swap (28.5 s, three performers, two place changes, a blackout): the source clip, the 14 recast keyframes (2 of them spares) and the prompt - import it in the Director and run.
+  示例:三人舞蹈换人(28.5 秒,三个人、两次换位、一次熄灯)的计划包:原片、14 张换好的关键帧(其中 2 张备用)和提示词,导演台导入就能跑。
+- README: what the multi-person swap can and cannot do - works well with a fixed or steady camera; many people crossing close to the lens, faces against the lens and people walking in and out are not perfect (a person can get the wrong picture); music videos with edited-in morph effects (clothes changing between two frames, a face morphing into another person) are not supported.
+  说明里写清多人换人的上限:固定机位、镜头稳的效果好;人多贴脸交叉换位、频繁进出不完美,可能换错;后期加了变形特效(一帧换衣服、脸渐变换人)的 MV 不支持。
+
+### Changed / 变更
+- Multi-person swap seams: the Director cuts a long swap shot **on its keyframes** - every part's new frames begin with a keyframe (within 0.7 s) on any GPU, instead of equal parts that could start up to 3 s before the next keyframe (the source's gloves came back right after a seam). Keyframe Prepare adds **spare keyframes** (marked `"backup": true` in the plan, "(spare)" on the sheets) only where two keyframes are further apart than a 16 GB GPU's part can reach; a bigger GPU ignores them, a smaller one takes them exactly where its cuts need them. A part start that still has no keyframe is named in the run notes with its time. Remake parts are capped at 345 frames (a 48 GB GPU planned 379 and would have stopped).
+  多人换人接缝：导演台按关键帧切段，任何显卡上每一段的新画面开头都有关键帧（0.7 秒内），不再平均切（之前接缝后最多 3 秒没有关键帧，原片的手套漏回来）。Prepare 只在两张关键帧隔得比 16G 显卡一段还长的地方加备用关键帧（计划里 `"backup": true`，对比图标 "(spare)"）；大显卡不用，小显卡只在它的切点需要的地方用。仍然缺关键帧的段开头会在运行说明里写出时间。Remake 每段最多 345 帧（48G 显卡原来会切出 379 帧而报错）。
+- Keyframe Prepare, cast panel: **one picture can take several numbers**. When the tracker splits one person into two
+  numbers (after a cut, a turn, a crossing), drag a second line from the same picture to the other number: both become
+  one person for the keyframes and the plan ("图1换2号" + "图1换4号"). Numbers without a line stay themselves (passers-by);
+  a number still goes to one picture only. The user's lines are final.
+  演员表一张图可以连多个号：追踪把同一个人切成两个号（剪辑点后、转身、交错）时，从同一张图再拖一根线，两个号合成一个人。
+  没连线的号保持原样（路人）；一个号仍然只能连一张图。用户连的线说了算。
+- Keyframe Prepare: a frame where the people are **too dark to read** (a blackout, a strobe) is never a keyframe - the
+  nearest lit frame is taken. Dark = the lit parts of the people (90th percentile of the brightness in their boxes)
+  below 40 % of the clip's own usual light, so a clip that is dark all through loses nothing. (A three-dancer clip had
+  a keyframe on the 0.2 s blackout at 16.83 s; now 17.17 s.)
+  人身上太暗看不清的帧（熄灯、频闪）不再当关键帧，取前后最近的亮帧。和这条片子自己的正常亮度比（低于 4 成算暗），
+  整片都偏暗的视频不受影响。
+- Keyframe Prepare: *descriptions* is optional. Left empty, the AI that writes the keyframe prompts describes every character from its picture, asks the user what the picture does not show (a half-body picture: trousers and shoes) and returns one sentence per character as "characters" in its answer; H3MD Keyframe Import puts them into the Director's video prompt (kept next to the export package for later redo answers). request.json lists the characters once; skill and package README updated.
+  描述框可以不填：写关键帧提示词的 AI 按角色图自己描述，图上看不到的（半身照的裤子、鞋）先问用户；它在回包里给每个角色一句描述（characters），Import 填进导演台的视频提示词。
+- Keyframe Prepare: **who is who, redone** (K.identify, after Zhang et al., "Tracking Persons-of-Interest via Unsupervised Representation Adaptation"). Every tracker number is cut at the shot cuts and where the person's look changes, and the pieces are grouped into people by face, hair colour and clothes colour - each weighted by how well it tells THIS clip's people apart, learned from the clip itself (two halves of one track = one person, two tracks on screen together = two people). Pieces seen together are never one person; when two people fit about equally well nothing is guessed; the number of people is the number on screen together. An AI-generated three-woman dance whose faces ArcFace could not tell apart had the numbers jump between two women at the cuts (one woman shown twice on the cast panel, the other half 'kept'); now each is one number for the whole clip, and five men in the same white clothes are still told apart by their faces. A second box the tracker put on the same person is merged. Replaces the 0.5.9 re-identification and the face clusters below.
+  演员表"一个人出现两次"：追踪器在切镜头时把号交给了另一个人。现在每个号在镜头切换和长相变化处切开，再按脸、发色、衣服颜色归人，各项的权重由这段视频自己算（同一段前后两半是同一人，同时出现的是不同的人），同时出现的绝不归成一个人，分不清就不猜。同一个人身上的重复框也会合并。
+- Keyframe Prepare: identity by face - the faces of every sampled frame are grouped into people, and a track whose face turns into another person's (the tracker passed the number on at a crossing) is cut there; five men in the same white clothes keep one number each. The cast sheet shows each person bright and framed, the others dimmed.
+- Keyframe Prepare: a cast panel on the node after a run - drag a line from a picture to the person it replaces (or click people in order); running again reuses the tracking, so a new choice takes seconds.
+- Multi-person swap keyframes for any GPU: the Director splits a shot by the token budget of the GPU it runs on, so Prepare gives every replaced person on screen a keyframe at least every 3 s (no more thinning to 4), each plan keyframe lists the replaced people it shows, and every Remake part picks the 4 keyframes that show everybody of that part (h3md_remake_engine.pick_keyframes; old plans: 4 spread over the part). The Remake report names people a part cannot show.
+- Keyframe Export: request.json lists every person of a keyframe left to right with the box in % of the frame, the edges that cut them and their role, so the AI can check left/right and front/back by numbers; the h3md-keyframe skill and the package README have the new rules (same character sentence in every keyframe, people mostly outside the frame or almost hidden, clear tilts and leans).
+- Keyframe Prepare: who gets which picture no longer depends on places in one frame. Everyone seen clearly for at least 1 s is numbered in order of first appearance (people who appear together: left to right); with *mapping* left empty, picture 1 goes to person #1, picture 2 to #2 and so on, a person keeps his picture wherever he moves, and people after the last picture stay themselves. *People* is now a cast sheet (each person large, the seconds he is seen, the picture he gets or "kept"); "图1换3号" / "picture 1 -> 3" picks by its numbers. Clips cut from the middle, with people walking in later, work the same way.
+- Keyframe Prepare: people are told apart by their faces too (InsightFace ArcFace, models/insightface antelopev2 / buffalo_l, as ReActor / PuLID use; optional): when both tracks were seen with a face, the face decides who comes back after a cut, else hair / clothes colour as before.
+- H3MD Keyframe Recast no longer reads the keyframes itself (the local prompt enhancer took 55-83 s a keyframe and sometimes answered empty). Its result is cut to the video's aspect before scaling (no stretch).
+  Recast 不再自己看图写提示词(本地反推每张 55-83 秒,偶尔回空);出图先按视频比例裁齐再缩放,不拉伸。
+- Control Panel style 多人互换 switches on only the LMS LoRA (high-res 0.2, nothing on low-res) instead of keeping the previous style's LoRAs; a multi-swap plan's global prompt is the LMS trigger words.
+  总控台「多人互换」只开 LMS(高清 0.2,低清不开),不再沿用上一个风格的 LoRA;多人换人计划的全局提示词是 LMS 触发词。
+- Keyframe node names are English (H3MD Keyframe Prepare / Export / Import / Recast / Redo / Assemble + version). The two older keyframe workflows and the flat prompt-skill files `skills/h3md_director_prompt_skill-cn/en.md` are removed.
+  关键帧节点名改为英文;旧的关键帧工作流和旧的单文件 skill 删除。
+
+### Fixed / 修复
+- Keyframe Prepare: a person whose pieces were grouped together was dropped as a whole when one small piece shared a few
+  frames with someone else (a double box at a crossing) - the centre woman of a dance stayed unswapped from 3.0 to 8.7 s.
+  The pieces of a blocked group now join one by one.
+  认人：一组片段里只要有一小段和别人重叠几帧（交错时的双框），整组都被丢掉——中间那位 3.0 到 8.7 秒没换。现在被挡的组逐段并入。
+- Keyframe Prepare: a person who walked in after the part's keyframes were picked got another character's look in that part (the run used 7.3 s parts, the keyframes were thinned for 10.8 s). A picture written twice in 'mapping' takes the last line; pictures connected but missing from an old 'mapping' text are reported.
+- Keyframe Prepare: a new person walking in (a face unlike everyone missing) no longer warns "a person came back who could be any of ..."; a person showing only as a narrow strip at the frame edge is not recast at that keyframe (a 26 px strip got a character picture).
+- Loop: a trial (试镜) or `segments_to_run` took segments it did not run from the cache even when they had been made for **another plan** (the cache folder is shared by every plan with the same settings; only the frame count was checked). The old take was spliced into the video and used as the tail lock of the re-made segment. Every cached segment now records what it was made from; a segment is kept from the cache only when it matches this plan. Caches written before 0.6.0 are made again once when repairing.
+  Loop:试镜 / 只跑某几段时,没跑的段会从缓存拿,哪怕是**别的计划**做的(缓存文件夹按设置共用,只查了帧数):旧视频被接进成片,还被当成重做那段的锁尾。现在每段缓存记下它是用哪份计划内容做的,对得上才沿用。0.6.0 以前的缓存修补时会重做一次。
+- Director Import plan keeps the global prompt already in the Director when the imported plan has none (it was wiped).
+  导演台导入计划时,计划里没有全局提示词就保留导演台原有的(以前会被清空)。
+- Director: importing a portrait plan while the Control Panel was set to landscape (or the other way) ran at the wrong size. Import plan now sets the Control Panel's width / height to the plan's, and a multi-swap plan run at a Remake size of the other orientation follows the plan (1664x960 -> 960x1664, 2560x1472 -> 1472x2560).
+  导演台:横屏的总控台导入竖屏计划(或反过来)会按错的尺寸跑。现在导入计划时总控台宽高自动改成计划的;多人换人计划遇到另一方向的 Remake 尺寸也跟计划走。
+- Keyframe package: request.json lists per keyframe who stays (`keeps_people_from_left`, any positions, different per keyframe), and the keyframe skill says to describe every kept person too - with only "stays as in Picture 1", H3 Image redrew two kept men as copies of the new characters.
+  关键帧包:request.json 每张写明哪些人保留(`keeps_people_from_left`,任意位置、每张不同),skill 要求保留的人也要描述——只写“保持原样”时 H3 Image 把两个保留的人画成了新角色的复制品。
+- Keyframe Prepare: every replaced person gets at least one large, clear keyframe (at least 0.4 of the frame height, not at a side edge, not mostly overlapped). Without one Remake had no face for that person and drew someone else in the close-ups (a hangar clip: picture 3 was small in one keyframe and only a sliver in the other). The frame where they are largest is added, never dropped by the 4-per-part limit; a person never seen large is named in the warnings.
+  关键帧 Prepare:每个要换的人至少有一张大而清楚的关键帧(至少 0.4 画面高、不在左右边、没被挡住大半)。没有的话 Remake 没有他的脸,近景会画成别人(机库片段:图3 一张很小、一张只露一条)。补上他最大最清楚的那一帧,“每段 4 张”不会删它;整段都没有就在警告里写明。
+- Registry scan test reads file names as UTF-8 (Chinese workflow names).
+- Director (RefMod): in the new ComfyUI frontend (Nodes 2.0) the plan editor inside the node shrank to a narrow strip after clicking the node. The editor now always keeps the node's width. Fix by Civitai user zhendao - thank you!
+  导演台（RefMod）：新版界面（Nodes 2.0）点一下导演台节点，里面的计划编辑器会缩成很窄的一条。现在编辑器始终跟节点同宽。修复来自 Civitai 用户 zhendao，感谢！
+- Keyframe workflow (multi-person swap): Prepare finds a person again after the tracker lost her - a blackout, a shot cut, a spin or leaving the frame and coming back. The tracker gives such a person a new id, so the picture mapped to her was "followed only up to N s" and later keyframes left her unswapped (Remake then drew the original back; 11-19: a group dance with a blackout position change, the third dancer was lost at 7.8 s). A new track is joined to a lost one by elimination (it is the only person missing) or by look (hair colour first, then clothes). Two tracks seen together are never joined; when it is not clear (two lost people who look alike) nothing is guessed and the info names the moment. The log says "person found again at ... s".
+- Keyframe workflow: keyframes avoid frames the edit model cannot redraw at the right size. Skipped: a chosen person filling the whole frame height, or cut off by the bottom AND a side edge (only part of her in the frame: the model drew a whole, smaller person and the cut-off original stayed beside her - 11-19 run 38, 2.33 s). A keyframe with people cut off by the bottom edge moves, inside the same shot, to a frame where they are whole or clearly farther away - never across a cut or a place change, never making a gap longer than max_gap_s. People still cut off by the bottom get "keep the same size" in the edit prompt, and every edit prompt says to keep a back or side view (6.83 s had been redrawn facing the camera). The 4-keyframes-per-part limit now follows the Director's real split instead of a fixed 14.4 s window (a needed keyframe at 8.33 s had been dropped).
+  关键帧流程：关键帧避开修图模型画不对大小的帧。不放：要换的人从上到下占满画面，或者同时被下边和左右边截断（人只有一部分在画面里：修图会画成一个完整的小人，旁边还留着原来那个人的一截——11-19 第 38 次，2.33 秒）。人被下边截断的关键帧，在同一个镜头里挪到人完整、或明显更远的那一帧；不跨剪辑点、不跨换位、不让间隔超过 max_gap_s。仍被下边截断的人，修图提示词加「保持一样大」；所有修图提示词都加「原来背对或侧身，新的人也背对或侧身」（6.83 秒曾被画成正面）。每段最多 4 张的限制改按导演台实际的分段来算，不再用固定的 14.4 秒（之前误删了 8.33 秒那张）。
+  关键帧流程（多人换人）：跟踪器在黑场、切镜头、转圈、出画再入画后把人跟丢时，Prepare 会把她认回来。以前跟丢的人会被当成新人，图片对应的那个人「只跟到第 N 秒」，后面的关键帧漏换她，Remake 又把原来的人画了回来（11-19 团舞黑场换位，第三位在 7.8 秒跟丢）。认人的办法：排除法（只少了她一个），或看长相（先比发色，再比衣服颜色）。同时出现过的两个人绝不合并；分不清（两个长得像的人同时跟丢）就不猜，在信息里写明是哪一刻。日志会写「person found again at … s」。
+
 ## [0.5.9] - 2026-11-20
 
 ### Fixed / 修复

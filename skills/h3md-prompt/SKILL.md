@@ -411,14 +411,30 @@ picture list)**. Remake follows the keyframes: a person moved, resized or swappe
 with it. Every keyframe must pass the self-check in step 5; redraw failures, never hand them over. Do not use TARA,
 depth or H3 mask repaint for this.
 
-**Local users: no agent needed.** `example_workflows/Qwen Image 2.1 Keyframe.json` does route A in one run:
-H3MD Keyframe 1: Prepare (numbering, cuts, moments - at least one keyframe in every shot since 0.5.8), 1b: Recast
-(Qwen Image 2.1 Edit, one person after another, each crop cut from the frame where the people before her are already
-recast; `mask_grow` 0.25, 0.3-0.35 when bits of a bigger original such as a wig, ears, tail or wide skirt stay) and
-2: Assemble (colour match, paste back, the step-6 prompt and the plan .zip). The user writes one description line per
-character: race, age, face, hair, every garment, **shoes and legwear, and what she does not wear** ("bare legs and black
-stiletto heels; no socks, no boots, no apron"), or the editor keeps the original's. Point the user there first; the
-routes below are for agents doing it by hand or fixing single keyframes.
+**Local users: use the keyframe workflow (0.6.0).** `example_workflows/H3MD_Keyframe_MultiSwap_0.6.0.json`, two
+groups:
+1. **Keyframe Export**: H3MD Keyframe Prepare (numbering, cuts, moments - at least one keyframe in every shot)
+   + H3MD Keyframe Export write `<name>_keyframe_export_<date>_<no>.zip`.
+   - **Cast panel**: Prepare guesses who gets which picture; the user checks it and drags lines from a picture to the
+     numbered people. **One picture can take several numbers**: when the tracker split one person into two numbers
+     (after a cut, a turn, a crossing), the user drags a second line from the same picture and both numbers become one
+     person. Numbers with no line stay as they are (passers-by). The user's lines are final.
+   - Prepare never picks a frame where the people are too dark to read (a blackout, a strobe): it takes the nearest
+     lit frame. It adds **spare keyframes** where the gap between keyframes is too long for a 16 GB GPU; the Director
+     uses them only where its parts need them. They are written like any other keyframe.
+2. An agent reads the package with **the H3MD keyframe skill (`skills/h3md-keyframe`)** and answers with a `.h3kf`
+   (or `.json`) holding one MiniMax H3 Image prompt per keyframe.
+3. **Keyframe Import**: Import (button) -> Recast (H3 Image, ~25 s a keyframe) -> Compare (original | new). The Redo
+   node redoes single keyframes. Assemble writes `<name>_multiswap_plan_<date>_<no>.zip` for this Director.
+
+Character descriptions are optional: the agent writing the keyframe prompts describes each character from the picture,
+head to toe, and **asks the user** for what the picture does not show but a keyframe needs (a half-body picture:
+trousers and shoes). If you are asked to write those keyframe prompts, follow `skills/h3md-keyframe`.
+
+**What works:** fixed or steady camera (stage, dance, brief occlusion with faces soon visible again), 1 to 5 people,
+a GPU with 16 GB or more. **Not perfect:** crowded close-ups with people crossing, faces right at the lens, people
+walking in and out - someone may be swapped wrong. **Out of scope:** music videos with edited-in effects (clothes
+changing between frames, a face morphing into another person). The routes below are for agents painting keyframes themselves.
 
 **Two routes** - pick the one you can do; the other steps are shared.
 - **Route A: you can run code** (Claude Code, Codex, Cursor, or a local ComfyUI): crop -> edit -> paste back ->
@@ -431,8 +447,8 @@ routes below are for agents doing it by hand or fixing single keyframes.
 always refuse famous ones. Use footage you have the right to use; real-people footage needs route A with a local
 editor. Never use this to pass someone off as a real person.
 
-**Image editor**: locally Qwen Image 2.1 Edit (route A); in a chat, ChatGPT (route B). It must be one that takes two or more
-images (source frame + character pictures) and can keep or set the output size.
+**Image editor**: locally MiniMax H3 Image (the keyframe workflow) or another editor that takes two or more images
+(source frame + character pictures) and can keep or set the output size; in a chat, ChatGPT (route B).
 
 ### 1. Who is who: number by position, the number never changes
 - The user names people by position, e.g. "picture 1 replaces the 2nd from the left". Number the performers **left to
@@ -518,17 +534,16 @@ Picture number**. Define each Subject by look and by the performer it replaces; 
   soundtrack.` / `The <Picture> images are redrawn frames of this same run: each shows the people at that moment with
   their final look, in the positions and poses they hold then; together they fix who is who as the performers change
   places, leave and come back, and in close-ups.` / `<Subject 1> is a woman with long wavy blonde hair in a white ribbed
-  tank top, black jeans and white sneakers; this subject replaces the second performer counted from the left at the
-  start.` (one line per character). **Give every Subject an ethnicity, a rough age and a face** (face shape, eyes, skin, beard or not), not only hair and clothes, e.g. `<Subject 3> is an East Asian man in his late twenties with a clean-shaven face, dark almond-shaped eyes and short black hair ...` (measured: with only "short black hair, black T-shirt" the East Asian character came out European)
+  tank top, black jeans and white sneakers; this subject replaces performer #2, who first appears at 0.0 s on the left of the frame.` (one line per character). **Give every Subject an ethnicity, a rough age and a face** (face shape, eyes, skin, beard or not), not only hair and clothes, e.g. `<Subject 3> is an East Asian man in his late twenties with a clean-shaven face, dark almond-shaped eyes and short black hair ...` (measured: with only "short black hair, black T-shirt" the East Asian character came out European)
 - `summary`: `The target video is an edited version of <Video 1>. [video editing + reference generation + audio reuse]
-  Recast 3 of the 5 performers with a fixed mapping the whole time, counted from left to right at the start: ...; the
+  Recast 3 of the 5 performers with a fixed mapping the whole time, numbered in order of first appearance: ...; the
   other performers stay themselves, with their own faces, hair and outfits.`
 - `retention_analysis`: `<Video 1>: partially_preserved - motion, posture, lip and jaw movement, timing, camera,
   framing, scene, lighting and colour grade are retained; the face, hair and outfit of the recast performers are not
   carried over.`; per Subject `fully_preserved - ..., identical in every moment, including close-ups and group shots.`;
   `Source audio: fully_copy - the original soundtrack and its synchronisation are kept.`
 - `detailed_description`: one continuous take matching `<Video 1>` (source cuts written as `[Ns cut]` at the source's
-  times), who stands where from left to right at the start, each recast person moves exactly like their performer and
+  times), the performers in order of first appearance, each recast person moves exactly like their performer and
   keeps their own face, hair and clothes in every frame; five fingers per hand.
 - `overall_soundscape`: `Keep the source soundtrack; do not invent dialogue.`; `non_diegetic_music`: the music of
   `<Video 1>` unchanged.

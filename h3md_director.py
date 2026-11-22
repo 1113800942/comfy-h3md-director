@@ -409,6 +409,14 @@ def _remake_size(w: int, h: int, pw: int, ph: int, notes: list) -> tuple:
     """0.5.5: a swap (Remake) plan only runs at the sizes Remake was trained on. If the Control Panel size is not one
     of them, use the plan's size when it is, otherwise 1664x960 / 960x1664 with the same orientation, and say so."""
     if (w, h) in REMAKE_SIZES:
+        if (pw, ph) in REMAKE_SIZES and (w > h) != (pw > ph):
+            # 0.5.91 (user 00:54): a Remake size of the other orientation (landscape panel, portrait plan): the plan's
+            # orientation wins, the panel's tier stays (1664x960 -> 960x1664, 2560x1472 -> 1472x2560)
+            notes.append(f"multi-person swap: size {w}x{h} -> {h}x{w} (the plan is "
+                         f"{'portrait' if ph > pw else 'landscape'})")
+            LOG.warning("[H3MD Director] multi-person swap: size %dx%d -> %dx%d to match the plan's orientation. "
+                        "多人互换：尺寸 %dx%d 改成 %dx%d，跟计划的横竖一致。", w, h, h, w, w, h, h, w)
+            return h, w
         return w, h
     if (pw, ph) in REMAKE_SIZES:
         nw, nh = pw, ph
@@ -1063,11 +1071,20 @@ def normalize_keyframes(value, n, length: int, overlap: int, media: dict, notes:
                          f"overlap (first {int(overlap)} frames come from the previous shot) - skipped")
             continue
         if frame in by_frame:
-            notes.append(f"segment {n}: two keyframes at frame {frame} - '{image}' replaces '{by_frame[frame]}'")
-        by_frame[frame] = image
-    out = [{"image": by_frame[f], "frame": f} for f in sorted(by_frame)]
+            notes.append(f"segment {n}: two keyframes at frame {frame} - '{image}' replaces '{by_frame[frame][0]}'")
+        # 0.5.91: "people" = the replaced people this keyframe shows (multi-person swap) - each Remake part picks
+        # its 4 keyframes so that every person of the part is shown (h3md_remake_engine.pick_keyframes)
+        ppl = e.get("people")
+        ppl = sorted({int(x) for x in ppl}) if isinstance(ppl, list) and all(_num(x) is not None for x in ppl) else None
+        # 0.5.91 seams: "backup": true = a spare keyframe, used only where this GPU's split puts a part start that no
+        # main keyframe reaches (h3md_autosplit.plan_parts_kf); never used on a shot that is not split
+        by_frame[frame] = (image, ppl, bool(e.get("backup")))
+    out = [dict({"image": by_frame[f][0], "frame": f}, **({"people": by_frame[f][1]} if by_frame[f][1] is not None
+                                                         else {}), **({"backup": True} if by_frame[f][2] else {}))
+           for f in sorted(by_frame)]
     if out:
-        notes.append(f"segment {n}: keyframes at " + ", ".join(f"{k['frame'] / FPS:.2f} s ({k['image']})"
+        notes.append(f"segment {n}: keyframes at " + ", ".join(f"{k['frame'] / FPS:.2f} s ({k['image']}"
+                                                               f"{', spare' if k.get('backup') else ''})"
                                                                for k in out))
     return out
 

@@ -9,7 +9,7 @@
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 import * as M from "./h3md_plan.js";
-import { setPanelsFromRemake } from "./h3md_control_panel.js";
+import { setPanelsFromRemake, setPanelsSize } from "./h3md_control_panel.js";
 import { PERF_CSS, videoThumb, attachHoverPlay, installMoveWatch, watchNode, unwatchNode } from "./h3md_director_perf.js";
 import { hideWidgets } from "./h3md_hide_widgets.js";
 
@@ -500,6 +500,18 @@ class DirectorEditor {
       getMinHeight: () => 320,
     });
     this.widget.serialize = false; // not part of widgets_values: plan_json/width/height keep their slots
+    // Nodes 2.0 (Vue nodes) can write a stale/narrow grid-cell width onto the widget
+    // (`widget.width`), which makes the DOM editor shrink to a fraction of the node on
+    // selection. Keep width unset so the DOM widget always falls back to the node width.
+    // (fix contributed by zhendao on Civitai)
+    try {
+      Object.defineProperty(this.widget, "width", {
+        configurable: true,
+        enumerable: false,
+        get: () => undefined,
+        set: () => {},
+      });
+    } catch { /* older frontends never set widget.width */ }
     this.reload();
   }
 
@@ -853,11 +865,20 @@ class DirectorEditor {
     const frames = lay.length ? lay[lay.length - 1].endFrame : 0;
     const close = () => { this.importDlg = null; this.render(); };
     const usePlan = () => {
-      this.plan = RM.ensure(M.ensureShape(JSON.parse(j.plan_json)));
+      // 0.5.91: a plan without its own global prompt (e.g. a multi-swap plan from H3MD Keyframe Assemble) keeps the
+      // trigger words already in the Director instead of wiping them (user rule: never lose the globalPrompt)
+      const prevGlobal = (this.plan && this.plan.globalPrompt) || "";
+      const np = RM.ensure(M.ensureShape(JSON.parse(j.plan_json)));
+      const kept = !String(np.globalPrompt || "").trim() && prevGlobal.trim();
+      if (kept) np.globalPrompt = prevGlobal;
+      let sized = 0;
+      try { sized = setPanelsSize(np.width, np.height); } catch (err) { console.warn("[H3MD] control panel size", err); }
+      this.plan = np;
       this.importDlg = null;
       this.commit();
       this.probeAll();
-      this.setPlanIOMsg(`imported plan '${j.name}'`);
+      this.setPlanIOMsg(`imported plan '${j.name}'` + (kept ? " (your global prompt kept)" : "")
+        + (sized ? ` (Control Panel size -> ${np.width}x${np.height})` : ""));
     };
     const useAll = async () => {
       const wf = JSON.parse(JSON.stringify(j.workflow));

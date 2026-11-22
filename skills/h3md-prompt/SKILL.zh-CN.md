@@ -249,12 +249,24 @@ non_diegetic_music:
 关键帧、提示词,最后交计划包(或图片清单)**。Remake 会照着关键帧拍:关键帧里人挪了位、变了大小、换错了人,视频就跟着错。
 所以每张关键帧都要过第 5 步的自查,不合格就重画,不能凑合交。不要用 TARA、depth 或 H3 遮罩重画来做这件事。
 
-**本地用户直接用工作流,不用智能体**:`example_workflows/Qwen Image 2.1 Keyframe.json` 一次跑完 A 线:
-H3MD Keyframe 1: Prepare(编号、找剪辑点、挑时刻,0.5.8 起每个镜头至少一张关键帧)、1b: Recast 串行换人(Qwen Image 2.1
-编辑,一个人一个人换,后一个人从已换好前面人的帧上裁;`mask_grow` 默认 0.25,原角色的假发、耳朵、尾巴、蓬裙有残留时
-调到 0.3-0.35)、2: Assemble(对色、贴回、第 6 步的提示词和计划包)。用户每个角色写一行描述:人种、年龄、长相、发型、
-每件衣服,**还有鞋和腿(光腿 / 袜子)以及没有什么**("bare legs and black stiletto heels; no socks, no boots, no apron"),
-否则修图会照抄原角色的。先推荐用户用它;下面两条路线留给智能体手工做,或单独修某一张关键帧。
+**本地用户用关键帧工作流(0.6.0)**:`example_workflows/H3MD_Keyframe_MultiSwap_0.6.0.json`,一个工作流两组:
+1. **Keyframe Export**:H3MD Keyframe Prepare(编号、找剪辑点、挑时刻,每个镜头至少一张关键帧)+ H3MD Keyframe Export,
+   写出 `<名字>_keyframe_export_<日期>_<序号>.zip`。
+   - **演员表连线**:Prepare 先猜好哪张图换哪个人,用户检查,从图拖线到编号的人。**一张图可以连多个号**:追踪把同一个人
+     切成了两个号(剪辑点后、转身、交错走位),就从同一张图再拖一根线过去,两个号合成一个人。没连线的号保持原样(路人)。
+     用户连的线说了算。
+   - Prepare 不会挑人太暗看不清的帧(熄灯、频闪),自动取前后最近的亮帧;关键帧间隔对 16G 显卡太长的地方会加**备用关键帧**,
+     导演台只在自己的分段需要时才用。备用关键帧的提示词照常写。
+2. 智能体按 **H3MD 关键帧 skill(`skills/h3md-keyframe`)** 读这个包,回一个 `.h3kf`(或 `.json`),每张关键帧一段
+   MiniMax H3 Image 提示词。
+3. **Keyframe Import**:Import(按钮导入)→ Recast(H3 Image,每张约 25 秒)→ Compare(原图 | 新图)。哪张不对用 Redo
+   节点单张重做。Assemble 写出 `<名字>_multiswap_plan_<日期>_<序号>.zip`,交给导演台。
+
+角色描述可以不写:写关键帧提示词的智能体会照着角色图从头到脚描述每个人,参考图上看不到、但关键帧里要露出来的部分
+(半身图的裤子和鞋)**会先问用户**。如果是你来写这些关键帧提示词,照 `skills/h3md-keyframe` 做。
+
+**能做的**:固定机位或稳定机位(舞台、跳舞、短暂遮挡后很快又露脸),1 到 5 个人,显卡 16G 以上。**不完美的**:人多的
+近景、交错走位、脸贴着镜头、人进进出出,可能换错人。**不在范围内的**:后期加了特效的 MV(衣服逐帧变、一张脸变成另一个人)。下面两条路线留给智能体自己画关键帧。
 
 **两条路线**:按你自己的能力选一条,其余步骤两条线共用。
 - **A 线:你能运行代码**(Claude Code、Codex、Cursor 之类,或接着本地 ComfyUI):裁图 → 修图 → 贴回 → 对色。构图在原理上
@@ -264,12 +276,13 @@ H3MD Keyframe 1: Prepare(编号、找剪辑点、挑时刻,0.5.8 起每个镜头
 
 **真人素材**:在线修图服务(Grok、GPT-image、豆包等)通常拒绝修改真人照片,名人几乎一定被拒。素材要用你有权使用的视频;真人素材只能走 A 线 + 本地修图模型。不要用这个功能冒充真实的人。
 
-**修图模型**:本地用 Qwen Image 2.1 编辑(A 线);只能聊天出图就用 ChatGPT(B 线)。要求是:能同时看两张以上
+**修图模型**:本地用 MiniMax H3 Image(关键帧工作流)或其他修图模型(A 线);只能聊天出图就用 ChatGPT(B 线)。要求是:能同时看两张以上
 的图(原帧 + 角色图),输出尺寸可以指定或保持原图大小。
 
-### 1. 认人:按位置编号,编号一直不变
-- 用户按位置指定,例如"图1换左二,图2换左三,图3换左五"。在**所有人第一次都清楚出现的那一帧**,从左到右编号:左一、左二……
-  这个编号就是这个人在整条视频里的身份,后面换了位置也不变。
+### 1. 认人:按出场先后编号,编号一直不变(0.6.0)
+- 按**出场先后**编号:第一个清楚出现(至少 1 秒)的人是 1 号,下一个是 2 号……同时出场的从左往右。一闪而过的、只在画面边上
+  露一小条的不编号。默认图1 换 1 号、图2 换 2 号……用户也可以写"图1换3号"。
+- 这个编号就是这个人在整条视频里的身份:后面换了位置、出画再回来都不变;图用完以后出场的人保持原样。
 - 给每个人记一句外貌(帽子、发型、衣服颜色和款式),后面每一帧都靠它认人。两个人长得很像、或分不清谁是谁时,停下来问用户。
 - 角色图:每个角色一张清楚的全身或半身图;记下角色的外貌(发型、上衣、裤子、鞋、袜子 / 光腿),原角色穿了而新角色没有的写明
   "no socks, no boots"。
@@ -334,10 +347,9 @@ Remake 里 `<Picture N>` 是本段第 N 张关键帧,不是角色图,所以**不
   soundtrack.` / `The <Picture> images are redrawn frames of this same run: each shows the people at that moment with
   their final look, in the positions and poses they hold then; together they fix who is who as the performers change
   places, leave and come back, and in close-ups.` / `<Subject 1> is a woman with long wavy blonde hair in a white
-  ribbed tank top, black jeans and white sneakers; this subject replaces the second performer counted from the left
-  at the start.`(每个角色一行)。**每个 Subject 都要写人种、大概年龄和长相**（脸型、眼睛、肤色、有没有胡子），不能只写发型和衣服，例如 `<Subject 3> is an East Asian man in his late twenties with a clean-shaven face, dark almond-shaped eyes and short black hair ...`（实测：只写"黑色短发、黑 T 恤"时，东亚角色被画成了欧洲人）
+  ribbed tank top, black jeans and white sneakers; this subject replaces performer #2, who first appears at 0.0 s on the left of the frame.`(每个角色一行)。**每个 Subject 都要写人种、大概年龄和长相**（脸型、眼睛、肤色、有没有胡子），不能只写发型和衣服，例如 `<Subject 3> is an East Asian man in his late twenties with a clean-shaven face, dark almond-shaped eyes and short black hair ...`（实测：只写"黑色短发、黑 T 恤"时，东亚角色被画成了欧洲人）
 - `summary`:`The target video is an edited version of <Video 1>. [video editing + reference generation + audio reuse]
-  Recast 3 of the 5 performers with a fixed mapping the whole time, counted from left to right at the start: ...; the
+  Recast 3 of the 5 performers with a fixed mapping the whole time, numbered in order of first appearance: ...; the
   other performers stay themselves, with their own faces, hair and outfits.`
 - `retention_analysis`:`<Video 1>: partially_preserved - motion, posture, lip and jaw movement, timing, camera, framing,
   scene, lighting and colour grade are retained; the face, hair and outfit of the recast performers are not carried

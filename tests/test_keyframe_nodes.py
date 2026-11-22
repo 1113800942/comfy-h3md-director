@@ -1,4 +1,4 @@
-"""Smoke test of the two Keyframe nodes on a synthetic clip (SAM3 replaced by the known boxes)."""
+"""Smoke test of the Keyframe nodes Prepare and Assemble on a synthetic clip (SAM3 replaced by the known boxes)."""
 import json
 import os
 import sys
@@ -56,44 +56,154 @@ def clip(tmp_path, monkeypatch):
 def test_prepare_assemble(clip):
     inp, out = clip
     pic = torch.rand(1, 1200, 1000, 3)
-    crops, pics, prompts, job, sheet, info = N.H3MDKeyframePrepare().prepare(
-        "clips/src.mp4", "图1换左二", "a man with short red hair, yellow coat", "", 5.0, "en", 0.4, 8,
-        picture_1=pic)["result"]
+    pics, job, sheet, info = N.H3MDKeyframePrepare().prepare(
+        "clips/src.mp4", "图1换左二", "a man with short red hair, yellow coat", "伊娃：金发\n阿比：红发\n义父：黑发",
+        5.0, 0.4, 8, picture_1=pic)["result"]
     i = json.loads(info)
-    assert i["people_at_start"] == 3 and i["mapping"] == [{"picture": 1, "left": 2}]
-    assert len(crops) == len(pics) == len(prompts) == i["edits"] >= 2
-    assert all(c.shape[1] % 32 == 0 and c.shape[2] % 32 == 0 for c in crops)
-    assert pics[0].shape[1] * pics[0].shape[2] <= 1.0e6
+    assert i["people"] == 3 and i["mapping"] == [{"picture": 1, "person": 2}]
+    assert [c["picture"] for c in i["cast"]] == [None, 1, None]
+    assert len(pics) == i["recasts"] == sum(len(m["items"]) for m in job["moments"]) >= 2
     assert job["size"] == [1664, 960] and job["length"] <= SEC * FPS
     assert not any(5.0 < m["at"] < 6.0 for m in job["moments"])
     assert "change places" in job["prompt"]
-    edited, k = [], 0                                       # "edit" = paint the person white, keep the rest
-    for m in job["moments"]:
+    for m in job["moments"]:                                  # 0.5.91: where she stands NOW (they change places)
+        assert len(m["boxes"]) == 3
         for it in m["items"]:
-            c = crops[k].clone()
-            k += 1
-            x0, y0, x1, y1 = it["crop"]
-            sx, sy = c.shape[2] / (x1 - x0), c.shape[1] / (y1 - y0)
-            a, b, e, f = it["inner"]
-            c[:, int(b * sy):int(f * sy), int(a * sx):int(e * sx)] = 1.0
-            edited.append(c)
-    sheet2, plan_s, zp = N.H3MDKeyframeAssemble().assemble([job], edited, ["t1"], [True])["result"]
+            assert it["rank"] == (2 if m["at"] < 5.0 else 1) and it["n"] == 3 and it["desc"].startswith("a man")
+    done = {}                                                 # stand-in for Recast: paint the person white
+    for m in job["moments"]:
+        f = job["frames"][m["at"]].copy()
+        for it in m["items"]:
+            x0, y0, x1, y1 = [int(v) for v in it["own"]]
+            f[y0:y1, x0:x1] = 255
+        done[m["at"]] = f
+    job2 = dict(job, recast_frames=done, recast={"report": "r"})
+    sheet2, plan_s, zp = N.H3MDKeyframeAssemble().assemble(job2, "t1", True)["result"]
     plan = json.loads(plan_s)
     seg = plan["segments"][0]
     assert plan["swapEngine"] == "remake" and seg["videos"][0]["useDuration"] == round(seg["length"] / 24, 4)
     assert plan["media"]["videos"][0]["file"] == "clips/src.mp4"
     kf = plan["media"]["images"][0]["file"]
-    assert os.path.isfile(inp / kf)
-    from PIL import Image
-    a = np.asarray(Image.open(inp / kf))
-    m = job["moments"][0]
-    own = m["items"][0]["own"]
-    cx, cy = int((own[0] + own[2]) / 2), int((own[1] + own[3]) / 2)
-    assert a[cy, cx].min() > 150                             # recast person painted
-    other = [b for b in m["items"][0]["others"] if b[0] > own[2]][0]
-    ox, oy = int((other[0] + other[2]) / 2), int((other[1] + other[3]) / 2)
-    assert abs(int(a[oy, ox, 2]) - 200) < 40                 # the blue neighbour keeps its pixels
+    assert os.path.isfile(inp / kf) and os.path.isfile(inp / os.path.dirname(kf) / "recast_report.txt")
     with zipfile.ZipFile(zp) as z:
         names = z.namelist()
     assert "plan.json" in names and any(n.endswith("src.mp4") for n in names)
     assert len([n for n in names if n.endswith(".png")]) == len(plan["media"]["images"])
+    with pytest.raises(N.K.KeyframeError):                    # Assemble needs Recast's job
+        N.H3MDKeyframeAssemble().assemble(job, "t2", False)
+
+
+
+
+def _fake_h3(monkeypatch, value):
+    from types import SimpleNamespace as NS
+    import comfy_extras.nodes_minimax_h3 as MH
+    import comfy_extras.nodes_custom_sampler as CS
+    import nodes as CN
+    seen = []
+
+    def fake_cond(**kw):
+        seen.append(kw)
+        return NS(result=("COND", {"samples": None}))
+
+    monkeypatch.setattr(MH.MiniMaxH3ImageConditioning, "execute", staticmethod(fake_cond))
+    monkeypatch.setattr(CS.BasicGuider, "execute", staticmethod(lambda **kw: NS(result=("G",))))
+    monkeypatch.setattr(CS.RandomNoise, "execute", staticmethod(lambda **kw: NS(result=("N",))))
+    monkeypatch.setattr(CS.SamplerCustomAdvanced, "execute", staticmethod(lambda **kw: NS(result=("LAT", None))))
+    monkeypatch.setattr(CN.VAEDecode, "decode", lambda self, vae, s: (torch.full((1, 1504, 2624, 3), value),))
+    return seen
+
+
+def test_export_import_recast(clip, monkeypatch):
+    """0.5.91 (user 21:56, 22:47): Export writes a stamped package for the AI; the AI's answer (.h3kf = the package +
+    prompts.json, or the .json alone) is loaded by Import, which restores the job without Prepare; Recast makes the
+    pictures, shows original | new, and 'redo' (the Redo node) makes single keyframes again"""
+    inp, out = clip
+    pic = torch.rand(1, 1200, 1000, 3)
+    pics, job, sheet, info = N.H3MDKeyframePrepare().prepare(
+        "clips/src.mp4", "图1换左二", "a man with short red hair, yellow coat", "", 5.0, 0.4, 8, picture_1=pic)["result"]
+    todo = [m for m in job["moments"] if m["items"]]
+    day = __import__("datetime").date.today().strftime("%Y%m%d")
+    zp, shown = N.H3MDKeyframeExport().export([job], pics, ["t5"])["result"]
+    assert os.path.basename(zp) == f"t5_keyframe_export_{day}_001.zip" and os.path.dirname(zp) == str(out / "H3MD_keyframes")
+    assert shown.shape[0] == 1
+    zp2, _ = N.H3MDKeyframeExport().export([job], pics, ["t5"])["result"]      # never overwritten
+    assert os.path.basename(zp2).endswith("_002.zip") and os.path.isfile(zp)
+    with zipfile.ZipFile(zp) as z:
+        names = set(z.namelist())
+        req = json.loads(z.read("request.json").decode("utf-8"))
+        readme = z.read("README_for_AI.md").decode("utf-8")
+    assert {"request.json", "README_for_AI.md", "character_picture_1.png", "_h3md/job.json"} <= names
+    assert {f"keyframe_{k}.png" for k in range(1, len(todo) + 1)} <= names
+    assert req["answer_file"] == f"t5_keyframe_import_{day}_001.h3kf" and req["answer_file"] in readme
+    k1 = req["keyframes"][0]
+    assert k1["picture_1"] == "keyframe_1.png" and k1["pictures"][0]["picture"] == 2
+    assert k1["pictures"][0]["description"].startswith("a man") and k1["people_in_frame"] == 3
+    assert k1["keeps_people_from_left"] == [1, 3]               # who stays, in THIS keyframe (user 00:54)
+    assert k1["sentence"].startswith("把图1里从左数第2个人替换成图2里的人，图1里其他的人保持不变，")
+    # the AI's answer: the package + prompts.json, as .h3kf
+    answer = {"package": req["package"], "prompts": {str(k): f"P{k}" for k in range(1, len(todo) + 1)}}
+    h3kf = inp / "H3MD_keyframes" / "imports" / req["answer_file"]
+    h3kf.parent.mkdir(parents=True)
+    with zipfile.ZipFile(zp) as z, zipfile.ZipFile(h3kf, "w") as o:
+        for n in z.namelist():
+            o.writestr(n, z.read(n))
+        o.writestr("prompts.json", json.dumps(answer))
+    rel = "H3MD_keyframes/imports/" + req["answer_file"]
+    job_i, pics_i, prompts, kf_sheet, inf = N.H3MDKeyframeImport().load(rel)["result"]
+    assert [m["at"] for m in job_i["moments"]] == [m["at"] for m in job["moments"]] and len(pics_i) == len(pics)
+    assert all(np.array_equal(job_i["frames"][m["at"]], job["frames"][m["at"]]) for m in job["moments"])
+    assert job_i["moments"][0]["items"] == json.loads(json.dumps(job["moments"][0]["items"]))
+    # the .json alone finds its export package by name
+    js = inp / "H3MD_keyframes" / "imports" / "a.json"
+    js.write_text(json.dumps(answer), encoding="utf-8")
+    assert N.H3MDKeyframeImport().load(str(js))["result"][2] == json.dumps(answer)
+    js.write_text(json.dumps(answer["prompts"]), encoding="utf-8")
+    with pytest.raises(N.K.KeyframeError):                     # no package name: say what is missing
+        N.H3MDKeyframeImport().load(str(js))
+    args = [[job_i], pics_i] + [[None]] * 5
+    with pytest.raises(N.K.KeyframeError):                     # no prompts: says to export and ask the AI
+        N.H3MDKeyframeRecast().recast(*args, [""], [4.0], [7])
+    seen = _fake_h3(monkeypatch, 0.2)
+    imgs, job2, report, cmp = N.H3MDKeyframeRecast().recast(*args, [prompts], [4.0], [7])["result"]
+    assert [s["prompt"] for s in seen] == [f"P{k}" for k in range(1, len(todo) + 1)]
+    assert list(seen[0]["images"]) == ["image_0", "image_1"] and (seen[0]["width"], seen[0]["height"]) == (2624, 1504)
+    assert len(imgs) == len(todo) and imgs[0].shape[1:3] == (960, 1664) and "#1 " in report
+    assert tuple(cmp.shape[1:3]) == (1080, 1920) and cmp.shape[0] == 2 * len(todo)  # pages: keyframe, then its people (user 06:06)
+    (redo,) = N.H3MDKeyframeRedo().pick("2", len(todo))
+    seen = _fake_h3(monkeypatch, 0.8)
+    imgs2, job3, report2, _ = N.H3MDKeyframeRecast().recast(*args, ['{"2": "P2b"}'], [4.0], [9], [redo])["result"]
+    assert [s["prompt"] for s in seen] == ["P2b"] and "kept from the last run" in report2
+    assert abs(float(imgs2[0].mean()) - 0.2) < 0.02 and abs(float(imgs2[1].mean()) - 0.8) < 0.02
+    _, _, plan_zip = N.H3MDKeyframeAssemble().assemble(job3, "t5", True)["result"]
+    assert os.path.basename(plan_zip) == f"t5_multiswap_plan_{day}_001.zip"
+
+
+def test_crop_to_aspect():
+    assert N.K.crop_to_aspect(2624, 1504, 1664, 960) == (8, 0, 2615, 1504)           # 32-px rounding: crop, no stretch
+    assert N.K.crop_to_aspect(1000, 1000, 2, 1) == (0, 250, 1000, 750)
+    assert N.K.crop_to_aspect(1000, 500, 1, 1) == (250, 0, 750, 500)
+
+
+def test_prepare_cast_panel_and_reuse(clip, monkeypatch):
+    """0.5.91 (user 02:18-02:23): the cast panel gets the people and pictures; picking someone else and running
+    again reuses the tracking (no second SAM3 run)."""
+    calls = []
+    real = N.track_people
+
+    def counting(frames, **kw):
+        calls.append(1)
+        return real(frames, **kw)
+    monkeypatch.setattr(N, "track_people", counting)
+    pic = torch.rand(1, 600, 500, 3)
+    out = N.H3MDKeyframePrepare().prepare("clips/src.mp4", "", "a man\na woman", "", 5.0, 0.4, 8,
+                                          picture_1=pic, picture_2=pic)
+    cast = json.loads(out["ui"]["h3md_cast"][0])
+    assert [q["picture"] for q in cast["people"]] == [1, 2, None]          # automatic: first to appear
+    assert len(cast["tiles"]) == 3 and set(cast["thumbs"]) == {"1", "2"}
+    assert cast["tiles"][0].startswith("data:image/jpeg;base64,")
+    out2 = N.H3MDKeyframePrepare().prepare("clips/src.mp4", "图1换3号\n图2换1号", "a man\na woman", "", 5.0, 0.4, 8,
+                                           picture_1=pic, picture_2=pic)
+    cast2 = json.loads(out2["ui"]["h3md_cast"][0])
+    assert [q["picture"] for q in cast2["people"]] == [2, None, 1]
+    assert len(calls) == 1
