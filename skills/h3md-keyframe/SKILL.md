@@ -106,6 +106,12 @@ c. **Body parts the frame cuts off are not mentioned.** When the feet are outsid
    - **A person almost hidden behind another**: write exactly which part shows (the top of the head and the eyes
      beside the front man's head, on the left side of it) and that everything else is hidden by whom. The model tends
      to show more of a hidden person than the original does; the clearer the text, the less it adds.
+   - **A far shot with small people** (everyone well under half the frame height, a lot of floor or sky): say how many
+     people the frame holds and that nobody else is added, that every person keeps the same small size and place, and
+     that the camera does not move closer, the people are not enlarged or pushed together and the empty floor / sky stay
+     as large. Without it H3 Image zoomed in, enlarged everyone and drew a sixth person (measured, 2026-11-22).
+   - For a person who is **only a strip at the edge or almost hidden**, use only the face and hair part of the
+     character's sentence, never the full outfit with shoes: the full outfit makes the model draw the whole person.
    - **A different body or garment** (a woman in a dress for a man in a long coat): write the character's own clothes
      only as far as the frame shows them - dress length, bare legs, shoes only when the feet are in the frame.
 d. **For every replaced person**, say which Subject takes which place, then write each item below as you read it
@@ -166,6 +172,8 @@ original. Typical misses:
   in every "Subject Picture N takes the place of ..." sentence name that person's shirt again, and the trousers when the legs show (not for a half-body framing: it pulls the camera back)
   ("Subject Picture 4, in the yellow shirt and light-blue jeans, takes the place of the fifth person"), so each outfit
   stays bound to its place;
+- a far shot redrawn closer, the people enlarged or pushed together, or one person more than in the original (say the
+  number of people, "nobody else", same small size and place, camera not closer);
 - trousers / shoes left out for a person whose legs do show in the frame (even only one leg at the edge): the model
   then invents them, often from another person.
 
