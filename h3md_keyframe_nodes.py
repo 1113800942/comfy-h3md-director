@@ -261,7 +261,7 @@ def face_observations(path, times, per_frame, size, every=FACE_EVERY, boxes_out=
                 continue
             pid = K.assign_face((x0 / W, y0 / H, x1 / W, y1 / H), per_frame[i])
             if pid is not None:
-                obs.append((i, pid, np.asarray(emb, np.float32)))
+                obs.append((i, pid, np.asarray(emb, np.float32), x1 - x0))   # + width: bigger faces count more
     return obs
 
 
@@ -770,7 +770,7 @@ class H3MDKeyframePrepare:
                 int(max_people), round(dur, 3))
         hit = _TRACK_CACHE.get(tkey)
         if hit is not None:
-            times, small, per_frame, reid_joins, reid_unsure, face_boxes = hit
+            times, small, per_frame, reid_joins, reid_unsure, face_boxes, cuts = hit
             K.FRAME_ASPECT = size[0] / float(size[1])
             LOG.info("%s tracking reused from the last run (same clip and settings)", TAG)
         else:
@@ -778,44 +778,44 @@ class H3MDKeyframePrepare:
             K.FRAME_ASPECT = size[0] / float(size[1])
             windows = track_people(small, threshold=threshold, max_people=max_people)
             per_frame = K.link_windows(windows)[:len(times)]
-            # 0.5.9: join people the tracker split (blackout, cut, spin, out and back in) - elimination, then hair /
-            # clothes colour.  Before, the person a picture is mapped to was "lost" and later keyframes missed her.
+            try:   # 0.5.8: the shot cuts (one keyframe per shot); 0.5.91: no tracker number goes on across a cut
+                cuts = detect_cuts(path)
+            except Exception as exc:
+                cuts = []
+                LOG.warning("%s cut detection failed (%s): keyframes by max_gap_s only", TAG, exc)
+            # 0.5.91 (user 16:11): who is who - tracker numbers cut at the cuts and where the look changes, then
+            # grouped into people by face + hair + clothes colour, each weighted by how well it tells THIS clip's
+            # people apart (K.identify).  Replaces the 0.5.9 re-identification and the 0.5.91 face clusters.
             faces, face_boxes = {}, {}
-            try:   # 0.5.91: faces tell apart people in the same clothes (a cut, a close-up, five men in white).  The
-                # faces are grouped into people first; where a track's face turns into another person's (the tracker
-                # passed the number on at a crossing) the track is cut there, and every piece is named after its person
+            try:
                 obs = face_observations(path, times, per_frame, size, boxes_out=face_boxes)
-                labels, cents = K.face_clusters([o[2] for o in obs]) if obs else ([], [])
-                per_frame, person_of, split_notes = K.split_by_face(per_frame, obs, labels)
-                faces = {nid: cents[p] for nid, p in person_of.items()}
-                LOG.info("%s faces: %d seen, %d people by face", TAG, len(obs), len(cents))
-                for n_ in split_notes:
-                    LOG.info("%s %s", TAG, n_)
+                faces = {(i, pid): (emb, w) for i, pid, emb, w in obs}
+                LOG.info("%s faces: %d seen", TAG, len(obs))
             except Exception as exc:
                 LOG.warning("%s face reading failed (%s): hair / clothes colour only", TAG, exc)
             try:
-                track_looks = K.add_faces(K.appearance(small, per_frame), faces)
-                per_frame, reid_joins, reid_unsure = K.reid_merge(per_frame, track_looks, times)
+                det_looks = K.look_samples(small, per_frame)
+                per_frame, reid_joins, reid_unsure, id_notes = K.identify(per_frame, times, cuts, faces, det_looks)
+                for n_ in id_notes:
+                    LOG.info("%s %s", TAG, n_)
             except Exception as exc:
                 reid_joins, reid_unsure = [], []
-                LOG.warning("%s re-identification failed (%s): tracks used as they are", TAG, exc)
-            try:   # 0.5.9 diagnostics: every track's time span, and why a new track was or was not joined
+                LOG.warning("%s identification failed (%s): tracks used as they are", TAG, exc)
+            try:   # diagnostics: every person's time span
                 spans = {}
                 for t_, fr in zip(times, per_frame):
                     for q in fr:
                         a = spans.setdefault(q, [t_, t_, 0])
                         a[1], a[2] = t_, a[2] + 1
-                LOG.info("%s tracks after re-identification: %s", TAG,
+                LOG.info("%s people: %s", TAG,
                          "; ".join(f"{q}: {a[0]:.1f}-{a[1]:.1f} s ({a[2]} frames)" for q, a in sorted(spans.items())))
-                for n_ in getattr(K.reid_merge, "notes", []):
-                    LOG.info("%s re-id %s", TAG, n_)
             except Exception:
                 pass
             for j in reid_joins:
-                LOG.info("%s person found again at %.1f s (track %s = track %s, %s, look %.2f)", TAG, j["at"], j["new"],
-                         j["into"], j["why"], j["look"])
+                LOG.info("%s person found again at %.1f s (piece of track %s -> person %s, %s, look %.2f)", TAG,
+                         j["at"], j["new"], j["into"], j["why"], j["look"])
             _TRACK_CACHE.clear()
-            _TRACK_CACHE[tkey] = (times, small, per_frame, reid_joins, reid_unsure, face_boxes)
+            _TRACK_CACHE[tkey] = (times, small, per_frame, reid_joins, reid_unsure, face_boxes, cuts)
         frames = K.report(per_frame, times)
         frames, twin_notes = K.merge_twins(frames)   # 0.5.91 (16:11): one person boxed twice = one id, not 2 numbers
         for n_ in twin_notes:
@@ -832,11 +832,6 @@ class H3MDKeyframePrepare:
             + next((f" <- picture {p}" for p, k, _ in chosen if k == n), " kept") for n, a in enumerate(people, 1)))
         ids = {pid for _, _, pid in chosen}
         moments = K.pick_moments(frames, ids, dur, max_gap_s)
-        try:   # 0.5.8: one keyframe in every shot
-            cuts = detect_cuts(path)
-        except Exception as exc:
-            cuts = []
-            LOG.warning("%s cut detection failed (%s): keyframes by max_gap_s only", TAG, exc)
         n_before = len(moments)
         moments = K.ensure_per_shot(frames, moments, ids, cuts, dur)
         LOG.info("%s shot cuts at %s s: %d keyframe(s) added so every shot has one", TAG, cuts,

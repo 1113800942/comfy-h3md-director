@@ -142,27 +142,6 @@ def link_windows(windows):
     return out
 
 
-# 0.5.9: re-identify a person the tracker lost (blackout, shot cut, spin, leaving and coming back).  SAM3 links a person
-# only while it can follow the box; after a cut or a blackout the same person comes back with a NEW id, and the old id
-# (the one a picture is mapped to) just ends - later keyframes then miss that person (11-19: a dance with a blackout
-# position change, the third woman was "lost at 7.8 s" and stayed unswapped).  A new id is joined to a lost one by
-# (1) elimination - it is the only lost person it could be - or (2) look: hair (top of the box) and clothes (middle)
-# colour histograms.  Two ids seen together for more than REID_OVERLAP frames are never the same person.  When it is
-# not clear, nothing is joined and a warning says who could not be told apart.
-REID_OVERLAP = 2          # sampled frames two ids may share and still be one person (a ghost box lingering in the dark)
-REID_HANDOFF = 12        # sampled frames (2 s at 6 fps) an old and a new track of ONE person may run side by side when
-                          # SAM3 hands over (11-19 log: old track 0 ended 0.8 s = 6 frames after new track 3 began) -
-                          # allowed only if their boxes overlap there (a double box on one person) or they look alike
-REID_HANDOFF_IOU = 0.3
-REID_EDGE = 0.03          # a box this close to the left / right frame edge = walking out or in
-REID_MIN_FRAMES = 2       # an id seen in fewer sampled frames is noise: never joined, never a candidate
-REID_SIM_ELIM = 0.25      # only one lost person it could be: join unless the look is clearly different
-REID_SIM_MIN = 0.55       # several lost people: the best look must reach this ...
-REID_MARGIN = 0.08        # ... and beat the second best by this
-REID_HAIR_W = 0.6         # look similarity = hair * this + clothes * (1 - this): hair colour tells people apart better
-                          # than clothes (navy vs royal-blue dresses; the same uniform)
-
-
 def _hsv_hist(px):
     """px: [n, 3] uint8 RGB -> normalised histogram: 12 hues x 3 saturations x 3 values for coloured pixels plus 6
     grey levels for pixels with little saturation (black, white, grey hair or clothes)."""
@@ -189,76 +168,6 @@ def _hsv_hist(px):
     return hist / hist.sum()
 
 
-def appearance(frames_u8, per_frame):
-    """mean hair / clothes histograms of every id over the sampled frames where it stands clear (not overlapping
-    another box much).  frames_u8: [N, h, w, 3]; per_frame: [{id: box (0-1)}].  -> {id: (hair, clothes)}"""
-    import numpy as np
-    acc = {}
-    for img, fr in zip(frames_u8, per_frame):
-        # grey-world white balance per frame: coloured stage light (pink / violet / cyan washes) tints everyone the
-        # same way and would make one dancer look like another from frame to frame
-        f = img.astype(np.float32)
-        m = f.reshape(-1, 3).mean(0)
-        gain = np.clip(m.mean() / np.maximum(m, 1.0), 1 / 3.0, 3.0)   # capped: a near-black frame is not blown up
-        img = np.clip(f * gain, 0, 255).astype(np.uint8)
-        hh, ww = img.shape[:2]
-        items = list(fr.items())
-        for pid, b in items:
-            if (b[3] - b[1]) < MIN_H:
-                continue
-            if any(iou(b, c) > CLEAR_IOU or covered(b, c) > COVERED for q, c in items if q != pid):
-                continue
-            x0, x1 = int(b[0] * ww), int(b[2] * ww)
-            y0, y1 = int(b[1] * hh), int(b[3] * hh)
-            bw, bh = x1 - x0, y1 - y0
-            if bw < 4 or bh < 8:
-                continue
-            hair = img[y0:y0 + max(2, int(bh * 0.15)), x0 + int(bw * 0.2):x1 - int(bw * 0.2)].reshape(-1, 3)
-            body = img[y0 + int(bh * 0.25):y0 + int(bh * 0.70), x0 + int(bw * 0.25):x1 - int(bw * 0.25)].reshape(-1, 3)
-            hh_, bb_ = _hsv_hist(hair), _hsv_hist(body)
-            if hh_ is None or bb_ is None:
-                continue
-            a = acc.setdefault(pid, [np.zeros_like(hh_), np.zeros_like(bb_), 0])
-            a[0] += hh_
-            a[1] += bb_
-            a[2] += 1
-    return {pid: (a[0] / a[2], a[1] / a[2]) for pid, a in acc.items() if a[2]}
-
-
-FACE_LO, FACE_HI = 0.15, 0.45   # 0.5.91: ArcFace cosine -> look 0-1 (different people ~0.0-0.15, one person 0.45+)
-
-
-def face_similarity(fa, fb):
-    """cosine of two L2-normalised face embeddings mapped to 0-1 (FACE_LO -> 0, FACE_HI -> 1)"""
-    import numpy as np
-    c = float(np.dot(fa, fb))
-    return max(0.0, min(1.0, (c - FACE_LO) / (FACE_HI - FACE_LO)))
-
-
-def look_similarity(a, b, hair_w=REID_HAIR_W):
-    """0-1.  a, b: (hair hist, clothes hist[, face embedding]) - 0.5.91: when both have a face, the face decides (five
-    men in the same white clothes: colour cannot tell them apart); else histogram intersection of hair and clothes."""
-    import numpy as np
-    if a is None or b is None:
-        return 0.0
-    fa = a[2] if len(a) > 2 else None
-    fb = b[2] if len(b) > 2 else None
-    if fa is not None and fb is not None:
-        return face_similarity(fa, fb)
-    if a[0] is None or b[0] is None or a[1] is None or b[1] is None:
-        return 0.0
-    return float(hair_w * np.minimum(a[0], b[0]).sum() + (1 - hair_w) * np.minimum(a[1], b[1]).sum())
-
-
-def add_faces(looks, faces):
-    """appearance() + {id: face embedding} -> {id: (hair, clothes, face)} (ids with only a face get None histograms)"""
-    out = {pid: (lk[0], lk[1], None) for pid, lk in (looks or {}).items()}
-    for pid, f in (faces or {}).items():
-        h = out.get(pid, (None, None, None))
-        out[pid] = (h[0], h[1], f)
-    return out
-
-
 def assign_face(face_box, boxes):
     """face box (x0, y0, x1, y1, 0-1) -> the person id whose box holds it in its upper part, or None.
     boxes: {id: box}.  Several: the one whose head height fits best."""
@@ -271,143 +180,6 @@ def assign_face(face_box, boxes):
     return min(cand)[1] if cand else None
 
 
-FACE_SAME = 0.35          # 0.5.91: ArcFace cosine at which two faces are one person (same person ~0.5-0.8,
-                          # different ~0.0-0.2)
-FACE_MIN_COUNT = 3        # a face cluster needs this many faces to be a person (else: a stray detection)
-FACE_KEEP_RUN = 2         # a track changes its face only after this many faces in a row of the other person
-
-
-def face_clusters(embs, same=FACE_SAME, min_count=FACE_MIN_COUNT, rounds=3):
-    """0.5.91 (2026-11-21 _004: five men in white, the tracker passed numbers between them when they crossed): group
-    L2-normalised face embeddings into people.  Centroid clustering: each face joins the nearest person if the
-    cosine reaches `same`, else starts a new one; centroids closer than `same` merge; then every face is assigned
-    again.  -> (labels per face, -1 = none; centroids)"""
-    import numpy as np
-    if not len(embs):
-        return [], []
-    X = np.asarray(embs, np.float32)
-    X /= np.maximum(np.linalg.norm(X, axis=1, keepdims=True), 1e-6)
-    cents = []
-    for x in X:
-        if cents:
-            sims = np.asarray(cents) @ x
-            j = int(np.argmax(sims))
-            if sims[j] >= same:
-                c = cents[j] + x
-                cents[j] = c / max(float(np.linalg.norm(c)), 1e-6)
-                continue
-        cents.append(x.copy())
-    for _ in range(rounds):
-        C = np.asarray(cents)
-        lab = np.argmax(X @ C.T, 1)
-        cents = []
-        for j in range(len(C)):
-            m = X[lab == j]
-            if len(m):
-                c = m.mean(0)
-                cents.append(c / max(float(np.linalg.norm(c)), 1e-6))
-        merged = []
-        for c in cents:                                   # people closer than `same` are one
-            for k, d in enumerate(merged):
-                if float(c @ d) >= same:
-                    e = c + d
-                    merged[k] = e / max(float(np.linalg.norm(e)), 1e-6)
-                    break
-            else:
-                merged.append(c)
-        cents = merged
-    C = np.asarray(cents)
-    S = X @ C.T
-    lab = np.argmax(S, 1)
-    counts = np.bincount(lab, minlength=len(C))
-    out = [int(l) if S[i, l] >= same and counts[l] >= min_count else -1 for i, l in enumerate(lab)]
-    keep = sorted({l for l in out if l >= 0})
-    remap = {l: n for n, l in enumerate(keep)}
-    return [remap.get(l, -1) for l in out], [C[l] for l in keep]
-
-
-def split_by_face(per_frame, obs, labels, keep_run=FACE_KEEP_RUN):
-    """0.5.91: a track is one person only while his face stays the same.  obs [(frame index, id, embedding)],
-    labels from face_clusters.  Where a track's face changes to another person (for keep_run faces in a row) the
-    track is cut half-way between the two faces; every piece with a face is renamed after that person (FACE_ID +
-    person), so pieces of one person anywhere in the clip are one id; pieces without a face keep their id.  Two
-    boxes of one person in one frame: the second keeps a separate id.  -> (new per_frame, {new id: person}, notes)"""
-    by_id = {}
-    for (i, pid, _), lab in zip(obs, labels):
-        if lab >= 0:
-            by_id.setdefault(pid, []).append((i, lab))
-    # 0.5.91 (_012, 24.2-26.5 s): the lead singer turning away gave a 6th "person" whose faces all came from his own
-    # track - a cluster seen on one track only, on a track that is mostly someone else, is that someone at an odd
-    # angle: no cut
-    # (_014: a few stray faces of that 'person' on other tracks kept the cut: count them instead - a person is
-    # established only when a fair share of his faces are on OTHER tracks)
-    total = {}
-    for pid, seq in by_id.items():
-        for _, lab in seq:
-            total.setdefault(lab, {}).setdefault(pid, 0)
-            total[lab][pid] += 1
-    for pid, seq in by_id.items():
-        counts = {}
-        for _, lab in seq:
-            counts[lab] = counts.get(lab, 0) + 1
-        main = max(counts, key=counts.get)
-
-        def elsewhere(lab):
-            n_all = sum(total[lab].values())
-            n_out = n_all - total[lab].get(pid, 0)
-            return n_out >= max(FACE_MIN_COUNT, 0.3 * n_all)
-        by_id[pid] = [(i, main if (lab != main and not elsewhere(lab)) else lab) for i, lab in seq]
-    pieces = {}                                           # id -> [(from frame, to frame, person)]
-    notes = []
-    for pid, seq in by_id.items():
-        seq.sort()
-        runs = []                                         # [person, first i, last i, faces]
-        for i, lab in seq:
-            if runs and runs[-1][0] == lab:
-                runs[-1][2], runs[-1][3] = i, runs[-1][3] + 1
-            else:
-                runs.append([lab, i, i, 1])
-        clean = []                                        # a short run between two runs is a stray face
-        for r in runs:
-            if clean and r[3] < keep_run and r is not runs[-1]:
-                continue
-            if clean and clean[-1][0] == r[0]:
-                clean[-1][2], clean[-1][3] = r[2], clean[-1][3] + r[3]
-            else:
-                clean.append(list(r))
-        if len(clean) > 1 and clean[-1][3] < keep_run:    # a stray face at the very end
-            clean[-2][2] = clean[-1][2]
-            clean.pop()
-        span = []
-        for n, r in enumerate(clean):
-            a = -10 ** 9 if n == 0 else (clean[n - 1][2] + r[1] + 1) // 2
-            b = 10 ** 9 if n == len(clean) - 1 else (r[2] + clean[n + 1][1] + 1) // 2 - 1
-            span.append((a, b, r[0]))
-        pieces[pid] = span
-        if len(span) > 1:
-            notes.append(f"track {pid} changes person at frame(s) {[s_[0] for s_ in span[1:]]}: "
-                         f"persons {[s_[2] for s_ in span]}")
-    out, person_of = [], {}
-    for i, fr in enumerate(per_frame):
-        row = {}
-        for pid, b in fr.items():
-            nid = pid
-            for a, z, lab in pieces.get(pid, ()):
-                if a <= i <= z:
-                    nid = FACE_ID + lab
-                    break
-            if nid in row:                                # one person twice in a frame
-                if iou(row[nid], b) >= DUP_IOU:           # 0.5.91 (_012, 8.5 s): the same box twice - one copy
-                    continue
-                nid = SPLIT_ID + pid                      # else keep them apart
-            row[nid] = b
-            if nid >= FACE_ID and nid < SPLIT_ID:
-                person_of[nid] = nid - FACE_ID
-        out.append(row)
-    return out, person_of, notes
-
-
-FACE_ID, SPLIT_ID = 1000, 5000   # ids given by split_by_face (tracker ids are small numbers)
 DUP_IOU = 0.7                    # two boxes of one person overlapping this much are one detection
 WIDE_BOX = 1.6                   # 0.5.91: a box this much wider than the person's usual box spans two people
 HIDDEN_COVER, HIDDEN_AREA = 0.8, 0.35   # a box this much inside a bigger one (and this small) = a hidden person
@@ -522,121 +294,312 @@ def clean_frames(frames, face_boxes=None):
                     "box(es) dropped"]
 
 
-def reid_merge(per_frame, looks=None, times=None, keep=None):
-    """join ids the tracker split.  per_frame: [{id: box}]; looks: appearance() or None (elimination only).
-    keep: ids that must stay roots (the people numbered at the start).  -> (new per_frame, joins, unsure) where
-    joins = [{"new": id, "into": id, "at": s, "why": "elimination"|"look", "look": sim}] and
-    unsure = [{"new": id, "at": s, "candidates": [[id, sim], ...]}]."""
-    times = times or list(range(len(per_frame)))
-    looks = looks or {}
-    seen = {}
+# ---------------------------------------------------------------------------------------------------- identity
+# 0.5.91 (user 16:11, H3MD_00154: numbers jumped between two women at the cuts - ArcFace alone could not tell three
+# AI-generated women apart (one person's own faces 0.24-0.39, two people 0.10-0.27), while five men in the same white
+# clothes can be told apart ONLY by their faces).  Identity by tracklets, after Zhang et al., "Tracking Persons-of-
+# Interest via Unsupervised Representation Adaptation" (music videos): the clip teaches itself what tells its people
+# apart - two halves of one tracklet are one person, two tracklets on screen together are two people - so each cue
+# (face, hair colour, clothes colour) counts as much as it separates the people of THIS clip.  Then:
+# 1. tracklets: every tracker id is cut at the shot cuts and where its look changes (the tracker passed it on);
+# 2. tracklets are merged, most alike first; never two seen together, never when another person fits as well;
+# 3. the people are the N biggest groups (N = people on screen together for at least 1 s); a smaller piece joins the
+#    one it is clearly closest to (or the only one it can be), else it stays a person of its own - nothing is guessed.
+# Replaces 0.5.9 reid_merge and 0.5.91 face_clusters / split_by_face (per-face clusters with a fixed threshold).
+ID_MIN_DET = 3          # a tracklet with fewer detections takes no part in learning and merging (only in joining)
+ID_SPLIT_W = 4          # a look change inside a tracklet needs this many detections on each side ...
+ID_SPLIT = 0.0          # ... and the two sides scoring below this (0 = as alike as two different people usually are)
+ID_SPLIT_WIN = 8        # an A-B-A swap (A on both ends): windows of this many detections on each side, faces only ...
+ID_STRONG = 3.0         # ... when faces tell this clip's people apart at least this well (d')
+ID_DARK = 0.1           # a frame darker than this (mean 0-1) gives no colour samples (a blackout: colours are noise)
+ID_MERGE = 0.5          # merge groups scoring this (1 = as alike as one person usually is) ...
+ID_FLOOR = 0.0          # ... or this while there are more groups than people on screen
+ID_AMBIG = 0.3          # ... unless someone seen together with the partner fits within this
+ID_LOOSE, ID_MARGIN = -0.5, 0.8   # a small piece joins the closest person when it scores this and beats the next by this
+ID_TOGETHER = 2         # sampled frames two tracklets may share and still be one person (a ghost box in the dark)
+ID_HANDOFF_IOU = 0.3    # frames where their boxes overlap this much are a hand-over / double box, not "together"
+ID_MIN_CUE = 0.5        # a cue that separates this clip's people less than this (d') is not used
+ID_PRIOR = {"face": (0.10, 0.60, 3.0), "hair": (0.55, 0.80, 0.0), "body": (0.55, 0.80, 0.0)}   # (different, same,
+                        # weight) when the clip has too few samples to learn from (one person, very short): faces
+                        # (ArcFace) only - colours are trusted only where this clip shows they tell its people apart
+                        # (a group in one uniform would all look 'the same')
+PERSON_ID, OTHER_ID = 1000, 5000   # ids given by identify (tracker ids are small numbers)
+
+
+def look_samples(frames_u8, per_frame):
+    """hair / clothes colour histograms of every detection standing clear (not overlapping another box much, not cut
+    by a side edge - part of a person has part of the colours).  -> {(frame index, id): (hair, clothes)}"""
+    import numpy as np
+    out = {}
+    for i, (img, fr) in enumerate(zip(frames_u8, per_frame)):
+        # grey-world white balance per frame: coloured stage light tints everyone the same way
+        f = img.astype(np.float32)
+        m = f.reshape(-1, 3).mean(0)
+        if float(m.mean()) < ID_DARK * 255:
+            continue
+        gain = np.clip(m.mean() / np.maximum(m, 1.0), 1 / 3.0, 3.0)   # capped: a near-black frame is not blown up
+        img = np.clip(f * gain, 0, 255).astype(np.uint8)
+        hh, ww = img.shape[:2]
+        items = list(fr.items())
+        for pid, b in items:
+            if (b[3] - b[1]) < MIN_H or b[0] <= 0.01 or b[2] >= 0.99:
+                continue
+            if any(iou(b, c) > CLEAR_IOU or covered(b, c) > COVERED for q, c in items if q != pid):
+                continue
+            x0, x1 = int(b[0] * ww), int(b[2] * ww)
+            y0, y1 = int(b[1] * hh), int(b[3] * hh)
+            bw, bh = x1 - x0, y1 - y0
+            if bw < 4 or bh < 8:
+                continue
+            hair = _hsv_hist(img[y0:y0 + max(2, int(bh * 0.15)), x0 + int(bw * 0.2):x1 - int(bw * 0.2)].reshape(-1, 3))
+            body = _hsv_hist(img[y0 + int(bh * 0.25):y0 + int(bh * 0.70),
+                                 x0 + int(bw * 0.25):x1 - int(bw * 0.25)].reshape(-1, 3))
+            if hair is not None and body is not None:
+                out[(i, pid)] = (hair, body)
+    return out
+
+
+def _id_feats(pid, idx, faces, looks):
+    import numpy as np
+    fw = [faces[(i, pid)] for i in idx if (i, pid) in faces]
+    face = None
+    if fw:
+        m = sum(np.asarray(e, np.float32) * max(1.0, float(s)) for e, s in fw)
+        face = m / max(float(np.linalg.norm(m)), 1e-6)
+    lk = [looks[(i, pid)] for i in idx if (i, pid) in looks]
+    return {"face": face, "hair": np.mean([l[0] for l in lk], 0) if lk else None,
+            "body": np.mean([l[1] for l in lk], 0) if lk else None}
+
+
+def _id_cues(a, b):
+    import numpy as np
+    out = {}
+    if a["face"] is not None and b["face"] is not None:
+        out["face"] = float(a["face"] @ b["face"])
+    if a["hair"] is not None and b["hair"] is not None:
+        out["hair"] = float(np.minimum(a["hair"], b["hair"]).sum())
+    if a["body"] is not None and b["body"] is not None:
+        out["body"] = float(np.minimum(a["body"], b["body"]).sum())
+    return out
+
+
+def identify(per_frame, times, cuts=(), faces=None, looks=None):
+    """per_frame: [{tracker id: box}]; faces: {(frame index, id): (embedding, face width px)}; looks: look_samples().
+    -> (per_frame with person ids, joins, unsure, notes).  joins: [{"new", "into", "at", "why", "look"}] (a piece
+    joined to a person after a gap); unsure: [{"new", "at", "candidates": [[id, score], ...]}] (not clear: kept apart)."""
+    import numpy as np
+    faces, looks = faces or {}, looks or {}
+    n = len(per_frame)
+    if n == 0:
+        return per_frame, [], [], []
+    times = list(times)
+    step = (times[-1] - times[0]) / (n - 1) if n > 1 else 1.0
+    cuts = sorted(cuts or ())
+
+    def shot(t):
+        return sum(1 for c in cuts if t >= c - 1e-6)
+
+    raw = {}
     for i, fr in enumerate(per_frame):
         for pid in fr:
-            seen.setdefault(pid, []).append(i)
-    real = {pid for pid, fs in seen.items() if len(fs) >= REID_MIN_FRAMES}
-    root = {pid: pid for pid in seen}
+            raw.setdefault((pid, shot(times[i])), []).append(i)
 
-    def find(x):
-        while root[x] != x:
-            x = root[x]
-        return x
+    # ---- what tells this clip's people apart (before any split: halves of every tracklet, tracklets seen together)
+    def together(ka, ia, kb, ib):
+        sb = set(ib)
+        return sum(1 for i in ia if i in sb and iou(per_frame[i][ka[0]], per_frame[i][kb[0]]) < ID_HANDOFF_IOU)
 
-    frames_of = {pid: set(fs) for pid, fs in seen.items()}
-    first = {pid: fs[0] for pid, fs in seen.items()}
-    keep = set(keep or ())
-    start_ids = set(per_frame[0]) if per_frame else set()
-    joins, unsure = [], []
-    notes = []
-    def box_of(pid_root, i, latest=True):
-        bs = [bx for q, bx in per_frame[i].items() if find(q) == pid_root]
-        return bs[-1] if bs else None
-
-    def at_edge(bx):
-        return bx is not None and (bx[0] <= REID_EDGE or bx[2] >= 1 - REID_EDGE)
-
-    for new in sorted(real - start_ids, key=lambda q: first[q]):
-        if new in keep:
-            continue
-        f0 = first[new]
-        cands, why_not = [], []
-        for old in sorted({find(q) for q in real if first[q] < f0}):
-            if old == find(new):
-                continue
-            span = frames_of[old]
-            shared = sorted(span & frames_of[new])
-            gap = False
-            if max(span) >= max(frames_of[new]):        # the old one is still there after the new one ends ...
-                during = [i for i in span if f0 <= i <= max(frames_of[new])]
-                if len(during) > REID_OVERLAP:          # ... and was there meanwhile: someone else
-                    why_not.append(f"{old}: still there after it")
-                    continue
-                # 0.5.91 (_013, 24.2-26.5 s): the new track fills a gap of the old one (he turned his back, the
-                # tracker gave his back a new number, then his face came back to the old one): a candidate
-                gap = True
-            ov = 0.0
-            if not gap and (len(shared) > REID_OVERLAP or max(span) > f0 + REID_OVERLAP):
-                if len(shared) > REID_HANDOFF or max(span) > f0 + REID_HANDOFF:
-                    why_not.append(f"{old}: seen together {len(shared)} frames")
-                    continue
-                ious = []
-                for i in shared:
-                    ob = [bx for q, bx in per_frame[i].items() if find(q) == old]
-                    nb = per_frame[i].get(new)
-                    if ob and nb is not None:
-                        ious.append(max(iou(bx, nb) for bx in ob))
-                ov = sum(ious) / len(ious) if ious else 0.0
-            # walked out of the frame / walked in: then it can be a different person - do not decide by elimination
-            edge = at_edge(box_of(old, max(span))) or at_edge(per_frame[f0].get(new))
-            cands.append((old, ov, edge, len(shared)))
-        notes.append(f"track {new} from {times[f0]:.1f} s: candidates "
-                     f"{[(c[0], 'overlap %d IoU %.2f' % (c[3], c[1]), 'edge' if c[2] else 'inside') for c in cands]}; "
-                     f"ruled out {why_not}")
-        if not cands:
-            continue
-        nl = looks.get(new) if looks else None
-        scored = []
-        for old, ov, edge, sh in cands:
-            lk = look_similarity(looks.get(old), nl) if looks else 0.0
-            scored.append((lk, old, ov, edge))
-        scored.sort(reverse=True)
-        lk, best, ov, edge = scored[0]
-        others = {find(q) for q in per_frame[f0] if find(q) not in {c[0] for c in cands} | {find(new)}}
-        rival = max([look_similarity(looks.get(o), nl) for o in others] or [0.0]) if looks else 0.0
-        why = None
-        if len(scored) == 1:
-            if ov >= REID_HANDOFF_IOU:
-                why = "double box"                       # the two tracks sat on one person during the hand-over
-            elif not edge and (nl is None or (lk >= REID_SIM_ELIM and lk >= rival - REID_MARGIN)):
-                why = "elimination"                      # the only person missing, nobody walked out or in, and
-                                                         # the look does not point to someone else
-            elif lk >= REID_SIM_MIN and lk - rival >= REID_MARGIN:
-                why = "look"
+    feats = {k: _id_feats(k[0], ix, faces, looks) for k, ix in raw.items()}
+    pos, neg = {}, {}
+    big = [k for k, ix in raw.items() if len(ix) >= ID_MIN_DET]
+    for k in big:
+        ix = raw[k]
+        if len(ix) >= 2 * ID_MIN_DET:
+            h = len(ix) // 2
+            for c, s in _id_cues(_id_feats(k[0], ix[:h], faces, looks), _id_feats(k[0], ix[h:], faces, looks)).items():
+                pos.setdefault(c, []).append(s)
+    for a in range(len(big)):
+        for b in range(a + 1, len(big)):
+            ka, kb = big[a], big[b]
+            if together(ka, raw[ka], kb, raw[kb]) > ID_TOGETHER:
+                for c, s in _id_cues(feats[ka], feats[kb]).items():
+                    neg.setdefault(c, []).append(s)
+    cal, notes = {}, []
+    for c in ("face", "hair", "body"):
+        if len(pos.get(c, [])) >= 2 and len(neg.get(c, [])) >= 2:
+            mp, mn = float(np.median(pos[c])), float(np.median(neg[c]))
+            sd = float(np.sqrt((np.std(pos[c]) ** 2 + np.std(neg[c]) ** 2) / 2))
+            cal[c] = (mn, mp, (mp - mn) / max(sd, 1e-3))
         else:
-            if lk >= REID_SIM_MIN and lk - scored[1][0] >= REID_MARGIN and lk - rival >= REID_MARGIN:
-                why = "look"
-        def has_face(lk_):
-            return lk_ is not None and len(lk_) > 2 and lk_[2] is not None
-        if not why and has_face(nl) and all(has_face(looks.get(o)) and s_ <= 0.0 for s_, o, _, _ in scored):
-            # 0.5.91 (_004, 3.0 s): every candidate has a face and none is like the new one - a new person walking
-            # in, not someone lost: no warning
-            notes.append(f"track {new}: a new person (the face matches none of {[s[1] for s in scored]})")
+            cal[c] = ID_PRIOR[c]
+    notes.append("what tells people apart here: " + ", ".join(
+        f"{c} {'learned' if len(pos.get(c, [])) >= 2 and len(neg.get(c, [])) >= 2 else 'default'} "
+        f"(one person {cal[c][1]:.2f}, two people {cal[c][0]:.2f}, weight {max(0.0, cal[c][2]):.1f})"
+        for c in ("face", "hair", "body")))
+
+    def score(fa, fb):
+        num = den = 0.0
+        for c, v in _id_cues(fa, fb).items():
+            mn, mp, w = cal[c]
+            if w < ID_MIN_CUE or mp <= mn:
+                continue
+            num += w * (v - mn) / (mp - mn)
+            den += w
+        return None if den == 0 else num / den
+
+    # ---- 1. tracklets: cut where the look changes
+    def split(pid, ix):
+        if len(ix) < 2 * ID_SPLIT_W:
+            return [ix]
+        best = None
+        for j in range(ID_SPLIT_W, len(ix) - ID_SPLIT_W + 1):     # everything before vs everything after
+            v = score(_id_feats(pid, ix[:j], faces, looks), _id_feats(pid, ix[j:], faces, looks))
+            if v is not None and v < ID_SPLIT and (best is None or v < best[0]):
+                best = (v, j)
+        if best is None and cal["face"][2] >= ID_STRONG:
+            # an A-B-A swap (two look-alikes crossing) has A at both ends: a short window on each side, faces only -
+            # and only where faces clearly tell this clip's people apart (else the windows only find noise)
+            mn, mp, _ = cal["face"]
+            for j in range(ID_SPLIT_W, len(ix) - ID_SPLIT_W + 1):
+                c = _id_cues(_id_feats(pid, ix[max(0, j - ID_SPLIT_WIN):j], faces, {}),
+                             _id_feats(pid, ix[j:j + ID_SPLIT_WIN], faces, {})).get("face")
+                v = None if c is None else (c - mn) / (mp - mn)
+                if v is not None and v < ID_SPLIT and (best is None or v < best[0]):
+                    best = (v, j)
+        if best is None:
+            return [ix]
+        notes.append(f"track {pid} changes person at {times[ix[best[1]]]:.2f} s (look {best[0]:.2f})")
+        return split(pid, ix[:best[1]]) + split(pid, ix[best[1]:])
+
+    tl = {}
+    for (pid, s), ix in raw.items():
+        for part, p_ix in enumerate(split(pid, ix) if len(ix) >= ID_MIN_DET else [ix]):
+            tl[(pid, s, part)] = p_ix
+    F = {k: _id_feats(k[0], ix, faces, looks) for k, ix in tl.items()}
+    keys = sorted(tl, key=lambda k: tl[k][0])
+    T = {}
+    for a in range(len(keys)):
+        for b in range(a + 1, len(keys)):
+            t = together(keys[a], tl[keys[a]], keys[b], tl[keys[b]])
+            if t:
+                T[(keys[a], keys[b])] = T[(keys[b], keys[a])] = t
+
+    def g_tog(ga, gb):
+        return sum(T.get((a, b), 0) for a in ga for b in gb)
+
+    def g_score(ga, gb):
+        ss = [(score(F[a], F[b]), len(tl[a]) * len(tl[b])) for a in ga for b in gb]
+        ss = [(s, w) for s, w in ss if s is not None]
+        return sum(s * w for s, w in ss) / sum(w for _, w in ss) if ss else None
+
+    size = lambda g: sum(len(tl[k]) for k in g)
+    first = lambda g: min(tl[k][0] for k in g)
+    # people on screen together for at least 1 s (a box on the same person twice counts once)
+    counts = []
+    for fr in per_frame:
+        bs = list(fr.values())
+        counts.append(sum(1 for x, b in enumerate(bs) if not any(iou(b, c) > DUP_IOU for c in bs[:x])))
+    counts.sort(reverse=True)
+    kmax = max(1, counts[min(len(counts) - 1, max(0, int(round(1.0 / max(step, 1e-6))) - 1))])
+
+    # ---- 2. merge, most alike first
+    groups = [[k] for k in keys if len(tl[k]) >= ID_MIN_DET]
+    small = [[k] for k in keys if len(tl[k]) < ID_MIN_DET]
+    n_merge = 0
+    while True:
+        pairs = []
+        for a in range(len(groups)):
+            for b in range(a + 1, len(groups)):
+                if g_tog(groups[a], groups[b]) > ID_TOGETHER:
+                    continue
+                s = g_score(groups[a], groups[b])
+                if s is not None:
+                    pairs.append((s, a, b))
+        pairs.sort(reverse=True)
+        done = False
+        for s, a, b in pairs:
+            if s < ID_MERGE and (len(groups) <= kmax or s < ID_FLOOR):
+                break
+            # someone seen together with the partner fits as well: not clear which - no guess
+            amb = False
+            for x, y in ((a, b), (b, a)):
+                for c in range(len(groups)):
+                    if c in (a, b) or g_tog(groups[c], groups[y]) <= ID_TOGETHER \
+                            or g_tog(groups[c], groups[x]) > ID_TOGETHER:
+                        continue
+                    r = g_score(groups[x], groups[c])
+                    if r is not None and r > s - ID_AMBIG:
+                        amb = True
+            if amb:
+                continue
+            groups[a] += groups[b]
+            del groups[b]
+            n_merge += 1
+            done = True
+            break
+        if not done:
+            break
+
+    # ---- 3. the people = the biggest groups; smaller pieces join the one they clearly are
+    groups.sort(key=lambda g: (-size(g), first(g)))
+    anchors, rest = groups[:kmax], groups[kmax:] + small
+    joins, unsure, left = [], [], []
+    owner = {}
+    for n_, g in enumerate(anchors):
+        for k in g:
+            owner[k] = n_
+    for g in sorted(rest, key=size):
+        cand = [(g_score(g, a), x) for x, a in enumerate(anchors) if g_tog(g, a) <= ID_TOGETHER]
+        scored = sorted([c for c in cand if c[0] is not None], key=lambda c: -c[0])
+        why, to = None, None
+        if scored and scored[0][0] >= ID_LOOSE and (len(scored) == 1 or scored[0][0] - scored[1][0] >= ID_MARGIN):
+            why, to = "look", scored[0][1]
+        elif len(cand) == 1 and not scored and size(g) >= ID_MIN_DET:
+            why, to = "elimination", cand[0][1]
+        else:
+            # the same track goes on before and after this piece as one person: her at an odd angle, in a crossing
+            # or a blackout (the piece is one or more consecutive parts of that track)
+            tracks = {(k[0], k[1]) for k in g}
+            parts = sorted(k[2] for k in g)
+            if len(tracks) == 1 and parts == list(range(parts[0], parts[-1] + 1)):
+                pid, s_ = tracks.pop()
+                nb = {owner.get((pid, s_, parts[0] - 1)), owner.get((pid, s_, parts[-1] + 1))}
+                if len(nb) == 1 and None not in nb and any(c[1] in nb for c in cand):
+                    why, to = "same track", nb.pop()
+        if to is not None:
+            anchors[to] += g
+            for k in g:
+                owner[k] = to
+            joins.append({"new": g[0][0], "into": anchors[to][0][0], "at": round(times[tl[g[0]][0]], 2), "why": why,
+                          "look": round(scored[0][0], 3) if scored else 0.0})
             continue
-        if not why:
-            unsure.append({"new": new, "at": times[f0], "candidates": [[o, round(s_, 3)] for s_, o, _, _ in scored]})
-            notes.append(f"track {new}: not joined (look {lk:.2f}, best other on screen {rival:.2f}, "
-                         f"{'edge' if edge else 'inside'})")
-            continue
-        root[new] = best
-        frames_of[best] = frames_of[best] | frames_of[new]
-        joins.append({"new": new, "into": best, "at": times[f0], "why": why, "look": round(lk, 3)})
+        left.append(g)
+        if size(g) >= ID_MIN_DET and scored and scored[0][0] >= ID_LOOSE:
+            unsure.append({"new": g[0][0], "at": round(times[tl[g[0]][0]], 2),
+                           "candidates": [[anchors[x][0][0], round(s, 2)] for s, x in scored[:3]]})
+    notes.append(f"{len(raw)} track pieces -> {len(anchors)} people (on screen together at most {kmax}), "
+                 f"{n_merge} merges, {len(joins)} joined after, {len(left)} left apart")
+
+    # ---- new ids; where two pieces of one person share a frame (a ghost box, a hand-over) the newer one wins
+    order = sorted(range(len(anchors)), key=lambda x: first(anchors[x]))
+    new_id = {}
+    for rank, x in enumerate(order):
+        for k in anchors[x]:
+            new_id[k] = PERSON_ID + rank
+    for rank, g in enumerate(left):
+        for k in g:
+            new_id[k] = OTHER_ID + rank
+    at = {}
+    for k, ix in tl.items():
+        for i in ix:
+            at.setdefault(i, []).append(k)
     out = []
     for i, fr in enumerate(per_frame):
         row = {}
-        for pid, b in sorted(fr.items(), key=lambda kv: first[kv[0]]):
-            row[find(pid)] = b                           # where both were seen, the newer track's box wins
+        for k in sorted(at.get(i, []), key=lambda k: tl[k][0]):
+            row[new_id[k]] = fr[k[0]]
         out.append(row)
-    reid_merge.notes = notes
-    return out, joins, unsure
+    return out, joins, unsure, notes
 
 
 def report(per_frame, times):
