@@ -91,9 +91,6 @@ def test_remake_never_gets_a_part_over_345(monkeypatch):
     assert len(out) > 1 and all(int(p["length"]) <= AS.REMAKE_MAX for p in out), notes
 
 
-def test_spare_gap_keeps_one_step_margin():
-    assert abs(K.spare_gap(85) - 68 / 24) < 1e-9          # 16 GB at 1664x960: 124-frame parts, 85 new frames
-
 
 def _frames(n_s=12.0):
     fr = []
@@ -102,12 +99,3 @@ def _frames(n_s=12.0):
     return fr
 
 
-def test_add_spares_fills_long_gaps_only():
-    fr = _frames()
-    idx = {round(f["at"], 2): i for i, f in enumerate(fr)}
-    moments = [(idx[0.0], "swap"), (idx[2.0], "swap"), (idx[9.0], "swap")]
-    spares, notes = K.add_spares(fr, moments, {1, 2}, 12.0, 2.83)
-    ts = [fr[i]["at"] for i in spares]
-    assert all(2.0 < t < 9.0 or t > 9.0 for t in ts) and not any(t < 2.0 for t in ts)
-    pts = sorted([0.0, 2.0, 9.0] + ts + [12.0 - 2 / 24])
-    assert max(b - a for a, b in zip(pts, pts[1:])) <= 2.83 + 0.6

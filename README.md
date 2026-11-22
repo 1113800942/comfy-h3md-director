@@ -189,11 +189,11 @@ pass and its own high-res pass on top.
      Numbers without a line stay themselves. Run again - the tracking is reused, so it takes seconds. *Descriptions*
      are optional: the AI describes each character from the picture and asks you what the picture does not show (a
      half-body picture: trousers and shoes). **H3MD Keyframe Prepare** tracks the people (core SAM3.1), finds the cuts
-     and picks the keyframe moments (one per part the Director makes on your GPU - a 5090: one per about 12 s - plus
-     one after each shot cut, which is also the large clear one; never a close-up
+     and picks the keyframe moments only where the picture needs one (the start, each shot cut, a person coming in or
+     back, people changing places, one large clear one per person; never a close-up
      the edit model cannot redraw, never a frame where the people are too dark to read; a person lost after a
-     blackout, a cut or a spin is found again), plus a **spare keyframe** only where a gap is longer than one part of
-     your GPU. **H3MD Keyframe Export** writes
+     blackout, a cut or a spin is found again). A stretch where nothing new happens keeps one keyframe: the Director's
+     carried frames take the swapped people from one part into the next. **H3MD Keyframe Export** writes
      `output/H3MD_keyframes/<name>_keyframe_export_<date>_<no>.zip` (never overwritten) and previews its keyframes.
    - **Give the zip to an AI** (Claude, ChatGPT, Gemini ... - one that reads pictures well) with the skill
      `skills/h3md-keyframe` (the package also carries a short version). It reads every keyframe - who goes where, both
@@ -234,10 +234,9 @@ faces), so the source decides how far it goes:
 - **Not supported:** music videos with edited-in effects - a person changing clothes from one frame to the next, a face
   morphing into another person's, transitions that blend two people. There the source frame itself holds two people at
   once, so no keyframe can say who it is.
-- **GPU: 16 GB VRAM or more.** The Director cuts the video into parts that fit your GPU and starts every part on a
-  keyframe; Prepare takes one keyframe per part of the GPU it runs on and a spare ("(spare)" on the sheets) only where
-  a gap is longer than one part - so make the keyframes on the GPU (or the same class of GPU) that will run the plan:
-  a plan made on a 5090 has fewer keyframes than a 16 GB GPU needs. Below 16 GB it is not supported. A stretch made only of close-ups cannot hold a
+- **GPU: 16 GB VRAM or more.** The Director cuts the video into parts that fit your GPU and starts a part on a
+  keyframe where it can; a part that starts between keyframes continues from the 39 frames carried over from the part
+  before, so the plan does not depend on the GPU. Below 16 GB it is not supported. A stretch made only of close-ups cannot hold a
   keyframe at all; if a part has to start there, the Director names the second in its notes.
 
 ## Reporting a problem

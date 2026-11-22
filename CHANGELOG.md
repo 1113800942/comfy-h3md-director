@@ -5,18 +5,23 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
 ## [0.6.1] - 2026-11-22
 
 ### Changed / 变更
-- Multi-person swap keyframes: **as many as the Director needs, not one every 2-4 s.** Keyframe Prepare now takes one
-  keyframe per part the Director makes on the GPU it runs on (a 5090: one per about 12 s; the first one on the first
-  clear frame), the keyframe after a shot cut is also the large clear one (most people, then biggest), and a person
-  still without a large clear keyframe gets one. The 0.5.91 rule "every replaced person at least every 3 s" is gone
-  (it dated from before the Director cut on keyframes). Spare keyframes follow THIS GPU instead of a fixed 16 GB card:
-  only where a gap is longer than one of its parts. `max_gap_s` 0 (new default) = automatic. A 38 s five-person clip
-  on a 5090: 19 keyframes -> 9; 28.5 s three dancers: 14 -> 5 - Recast takes a third of the time.
-  多人换人关键帧按导演台实际需要取：按这块显卡导演台每段一张（5090 约 12 秒一张，开头那张取第一个清楚的画面），剪辑点后那张同时就是
-  大而清楚的那张，还缺的人再补一张；"每人每 3 秒一张"删除（接缝修好前的保底）；备用关键帧按本机显卡、只在空档比一段长的地方插一张。
-  max_gap_s 默认 0 = 自动。38 秒五人片 19 张 -> 9 张，三人舞 14 -> 5，画关键帧的时间约为原来的三分之一。
-- A slot with no clear frame takes a lit frame that is not a double box when there is one (a double box at 1.17 s had
-  been a keyframe). 没有合格帧时也优先取不暗、不是一框两人的帧。
+- Multi-person swap keyframes **only where the picture needs one** - not by seconds, parts or GPU. Keyframe Prepare
+  takes one at the start, one after each shot cut (the clearest, so it is also the large clear one), one when a
+  replaced person comes in for the first time or comes back after leaving by a side edge, one after people change
+  places, and one large clear keyframe per person still missing one. A stretch where nothing new happens keeps the
+  keyframe it has: the Director's 39 carried frames take the swapped people from one part into the next. Removed: the
+  0.5.x "one every 5 s" base, the 0.5.91 "every replaced person at least every 3 s" and the spare keyframes for small
+  GPUs (they piled keyframes into short parts that the carried frames already hold). `max_gap_s` 0 (new default) =
+  this rule only; a number also keeps keyframes at most that far apart. A 38 s five-person clip: 19 keyframes -> 10;
+  28.5 s three dancers: 14 -> 5; 17 s: 8 -> 4.
+  多人换人关键帧**只在画面需要时放**，跟秒数、分段、显卡都不挂钩：开头一张；剪辑点后一张（挑最清楚的，同时就是大而清楚的那张）；
+  要换的人第一次出现、或从画面边上走开又回来时一张；有人换位置后一张；还缺大而清楚的人补一张。画面没新变化就不加——导演台接缝带过去的
+  39 帧会把换好的人带到下一段。删掉：旧的"每 5 秒一张"、"每人每 3 秒一张"和给小显卡的备用关键帧。max_gap_s 默认 0 = 只按这条规则；
+  填数 = 另外保证相邻不超过这么多秒。38 秒五人片 19 张 -> 10 张，三人舞 14 -> 5，17 秒 8 -> 4。
+- With no clear frame at all, the fallback takes a lit frame that is not a double box when there is one (a double box
+  at 1.17 s had been a keyframe). 没有合格帧时也优先取不暗、不是一框两人的帧。
+- The Director no longer warns about a part that starts between keyframes: it continues from the carried frames.
+  导演台不再把"某段开头没有关键帧"当警告：它接着上一段带过来的帧继续。
 
 ## [0.6.0] - 2026-11-22
 

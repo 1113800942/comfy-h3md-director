@@ -458,12 +458,9 @@ def apply(D, segments: list, media: dict, raw: dict, width: int, height: int, mo
             if spares:
                 notes.append(f"segment {n}: {spares} spare keyframe(s) used so that every part starts on a keyframe "
                              f"(this GPU's parts are short)")
-            for f in uncovered:
-                t = (ov0 + f) / D.FPS
-                notes.append(f"WARNING segment {n}: the part starting at {t:.2f} s has no keyframe at its start (none "
-                             f"there, no spare one either): the source look may come back there for a moment. Add a "
-                             f"keyframe near {t:.1f} s. 第 {t:.1f} 秒开始的那一段开头没有关键帧，可能露出原片的样子，"
-                             f"请在这里补一张关键帧。")
+            if uncovered:   # 0.6.1 (user 01:48): normal - the 39 carried frames take the swapped people over
+                notes.append(f"segment {n}: {len(uncovered)} part(s) start between keyframes and continue from the "
+                             f"carried frames of the part before")
         out.extend(parts)
     for i, seg in enumerate(out):
         seg["index"] = i
