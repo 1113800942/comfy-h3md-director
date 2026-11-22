@@ -957,48 +957,122 @@ def score(frames, i, chosen_ids):
     return (len(ch), round(g, 2), -round(mot, 2), sum(b[3] - b[1] for _, b in ch) / len(ch))
 
 
-def pick_moments(frames, chosen_ids, duration, max_gap=5.0):
-    """Keyframe moments one after another, never more than max_gap apart (Remake: every autosplit part needs one).
-    Each next one is picked in (prev + 0.7 max_gap, prev + max_gap]: most chosen people seen, farthest from everybody
-    else (people crossing are skipped), least motion, biggest.  -> [(index into frames, kind)]; kind "swap" (chosen
-    people seen) or "plain" (nobody chosen in the frame: the source frame itself is the keyframe)."""
+ENTRY_GAP_S = 2.0          # 0.6.1: a person not seen this long who left by a side edge (or comes in by one) came back;
+EDGE_X = 0.06              # ... "by a side edge": his box within this of the left / right edge (hidden behind someone
+                           # in the middle of the frame and seen again is not a comeback - the carried frames hold him)
+ENTRY_LOOK_S = 2.5         # ... the keyframe of an entrance or a place change is taken within this after it
+
+
+def _best_frame(frames, cand, chosen_ids, pid=None):
+    """the best clear frame of cand (score(); with pid: he is seen in it, largest first) or None"""
+    sc = [(s, i) for i in cand for s in [score(frames, i, chosen_ids)] if s is not None]
+    if pid is not None:
+        sc = [x for x in sc if pid in kf_people(frames, x[1], chosen_ids)]
+    if not sc:
+        return None
+    return max(sc, key=lambda x: (x[0][0], round(clear_height(frames[x[1]], pid) if pid is not None else x[0][3], 2),
+                                  x[0][1], x[0][2]))[1]
+
+
+def pick_moments(frames, chosen_ids, duration, max_gap=0.0, cuts=()):
+    """0.6.1 (user 2026-11-22 01:48): keyframes where the PICTURE needs one - not by seconds, parts or GPU.  The
+    Director's 39 carried frames take the swapped people from one part into the next, and one keyframe carries a
+    stretch where nothing new happens (one picture can run a long video).  A keyframe:
+      - at the start (the best clear frame in the first ENTRY_LOOK_S s after the first clear one);
+      - when a replaced person appears for the first time or comes back after ENTRY_GAP_S s away (and no keyframe of
+        that stretch shows him yet): the best frame of him in its first ENTRY_LOOK_S s;
+      - after people change places, when no keyframe shows the new order yet.
+    Per shot cut (ensure_per_shot) and one large clear one per person (ensure_identity) follow.  max_gap > 0 also
+    fills any gap longer than that (an option; 0 = off).  Never a close-up, a dark frame or a double box (score()).
+    No clear frame at all: the frame with the tallest chosen person that is not a close-up, else the source frame.
+    -> [(index into frames, kind)] sorted by time"""
     last = duration - 2.0 / FPS
     idx = [i for i, f in enumerate(frames) if 0.0 <= f["at"] <= last]
-    out, lo, hi = [], 0.0, min(max_gap / 2.0, last)   # the first one near the start (who is who)
-    while idx and lo <= last:
-        cand = [i for i in idx if lo <= frames[i]["at"] <= hi]
-        if not cand:
-            cand = [min(idx, key=lambda i: abs(frames[i]["at"] - hi))]
-        best, bs = None, None
-        for i in (reversed(cand) if out else cand):  # ties: first one early, then the later moment (fewer in all)
-            s = score(frames, i, chosen_ids)
-            if s is not None and (bs is None or s > bs):
-                best, bs = i, s
-        if best is None:
-            present = [i for i in cand if any(w[0] in chosen_ids for w in frames[i].get("who") or ())
-                       and not frames[i].get("dark")]
-            usable = [i for i in present if not closeup(frames[i], chosen_ids)]
-            if present and not usable:
-                # only close-ups here: no keyframe, look further on (the next mid shot carries the swap)
-                lo, hi = hi, min(hi + max_gap, last)
-                if lo >= last:
+    if not idx:
+        return []
+    at = lambda i: frames[i]["at"]
+    picked = []
+
+    def shows(pid, t0, t1):
+        return any(t0 - 1e-6 <= at(i) <= t1 + 1e-6 and pid in kf_people(frames, i, chosen_ids) for i in picked)
+
+    def window(t0, t1):
+        return [i for i in idx if t0 - 1e-6 <= at(i) <= t1 + 1e-6]
+
+    # the start
+    first = next((i for i in idx if score(frames, i, chosen_ids) is not None), None)
+    if first is not None:
+        b = _best_frame(frames, window(at(first), at(first) + ENTRY_LOOK_S), chosen_ids)
+        picked.append(b if b is not None else first)
+    # entrances and comebacks, in time order (one keyframe can show several people who come in together)
+    events = []
+    for pid in sorted(chosen_ids):
+        seen = [(at(i), next(b_ for q, b_ in visible(frames[i]) if q == pid)) for i in idx
+                if pid in kf_people(frames, i, chosen_ids)]
+        if not seen:
+            continue
+        edge = lambda b_: b_[0] <= EDGE_X or b_[2] >= 1 - EDGE_X
+        s0, prev, prev_box = seen[0][0], seen[0][0], seen[0][1]
+        for t, box in seen[1:] + [(None, None)]:
+            if t is None or (t - prev > ENTRY_GAP_S and (edge(prev_box) or edge(box))):
+                if prev - s0 >= 0.5:
+                    events.append((s0, prev, pid))
+                if t is not None:
+                    s0 = t
+            if t is not None:
+                prev, prev_box = t, box
+    for s0, s1, pid in sorted(events):
+        if shows(pid, s0, s1):
+            continue
+        b = _best_frame(frames, window(s0, min(s1, s0 + ENTRY_LOOK_S)), chosen_ids, pid)
+        if b is None:
+            b = _best_frame(frames, window(s0, s1), chosen_ids, pid)
+        if b is not None:
+            picked.append(b)
+    # place changes: the new order needs a keyframe
+    try:
+        changes = place_changes(frames, sorted(chosen_ids))
+    except Exception:
+        changes = []
+    for n, (c0, c1, _) in enumerate(changes):
+        end = changes[n + 1][0] if n + 1 < len(changes) else last
+        if any(c1 - 1e-6 <= at(i) <= end + 1e-6 for i in picked):
+            continue
+        b = _best_frame(frames, window(c1, min(end, c1 + ENTRY_LOOK_S)), chosen_ids)
+        if b is None:
+            b = _best_frame(frames, window(c1, end), chosen_ids)
+        if b is not None:
+            picked.append(b)
+    # optional: no gap longer than max_gap
+    if max_gap and max_gap > 0:
+        while True:
+            ts = sorted({at(i) for i in picked} | {0.0, last})
+            gaps = [(b_ - a_, a_, b_) for a_, b_ in zip(ts, ts[1:]) if b_ - a_ > max_gap + 1e-6]
+            added = False
+            for _, a_, b_ in sorted(gaps, reverse=True):
+                b = _best_frame(frames, window(a_ + (b_ - a_) / 3, b_ - (b_ - a_) / 3), chosen_ids) or \
+                    _best_frame(frames, window(a_ + 0.5, b_ - 0.5), chosen_ids)
+                if b is not None and b not in picked:
+                    picked.append(b)
+                    added = True
                     break
-                continue
-            if usable:
-                best = max(usable, key=lambda i: max(w[1][3] - w[1][1] for w in frames[i]["who"]
-                                                     if w[0] in chosen_ids))
-                out.append((best, "swap"))
-            else:
-                lit = [i for i in cand if not frames[i].get("dark")] or cand
-                best = lit[len(lit) // 2]
-                out.append((best, "plain"))
-        else:
-            out.append((best, "swap"))
-        t = frames[best]["at"]
-        if t + max_gap >= last:
-            break
-        lo, hi = t + SPACING * max_gap, t + max_gap
-    return out
+            if not added:
+                break
+    out = [(i, "swap") for i in sorted(set(picked), key=at)]
+    if out:
+        return out
+    # nothing clear in the whole clip: the old fallbacks (lit, not a double box when there is one)
+    ok = lambda i: not frames[i].get("bad") and not frames[i].get("dark")
+    present = [i for i in idx if any(w_[0] in chosen_ids for w_ in frames[i].get("who") or ())]
+    usable = [i for i in present if not closeup(frames[i], chosen_ids)]
+    usable = [i for i in usable if ok(i)] or usable
+    if usable:
+        return [(max(usable, key=lambda i: max(w_[1][3] - w_[1][1] for w_ in frames[i]["who"]
+                                                if w_[0] in chosen_ids)), "swap")]
+    if present:
+        return []                                   # only close-ups: finish_moments takes one anyway
+    lit = [i for i in idx if ok(i)] or idx
+    return [(lit[len(lit) // 2], "plain")]
 
 
 
@@ -1045,8 +1119,8 @@ def ensure_per_shot(frames, moments, chosen_ids, cuts, duration, settle=SHOT_SET
             scored = [(s, i) for i in cand for s in [score(frames, i, chosen_ids)] if s is not None]
             if scored:
                 break
-        if scored:
-            out.append((max(scored)[1], "swap"))
+        if scored:   # 0.6.1 (user 01:33): the shot's keyframe is also its large clear one - most people, then biggest
+            out.append((max(scored, key=lambda x: (x[0][0], round(x[0][3], 2), x[0][1], x[0][2]))[1], "swap"))
         elif cand and not any(any(w[0] in chosen_ids for w in frames[i].get("who") or ()) for i in cand):
             lit = [i for i in cand if not frames[i].get("dark")] or cand
             out.append((lit[len(lit) // 2], "plain"))
@@ -1206,112 +1280,9 @@ def kf_people(frames, i, chosen_ids):
     return {pid for pid, b in visible(frames[i]) if pid in chosen_ids and not sliver(b)}
 
 
-COVER_S = 3.0             # 0.5.91 (user 03:31): every replaced person on screen has a keyframe at least every this
-                          # many seconds - the Director's parts depend on the GPU it runs on (token budget), and each
-                          # part takes the look of a person only from its own keyframes
 NEAR_S = 0.5              # 0.5.91: two keyframes closer than this showing the same people are one too many
-COVER_APART = 0.75        # ... and an added keyframe is at least this far from the others (no near copies)
-COVER_MIN_S = 0.5         # ... when he is seen for at least this long in that stretch (a short
-                          # appearance in a part still gets his look from a keyframe)
-
-
-def ensure_cover(frames, moments, chosen_ids, duration, every=COVER_S, min_s=COVER_MIN_S):
-    """0.5.91: for every replaced person, every stretch of `every` seconds in which he is seen clearly for min_s or
-    more holds a keyframe that shows him (a part of any length >= every then has one).  Greedy from the start: the
-    first such stretch without one gets the frame in its first half where he is seen best (most replaced people,
-    then tallest, no close-up), which covers up to `every` s further.  The Director picks 4 per part
-    (h3md_remake_engine.pick_keyframes).  -> (moments sorted by time, notes, warnings)"""
-    out = sorted(moments, key=lambda m: frames[m[0]]["at"])
-    notes, warns, gaps = [], [], {}
-    step = (frames[-1]["at"] - frames[0]["at"]) / (len(frames) - 1) if len(frames) > 1 else 1.0
-    last = duration - 2.0 / FPS
-    half = every / 2.0
-    for pid in sorted(chosen_ids):
-        seen = [(f["at"], i) for i, f in enumerate(frames) if f["at"] <= last and pid in kf_people(frames, i, chosen_ids)]
-        j = 0
-        while j < len(seen):
-            t = seen[j][0]
-            if sum(1 for u, _ in seen if t <= u < t + every) * step < min_s - 1e-6:
-                j += 1
-                continue
-            cov = [frames[i]["at"] for i, _ in out if pid in kf_people(frames, i, chosen_ids)
-                   and abs(frames[i]["at"] - t) <= half]
-            if cov:
-                t_next = max(cov) + half
-            else:
-                cand = [i for u, i in seen if t <= u <= t + half and score(frames, i, chosen_ids) is not None
-                        and all(abs(frames[i]["at"] - frames[m[0]]["at"]) >= COVER_APART for m in out)]
-                if not cand:
-                    gaps[round(t, 1)] = gaps.get(round(t, 1), 0) + 1   # 0.5.91: one line per moment, not per person
-                    t_next = t + half
-                else:
-                    best = max(cand, key=lambda i: (len(kf_people(frames, i, chosen_ids)),
-                                                    round(clear_height(frames[i], pid), 2)))
-                    out.append((best, "swap"))
-                    out.sort(key=lambda m: frames[m[0]]["at"])
-                    notes.append(f"keyframe added at {frames[best]['at']:.2f} s: a replaced person seen around "
-                                 f"{t:.1f} s had none within {half:.1f} s")
-                    t_next = frames[best]["at"] + half
-            while j < len(seen) and seen[j][0] <= t_next:
-                j += 1
-    for t, n in sorted(gaps.items()):
-        who = "a replaced person" if n == 1 else f"{n} replaced people"
-        warns.append(f"{who} seen around {t:.1f} s {'has' if n == 1 else 'have'} no frame clear enough for a keyframe "
-                     f"there (close-ups or too dark): Remake may give {'him' if n == 1 else 'them'} another character's look. "
-                     f"{t:.1f} 秒附近有 {n} 个要换的人没有合适的关键帧（特写或太暗），可能换错。")
-    return sorted(out, key=lambda m: frames[m[0]]["at"]), notes, warns
-
-
-SPARE_GPU_GB = 16.0       # 0.5.91 seams (user 2026-11-21 19:03): the smallest GPU H3MD supports for the swap
-SPARE_MIN_STEP = 0.5      # a spare at least this far after the keyframe before it
-
-
-def spare_gap(max_new_frames: int) -> float:
-    """Longest gap (s) between keyframes that a GPU whose parts carry at most max_new_frames new frames can still
-    start every part on: the Director cuts on 17-frame steps, so one step is kept as margin."""
-    return max(17, (int(max_new_frames) // 17 - 1) * 17) / FPS
-
-
-def add_spares(frames, moments, chosen_ids, duration, max_gap_s, cuts=()):
-    """0.5.91 seams (user 2026-11-21 19:03): spare keyframes.  The Director cuts a long shot so that every part's new
-    frames begin on a keyframe (h3md_autosplit.plan_parts_kf); on a small GPU the parts are short and a long gap
-    between two keyframes holds a part start nobody reaches.  Walking every gap longer than max_gap_s (from spare_gap
-    of the smallest supported GPU; also from the last keyframe to the end): the next spare is the best clear frame in
-    the later 40 % of the reach (as far on as possible, so few are needed), else any clear frame within reach; never a
-    close-up (H3 Image cannot redraw one at the right size), never just after a cut.  Where no clear frame is in reach
-    the gap is named.  A big GPU never uses them; the plan marks them "backup".  -> (spare frame indices, notes)"""
-    if not moments or max_gap_s <= 0:
-        return [], []
-    last = duration - 2.0 / FPS
-    ts = sorted(frames[i]["at"] for i, _ in moments)
-    taken = set(i for i, _ in moments)
-    ok = {i for i, f in enumerate(frames) if i not in taken and f["at"] <= last
-          and not any(0.0 <= f["at"] - c < SHOT_SETTLE for c in cuts) and score(frames, i, chosen_ids) is not None}
-    spares, notes = [], []
-    for a, b in zip(ts, ts[1:] + [last]):
-        cur = a
-        while b - cur > max_gap_s + 1e-6:
-            reach = [i for i in ok if cur + SPARE_MIN_STEP <= frames[i]["at"] <= cur + max_gap_s]
-            late = [i for i in reach if frames[i]["at"] >= cur + 0.6 * max_gap_s]
-            if late:
-                best = max(late, key=lambda i: score(frames, i, chosen_ids))
-            elif reach:
-                best = max(reach, key=lambda i: frames[i]["at"])
-            else:
-                nxt = min((frames[i]["at"] for i in ok if cur + max_gap_s < frames[i]["at"] < b), default=b)
-                notes.append(f"no clear frame for a spare keyframe between {cur:.2f} and {nxt:.2f} s (close-ups or "
-                             f"nobody to replace): a small GPU may start a part there without one")
-                if nxt >= b:
-                    break
-                best = min((i for i in ok if frames[i]["at"] == nxt))
-            spares.append(best)
-            ok.discard(best)
-            cur = frames[best]["at"]
-    spares.sort(key=lambda i: frames[i]["at"])
-    if spares:
-        notes.append(f"{len(spares)} spare keyframe(s) at {[round(frames[i]['at'], 2) for i in spares]} s for GPUs "
-                     f"down to {SPARE_GPU_GB:.0f} GB (gaps over {max_gap_s:.2f} s); a bigger GPU does not use them")
-    return spares, notes
+# 0.6.1 (user 01:21): the 0.5.91 rule "every replaced person has a keyframe at least every 3 s" (ensure_cover) is gone -
+# it dated from before the Director cut on keyframes and nearly doubled the keyframes (Backstreet 38 s: 12 -> 19).
 
 
 def place_changes(frames, ids, min_hold=0.5):

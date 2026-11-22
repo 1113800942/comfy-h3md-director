@@ -143,7 +143,7 @@ def test_pick_moments_gap_and_crossing():
     m = K.pick_moments(fr, {11, 12}, duration=25.0, max_gap=5.0)
     ts = [fr[i]["at"] for i, _ in m]
     assert ts[0] <= 5.0
-    assert all(b - a <= 5.0 + 1e-6 for a, b in zip(ts, ts[1:]))
+    assert all(b - a <= 5.0 + 1e-6 for a, b in zip(ts, ts[1:]))   # 0.6.1: max_gap > 0 still caps the gaps
     assert 25.0 - ts[-1] <= 5.0
     assert not any(4.2 < t < 4.8 for t in ts)    # never while the two cross
     assert all(k == "swap" for _, k in m)
@@ -264,3 +264,46 @@ def test_dark_frames_are_no_keyframes():
     img[10:30, 10:20] = 200
     assert abs(K.people_light(img, [[0.1, 0.2, 0.3, 0.8]]) - 200 / 255) < 0.02
     assert K.people_light(img, [[0.6, 0.2, 0.9, 0.8]]) == 0.0
+
+
+def test_keyframes_only_where_the_picture_needs_one():
+    """0.6.1 (user 01:48): not by seconds, parts or GPU - a static 38 s stretch needs one keyframe; a person who comes in
+    gets one; people changing places get one; max_gap > 0 caps the gaps.  No spares, no 3 s per-person cover."""
+    def clip(enter=None, swap=None):
+        fr = []
+        for i in range(int(38 * 6)):
+            t = i / 6.0
+            a, b = (0.1, 0.5) if swap is None or t < swap else (0.5, 0.1)
+            who = [[1, [a, 0.2, a + 0.2, 0.95]], [2, [b, 0.2, b + 0.2, 0.95]]]
+            if enter is None or t >= enter:
+                who.append([3, [0.75, 0.2, 0.9, 0.95]])
+            fr.append({"at": t, "who": sorted(who, key=lambda w: w[1][0])})
+        return fr
+    ts = lambda fr, m: [round(fr[i]["at"], 1) for i, _ in m]
+    fr = clip(); m = K.pick_moments(fr, {1, 2, 3}, 38.0)
+    assert len(m) == 1 and ts(fr, m)[0] < 2.6
+    fr = clip(enter=20.0); m = K.pick_moments(fr, {1, 2, 3}, 38.0)
+    assert len(m) == 2 and 20.0 <= ts(fr, m)[1] <= 22.5
+    fr = clip(swap=15.0); m = K.pick_moments(fr, {1, 2, 3}, 38.0)
+    assert len(m) == 2 and ts(fr, m)[1] >= 15.0
+    fr = clip(); m = K.pick_moments(fr, {1, 2, 3}, 38.0, max_gap=12.0)
+    pts = [0.0] + [fr[i]["at"] for i, _ in m] + [38.0 - 2 / 24]
+    assert len(m) >= 3 and max(b - a for a, b in zip(pts, pts[1:])) <= 12.0 + 1e-6
+    assert not hasattr(K, "ensure_cover") and not hasattr(K, "add_spares")
+
+
+def test_slot_without_clear_frame_avoids_double_boxes():
+    """0.6.1: with no clear frame the fallback takes one that is not a double box / dark when there is one"""
+    fr = []
+    for i in range(60):
+        t = i / 6.0
+        fr.append({"at": t, "who": [[1, [0.1, 0.2, 0.3, 0.95]], [2, [0.5, 0.2, 0.7, 0.95]]], "bad": t < 4.0 or t > 4.5})
+    for f in fr:
+        if not f["bad"]:
+            f["dark"] = True                     # the only non-double-box frames are dark: then any usable one
+    m = K.pick_moments(fr, {1, 2}, 10.0, max_gap=12.0)
+    assert len(m) == 1
+    fr[30]["dark"] = False; fr[30]["bad"] = False; fr[30]["at"] = 5.0
+    fr[29]["bad"] = True
+    m = K.pick_moments([dict(f, bad=True) if i != 30 else f for i, f in enumerate(fr)], {1, 2}, 10.0, max_gap=12.0)
+    assert m and m[0][0] == 30

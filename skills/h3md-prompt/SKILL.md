@@ -420,8 +420,8 @@ groups:
      (after a cut, a turn, a crossing), the user drags a second line from the same picture and both numbers become one
      person. Numbers with no line stay as they are (passers-by). The user's lines are final.
    - Prepare never picks a frame where the people are too dark to read (a blackout, a strobe): it takes the nearest
-     lit frame. It adds **spare keyframes** where the gap between keyframes is too long for a 16 GB GPU; the Director
-     uses them only where its parts need them. They are written like any other keyframe.
+     lit frame. It puts keyframes only where the picture needs one: the start, each shot cut, a person coming in or
+     back, people changing places, one large clear one per person.
 2. An agent reads the package with **the H3MD keyframe skill (`skills/h3md-keyframe`)** and answers with a `.h3kf`
    (or `.json`) holding one MiniMax H3 Image prompt per keyframe.
 3. **Keyframe Import**: Import (button) -> Recast (H3 Image, ~25 s a keyframe) -> Compare (original | new). The Redo

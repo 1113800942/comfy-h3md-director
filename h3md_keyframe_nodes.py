@@ -53,28 +53,10 @@ def _plan_io():
     return h3md_plan_io
 
 
-SPARE_GPU_AVAIL_GIB = 15.99 - 0.68   # a 16 GB card with ComfyUI's default reserve (no --vram-headroom)
-
-
-def spare_new_frames(size, src_size) -> int:
-    """New frames a Director part carries at most on the smallest supported GPU (16 GB), for this swap plan: the
-    Director's own token budget and part-length search (Remake size, the source as the auto-tier reference video,
-    Remake's 345-frame cap), minus the 39 carried frames."""
-    try:
-        from . import h3md_director as D, h3md_autosplit as AS
-    except ImportError:
-        import h3md_director as D
-        import h3md_autosplit as AS
-    w, h = int(size[0]), int(size[1])
-    raw = {"swapEngine": "remake", "refVideoHeight": "auto"}
-    budget = AS.token_budget(raw, D.REF_VIDEO_AUTO_TOKEN_LIMIT, int(SPARE_GPU_AVAIL_GIB * AS.GIB))["tokens"]
-    seg = {"videos": [{"id": "src", "depth": False}], "images": []}
-    lmax = AS.max_length(D, seg, {("videos", "src"): (int(src_size[0]), int(src_size[1]))}, w, h, "auto", budget)
-    lmax = min(lmax, AS.REMAKE_MAX)
-    return max(17, lmax - AS.AUTO_OVERLAP)
-
-
 # ------------------------------------------------------------------------------------------------- video
+ENTRY_WARN_S = 5.0   # a replaced person last seen this long before the end gets the 'followed up to' warning
+
+
 def resolve_video(video: str) -> str:
     import folder_paths
     v = (video or "").strip().strip('"')
@@ -721,9 +703,11 @@ class H3MDKeyframePrepare:
                                     "Optional: one line per person of the cast sheet (#1, #2 ... = order of first appearance), what "
                                     "they look like now (e.g. 'the woman with wavy dark-brown hair in a red crop top'). "
                                     "Helps the Remake prompt keep the others. 可选：原片里从左到右每人一行，现在的样子。"}),
-                "max_gap_s": ("FLOAT", {"default": 5.0, "min": 2.0, "max": 8.0, "step": 0.5, "tooltip":
-                                        "Largest distance between two keyframes (Remake splits long videos into "
-                                        "parts; each part needs a keyframe)."}),
+                "max_gap_s": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 60.0, "step": 0.5, "tooltip":
+                                        "0 (default) = keyframes only where the picture needs one: the start, a shot "
+                                        "cut, a person coming in or back, people changing places, one large clear "
+                                        "one per person. A number = also never more than this many seconds apart "
+                                        "(for a long stretch that drifts). 0 = 只在画面需要时放关键帧。"}),
                 "threshold": ("FLOAT", {"default": 0.4, "min": 0.05, "max": 0.95, "step": 0.05,
                                         "tooltip": "SAM3 detection threshold for 'person'"}),
                 "max_people": ("INT", {"default": 8, "min": 1, "max": 20}),
@@ -751,7 +735,7 @@ class H3MDKeyframePrepare:
     FUNCTION = "prepare"
     CATEGORY = CATEGORY
     DESCRIPTION = ("Multi-person swap keyframes, step 1. Finds and numbers the people in the source (in order of first "
-                   "appearance), gives the pictures to them, picks keyframe moments at most max_gap_s apart (people standing apart, little "
+                   "appearance), gives the pictures to them, picks keyframe moments where the picture needs one - start, shot cuts, people coming in or back, place changes (people standing apart, little "
                    "motion) and notes where every person to recast stands then. Then H3MD Keyframe 1b: Recast "
                    "(H3 Image AIO chain: plain sentence, official enhancer, one edit per keyframe) and H3MD "
                    "Keyframe 2: Assemble.")
@@ -804,7 +788,7 @@ class H3MDKeyframePrepare:
                 cuts = detect_cuts(path)
             except Exception as exc:
                 cuts = []
-                LOG.warning("%s cut detection failed (%s): keyframes by max_gap_s only", TAG, exc)
+                LOG.warning("%s cut detection failed (%s): keyframes by the part length only", TAG, exc)
             # 0.5.91 (user 16:11): who is who - tracker numbers cut at the cuts and where the look changes, then
             # grouped into people by face + hair + clothes colour, each weighted by how well it tells THIS clip's
             # people apart (K.identify).  Replaces the 0.5.9 re-identification and the 0.5.91 face clusters.
@@ -871,39 +855,29 @@ class H3MDKeyframePrepare:
             LOG.info("%s %s", TAG, n_)
         order = [a["id"] for a in people if a["id"] not in merged_away]
         ids = {pid for _, _, pid in chosen}
-        moments = K.pick_moments(frames, ids, dur, max_gap_s)
+        # 0.6.1 (user 01:48): keyframes where the picture needs one (start, entrances / comebacks, place changes, shot
+        # cuts, one large clear one per person) - not by seconds, parts or GPU; max_gap_s > 0 also caps the gaps
+        step = float(max_gap_s or 0.0)
+        moments = K.pick_moments(frames, ids, dur, step, cuts)
         n_before = len(moments)
         moments = K.ensure_per_shot(frames, moments, ids, cuts, dur)
         LOG.info("%s shot cuts at %s s: %d keyframe(s) added so every shot has one", TAG, cuts,
                  len(moments) - n_before)
-        moments, full_notes = K.prefer_full(frames, moments, ids, cuts, dur, max_gap_s)
+        moments, full_notes = K.prefer_full(frames, moments, ids, cuts, dur, step or dur)
         # 0.5.91: every replaced person gets one large, clear keyframe (else Remake has no face for the close-ups)
         moments, id_keep, id_notes, id_warns = K.ensure_identity(frames, moments, chosen, dur)
-        moments, fin_notes = K.finish_moments(frames, moments, ids, dur, max_gap_s, cuts=cuts, keep=id_keep)
-        # 0.5.91 (_009 trial, user 03:31): the Director's parts depend on the GPU it runs on - every replaced person
-        # gets a keyframe at least every COVER_S s, and the Director picks 4 per real part that show everybody
-        moments, cov_notes, cov_warns = K.ensure_cover(frames, moments, ids, dur)
-        id_warns = list(id_warns) + cov_warns
-        fin_notes = full_notes + id_notes + fin_notes + cov_notes
-        # 0.5.91 seams (user 19:03): spare keyframes for small GPUs - the Director cuts on keyframes and takes a spare
-        # only where its parts are too short to reach the next main one; a 16 GB GPU is the smallest supported
-        try:
-            gap_s = K.spare_gap(spare_new_frames(size, (info["width"], info["height"])))
-            spare_idx, spare_notes = K.add_spares(frames, moments, ids, dur, gap_s, cuts)
-        except Exception as exc:
-            spare_idx, spare_notes = [], [f"spare keyframes skipped ({exc})"]
-        fin_notes += spare_notes
+        moments, fin_notes = K.finish_moments(frames, moments, ids, dur, step or dur, cuts=cuts, keep=id_keep)
+        fin_notes = full_notes + id_notes + fin_notes
         for n_ in fin_notes:
             LOG.info("%s %s", TAG, n_)
         LOG.info("%s keyframes at %s s (close-ups skipped)", TAG, [round(frames[i]["at"], 2) for i, _ in moments])
-        moments = sorted(list(moments) + [(i, "spare") for i in spare_idx], key=lambda m: frames[m[0]]["at"])
         try:   # 0.5.9: tracking data next to the sources, so the moment rules can be checked again without a run
             import json as _json
             dbg = os.path.join(folder_paths.get_input_directory(), KF_SUBDIR, SOURCES_SUBDIR,
                                os.path.splitext(os.path.basename(path))[0] + "_tracks.json")
             with open(dbg, "w", encoding="utf-8") as fh:
                 _json.dump({"frames": frames, "cuts": cuts, "chosen": sorted(ids), "duration": dur,
-                            "aspect": K.FRAME_ASPECT, "max_gap": max_gap_s}, fh)
+                            "aspect": K.FRAME_ASPECT, "max_gap": step or dur}, fh)
         except Exception:
             pass
         changes = K.place_changes(frames, order)
@@ -920,7 +894,7 @@ class H3MDKeyframePrepare:
         seen_last = {pid: max([f["at"] for f in frames if any(w[0] == pid for w in f["who"])] or [0.0])
                      for pid in ids}
         for p, k, pid in chosen:
-            if seen_last[pid] < dur - max_gap_s:
+            if seen_last[pid] < dur - (step or ENTRY_WARN_S):
                 warnings.append(f"picture {p} (person #{k}) is followed only up to {seen_last[pid]:.1f} s: after that "
                                 "the tracker lost them (left the frame or hidden?). Later keyframes miss this person.")
         sheet, cast_crops = cast_sheet(small, frames_cast, people, links)
