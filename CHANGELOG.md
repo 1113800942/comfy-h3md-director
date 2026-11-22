@@ -2,10 +2,10 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
-## [0.5.91] - 2026-11-21
+## [0.6.0] - 2026-11-22
 
 ### Added / 新增
-- Multi-person swap keyframes, new flow: **one workflow, two groups, all by buttons** (`example_workflows/H3MD_Keyframe_MultiSwap_0.5.91.json`).
+- Multi-person swap keyframes, new flow: **one workflow, two groups, all by buttons** (`example_workflows/H3MD_Keyframe_MultiSwap_0.6.0.json`).
   1. **Keyframe Export**: Prepare + the new **H3MD Keyframe Export** write `output/H3MD_keyframes/<name>_keyframe_export_<date>_<no>.zip` (keyframes, character pictures, who replaces whom, a README for the AI) and preview its keyframes.
   2. An AI (Claude, ChatGPT, Gemini ...) reads the keyframes with the new skill **`skills/h3md-keyframe`** and answers with `<name>_keyframe_import_<date>_<no>.h3kf` (or a `.json`): one MiniMax H3 Image prompt per keyframe.
   3. **Keyframe Import**: the new **H3MD Keyframe Import** (Import package button; group 1 can stay bypassed) -> **H3MD Keyframe Recast** (MiniMax H3 Image, int8, 4 MP, the tuned 6-step sigmas, ~25 s a keyframe; shows original | new, numbered) -> the new **H3MD Keyframe Redo** (one button per keyframe: only the chosen ones are made again) -> **H3MD Keyframe Assemble** (`output/H3MD_plans/<name>_multiswap_plan_<date>_<no>.zip`).
@@ -19,6 +19,18 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
 ### Changed / 变更
 - Multi-person swap seams: the Director cuts a long swap shot **on its keyframes** - every part's new frames begin with a keyframe (within 0.7 s) on any GPU, instead of equal parts that could start up to 3 s before the next keyframe (the source's gloves came back right after a seam). Keyframe Prepare adds **spare keyframes** (marked `"backup": true` in the plan, "(spare)" on the sheets) only where two keyframes are further apart than a 16 GB GPU's part can reach; a bigger GPU ignores them, a smaller one takes them exactly where its cuts need them. A part start that still has no keyframe is named in the run notes with its time. Remake parts are capped at 345 frames (a 48 GB GPU planned 379 and would have stopped).
   多人换人接缝：导演台按关键帧切段，任何显卡上每一段的新画面开头都有关键帧（0.7 秒内），不再平均切（之前接缝后最多 3 秒没有关键帧，原片的手套漏回来）。Prepare 只在两张关键帧隔得比 16G 显卡一段还长的地方加备用关键帧（计划里 `"backup": true`，对比图标 "(spare)"）；大显卡不用，小显卡只在它的切点需要的地方用。仍然缺关键帧的段开头会在运行说明里写出时间。Remake 每段最多 345 帧（48G 显卡原来会切出 379 帧而报错）。
+- Keyframe Prepare, cast panel: **one picture can take several numbers**. When the tracker splits one person into two
+  numbers (after a cut, a turn, a crossing), drag a second line from the same picture to the other number: both become
+  one person for the keyframes and the plan ("图1换2号" + "图1换4号"). Numbers without a line stay themselves (passers-by);
+  a number still goes to one picture only. The user's lines are final.
+  演员表一张图可以连多个号：追踪把同一个人切成两个号（剪辑点后、转身、交错）时，从同一张图再拖一根线，两个号合成一个人。
+  没连线的号保持原样（路人）；一个号仍然只能连一张图。用户连的线说了算。
+- Keyframe Prepare: a frame where the people are **too dark to read** (a blackout, a strobe) is never a keyframe - the
+  nearest lit frame is taken. Dark = the lit parts of the people (90th percentile of the brightness in their boxes)
+  below 40 % of the clip's own usual light, so a clip that is dark all through loses nothing. (A three-dancer clip had
+  a keyframe on the 0.2 s blackout at 16.83 s; now 17.17 s.)
+  人身上太暗看不清的帧（熄灯、频闪）不再当关键帧，取前后最近的亮帧。和这条片子自己的正常亮度比（低于 4 成算暗），
+  整片都偏暗的视频不受影响。
 - Keyframe Prepare: *descriptions* is optional. Left empty, the AI that writes the keyframe prompts describes every character from its picture, asks the user what the picture does not show (a half-body picture: trousers and shoes) and returns one sentence per character as "characters" in its answer; H3MD Keyframe Import puts them into the Director's video prompt (kept next to the export package for later redo answers). request.json lists the characters once; skill and package README updated.
   描述框可以不填：写关键帧提示词的 AI 按角色图自己描述，图上看不到的（半身照的裤子、鞋）先问用户；它在回包里给每个角色一句描述（characters），Import 填进导演台的视频提示词。
 - Keyframe Prepare: **who is who, redone** (K.identify, after Zhang et al., "Tracking Persons-of-Interest via Unsupervised Representation Adaptation"). Every tracker number is cut at the shot cuts and where the person's look changes, and the pieces are grouped into people by face, hair colour and clothes colour - each weighted by how well it tells THIS clip's people apart, learned from the clip itself (two halves of one track = one person, two tracks on screen together = two people). Pieces seen together are never one person; when two people fit about equally well nothing is guessed; the number of people is the number on screen together. An AI-generated three-woman dance whose faces ArcFace could not tell apart had the numbers jump between two women at the cuts (one woman shown twice on the cast panel, the other half 'kept'); now each is one number for the whole clip, and five men in the same white clothes are still told apart by their faces. A second box the tracker put on the same person is merged. Replaces the 0.5.9 re-identification and the face clusters below.
@@ -37,10 +49,14 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   关键帧节点名改为英文;旧的关键帧工作流和旧的单文件 skill 删除。
 
 ### Fixed / 修复
+- Keyframe Prepare: a person whose pieces were grouped together was dropped as a whole when one small piece shared a few
+  frames with someone else (a double box at a crossing) - the centre woman of a dance stayed unswapped from 3.0 to 8.7 s.
+  The pieces of a blocked group now join one by one.
+  认人：一组片段里只要有一小段和别人重叠几帧（交错时的双框），整组都被丢掉——中间那位 3.0 到 8.7 秒没换。现在被挡的组逐段并入。
 - Keyframe Prepare: a person who walked in after the part's keyframes were picked got another character's look in that part (the run used 7.3 s parts, the keyframes were thinned for 10.8 s). A picture written twice in 'mapping' takes the last line; pictures connected but missing from an old 'mapping' text are reported.
 - Keyframe Prepare: a new person walking in (a face unlike everyone missing) no longer warns "a person came back who could be any of ..."; a person showing only as a narrow strip at the frame edge is not recast at that keyframe (a 26 px strip got a character picture).
-- Loop: a trial (试镜) or `segments_to_run` took segments it did not run from the cache even when they had been made for **another plan** (the cache folder is shared by every plan with the same settings; only the frame count was checked). The old take was spliced into the video and used as the tail lock of the re-made segment. Every cached segment now records what it was made from; a segment is kept from the cache only when it matches this plan. Caches written before 0.5.91 are made again once when repairing.
-  Loop:试镜 / 只跑某几段时,没跑的段会从缓存拿,哪怕是**别的计划**做的(缓存文件夹按设置共用,只查了帧数):旧视频被接进成片,还被当成重做那段的锁尾。现在每段缓存记下它是用哪份计划内容做的,对得上才沿用。0.5.91 以前的缓存修补时会重做一次。
+- Loop: a trial (试镜) or `segments_to_run` took segments it did not run from the cache even when they had been made for **another plan** (the cache folder is shared by every plan with the same settings; only the frame count was checked). The old take was spliced into the video and used as the tail lock of the re-made segment. Every cached segment now records what it was made from; a segment is kept from the cache only when it matches this plan. Caches written before 0.6.0 are made again once when repairing.
+  Loop:试镜 / 只跑某几段时,没跑的段会从缓存拿,哪怕是**别的计划**做的(缓存文件夹按设置共用,只查了帧数):旧视频被接进成片,还被当成重做那段的锁尾。现在每段缓存记下它是用哪份计划内容做的,对得上才沿用。0.6.0 以前的缓存修补时会重做一次。
 - Director Import plan keeps the global prompt already in the Director when the imported plan has none (it was wiped).
   导演台导入计划时,计划里没有全局提示词就保留导演台原有的(以前会被清空)。
 - Director: importing a portrait plan while the Control Panel was set to landscape (or the other way) ran at the wrong size. Import plan now sets the Control Panel's width / height to the plan's, and a multi-swap plan run at a Remake size of the other orientation follows the plan (1664x960 -> 960x1664, 2560x1472 -> 1472x2560).

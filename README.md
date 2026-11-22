@@ -173,18 +173,23 @@ Replace several people in a real video with your own characters ("picture 1 repl
 keeping the motion, camera, lip movement and soundtrack. The Director runs Viggle Remake's swap model in the low-res
 pass and its own high-res pass on top.
 
-1. **Keyframes + plan** (0.5.91): open `example_workflows/H3MD_Keyframe_MultiSwap_0.5.91.json` - one workflow, two
+1. **Keyframes + plan** (0.6.0): open `example_workflows/H3MD_Keyframe_MultiSwap_0.6.0.json` - one workflow, two
    groups, everything by buttons.
    - **Group 1 - Keyframe Export.** Drag the source video into *Source video* (optional `start_s` / `end_s` on Prepare:
      recast only that part, cut with its sound), the characters into *Picture 1/2/3*, leave
      *mapping* empty - picture 1 goes to the first person who appears in the clip, picture 2 to the next, and so on (people
      who appear together: left to right); once given, a person keeps his picture wherever he moves, later people stay
-     themselves; the cast sheet (*People*) shows who got which picture; to choose yourself, click the people on the
-     buttons that appear under Prepare after the run (first click = picture 1 ...) and run again - the tracking is
-     reused, so it takes seconds - and write one description line per picture, head to toe: race, age, face, hair, every garment, the shoes - **always
-     what the picture does not show** (a half-body picture: trousers and shoes). **H3MD Keyframe Prepare** tracks the
-     people (core SAM3.1), finds the cuts and picks the keyframe moments (at least one per shot, at most about 5 s
-     apart; a person lost after a blackout, a cut or a spin is found again). **H3MD Keyframe Export** writes
+     themselves. After the run a **cast panel** appears under Prepare: the pictures on one side, the numbered people on
+     the other, joined by lines (the machine's guess). Drag a line from a picture to a person to change it, click a
+     line to remove it. **One picture can take several numbers**: if the tracker split one person into two numbers
+     (after a cut, a turn, a crossing), drag a second line from the same picture - both numbers become one person.
+     Numbers without a line stay themselves. Run again - the tracking is reused, so it takes seconds. *Descriptions*
+     are optional: the AI describes each character from the picture and asks you what the picture does not show (a
+     half-body picture: trousers and shoes). **H3MD Keyframe Prepare** tracks the people (core SAM3.1), finds the cuts
+     and picks the keyframe moments (at least one per shot, every replaced person at least every 3 s; never a close-up
+     the edit model cannot redraw, never a frame where the people are too dark to read; a person lost after a
+     blackout, a cut or a spin is found again), plus **spare keyframes** where the gap is too long for a 16 GB GPU
+     (a bigger GPU ignores them). **H3MD Keyframe Export** writes
      `output/H3MD_keyframes/<name>_keyframe_export_<date>_<no>.zip` (never overwritten) and previews its keyframes.
    - **Give the zip to an AI** (Claude, ChatGPT, Gemini ... - one that reads pictures well) with the skill
      `skills/h3md-keyframe` (the package also carries a short version). It reads every keyframe - who goes where, both
@@ -288,7 +293,7 @@ videos or audio; untick **prompts** to leave the prompts out. It is only saved o
   motion" style (one weapon LoRA per pass).
 * `H3MD Director.json` — the full setup used for the samples; adds face refine, RIFE interpolation to 48 fps, one extra
   refine step and a few convenience nodes.
-* `H3MD Director Remake.json` + `H3MD_Keyframe_MultiSwap_0.5.91.json` - the multi-person swap: the second
+* `H3MD Director Remake.json` + `H3MD_Keyframe_MultiSwap_0.6.0.json` - the multi-person swap: the second
   makes the keyframes (with an AI, see "Multi-person swap") and the plan .zip, the first runs it.
 
 | Node pack | What it does in the workflows | Needed? | Without it |

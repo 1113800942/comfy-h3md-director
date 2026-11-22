@@ -122,14 +122,17 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
 把真人视频里的几个人换成你自己的角色(图1 换第一个出场的人,图2 换第二个……),动作、镜头、口型和原声都保留。导演台低清这一遍用 Viggle Remake
 的换人模型,高清这一遍照常用 H3MD 自己的。
 
-1. **关键帧 + 计划包**(0.5.91):打开 `example_workflows/H3MD_Keyframe_MultiSwap_0.5.91.json`,一个工作流分两组,
+1. **关键帧 + 计划包**(0.6.0):打开 `example_workflows/H3MD_Keyframe_MultiSwap_0.6.0.json`,一个工作流分两组,
    操作都是点按钮。
    - **第 1 组 Keyframe Export(导出)**:原片拖进 *Source video*(只换其中一段就在 Prepare 填 `start_s` / `end_s`,连同
      原声一起截出来),角色图放 *Picture 1/2/3*,*mapping* 留空:图1 给片子里第一个出场的人,图2 给第二个……
-     (同时出场的从左往右),给了谁就一直是谁,图用完以后出场的人保持原样;*People* 演员表显示谁换成了哪张图;想自己挑,跑完后在 Prepare 下面
-     出现的按钮上按顺序点人(第一下 = 图1……),再跑一次,跟踪结果直接复用,几秒钟。每张图写一行从头到脚的描述:人种、年龄、长相、发型、每件衣服、鞋,**参考图上看不到的部分一定要
-     写**(半身图要写裤子和鞋)。**H3MD Keyframe Prepare** 用 SAM3.1 跟踪每个人、找剪辑点、挑关键帧时刻(每个镜头至少
-     一张,相邻不超过约 5 秒;黑场、切镜头、转圈后跟丢的人会认回来)。**H3MD Keyframe Export** 写出
+     (同时出场的从左往右),给了谁就一直是谁,图用完以后出场的人保持原样。跑完后 Prepare 下面出现**演员表连线面板**:
+     一边是图,一边是编号的人,中间的线是机器猜的。从图拖线到人就改,点线就删。**一张图可以连多个号**:追踪把同一个人
+     切成两个号(剪辑点后、转身、交错)时,从同一张图再拖一根线,两个号合成一个人;没连线的号保持原样。再跑一次,跟踪
+     结果直接复用,几秒钟。描述可以不填:AI 会照着图描述每个角色,图上看不到的(半身图的裤子和鞋)会先问你。
+     **H3MD Keyframe Prepare** 用 SAM3.1 跟踪每个人、找剪辑点、挑关键帧时刻(每个镜头至少一张,每个要换的人至少每 3 秒
+     一张;不挑修图画不对的特写,也不挑人太暗看不清的帧;黑场、切镜头、转圈后跟丢的人会认回来),关键帧间隔对 16G
+     显卡太长的地方再加**备用关键帧**(大显卡不用)。**H3MD Keyframe Export** 写出
      `output/H3MD_keyframes/<名字>_keyframe_export_<日期>_<序号>.zip`(不会覆盖旧包),并预览这次是哪几张关键帧。
    - **把 zip 交给 AI**(Claude、ChatGPT、Gemini 等看图能力强的),配上 skill `skills/h3md-keyframe`(包里也带了一份
      简版说明)。它逐张读关键帧:谁去哪、两只手、腿、头、前后遮挡、画面裁切,回一个
@@ -210,7 +213,7 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
 * `example_plans/h3md_silver_warrior_1min_v3.zip`——可直接导入的 **1 分钟打斗**示范计划（9 个镜头，1280×704，不带素材）：
   导演台点 **Import plan…**，选这个 zip，选"只导入计划"。配合总控台"高动态"风格（每条线只开一个 weapon LoRA）。
 * `H3MD Director.json`（完整版）——样片用的完整设置，多了修脸、RIFE 补帧到 48 fps、多 1 步精修和几个方便的小工具。
-* `H3MD Director Remake.json` + `H3MD_Keyframe_MultiSwap_0.5.91.json`:多人换人。后一个做关键帧(配 AI,见「多人换人」)和计划包,前一个跑视频。
+* `H3MD Director Remake.json` + `H3MD_Keyframe_MultiSwap_0.6.0.json`:多人换人。后一个做关键帧(配 AI,见「多人换人」)和计划包,前一个跑视频。
 
 | 节点包 | 在工作流里做什么 | 要不要装 | 不装会怎样 |
 |---|---|---|---|

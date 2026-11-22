@@ -711,7 +711,7 @@ class H3MDKeyframePrepare:
                                        "click = picture 1 ...) and run again (the tracking is reused: seconds), or "
                                        "write '图1换3号' / 'picture 1 -> 3'. 留空 = 自动；跑一次后点下面的人来挑。"}),
                 "descriptions": ("STRING", {"multiline": True, "default": "", "tooltip":
-                                            "Optional (0.5.91). Leave empty: the AI that writes the keyframe prompts "
+                                            "Optional. Leave empty: the AI that writes the keyframe prompts "
                                             "describes every character from its picture and asks you what the picture "
                                             "does not show (a half-body picture: trousers and shoes). Or write a line "
                                             "per picture, e.g. 'picture 2: a Black man in his twenties, short black "
@@ -1372,7 +1372,7 @@ class H3MDKeyframeRecast:
                        "Original | new, one row per keyframe (#1, #2 ...): check them, redo the ones that differ.")
     FUNCTION = "recast"
     CATEGORY = CATEGORY
-    DESCRIPTION = ("Multi-person swap keyframes, step 1b (0.5.91): one H3 Image edit per keyframe with the prompts "
+    DESCRIPTION = ("Multi-person swap keyframes, step 1b: one H3 Image edit per keyframe with the prompts "
                    "the AI wrote from H3MD Keyframe 1a: Export. Then H3MD Keyframe 2: Assemble.")
 
     METHOD = "H3 Image, prompts written by an AI from the Export package"

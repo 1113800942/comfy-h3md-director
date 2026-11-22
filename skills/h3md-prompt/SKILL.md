@@ -411,18 +411,30 @@ picture list)**. Remake follows the keyframes: a person moved, resized or swappe
 with it. Every keyframe must pass the self-check in step 5; redraw failures, never hand them over. Do not use TARA,
 depth or H3 mask repaint for this.
 
-**Local users: use the keyframe workflow (0.5.91).** `example_workflows/H3MD_Keyframe_MultiSwap_0.5.91.json`, two
+**Local users: use the keyframe workflow (0.6.0).** `example_workflows/H3MD_Keyframe_MultiSwap_0.6.0.json`, two
 groups:
 1. **Keyframe Export**: H3MD Keyframe Prepare (numbering, cuts, moments - at least one keyframe in every shot)
    + H3MD Keyframe Export write `<name>_keyframe_export_<date>_<no>.zip`.
+   - **Cast panel**: Prepare guesses who gets which picture; the user checks it and drags lines from a picture to the
+     numbered people. **One picture can take several numbers**: when the tracker split one person into two numbers
+     (after a cut, a turn, a crossing), the user drags a second line from the same picture and both numbers become one
+     person. Numbers with no line stay as they are (passers-by). The user's lines are final.
+   - Prepare never picks a frame where the people are too dark to read (a blackout, a strobe): it takes the nearest
+     lit frame. It adds **spare keyframes** where the gap between keyframes is too long for a 16 GB GPU; the Director
+     uses them only where its parts need them. They are written like any other keyframe.
 2. An agent reads the package with **the H3MD keyframe skill (`skills/h3md-keyframe`)** and answers with a `.h3kf`
    (or `.json`) holding one MiniMax H3 Image prompt per keyframe.
 3. **Keyframe Import**: Import (button) -> Recast (H3 Image, ~25 s a keyframe) -> Compare (original | new). The Redo
    node redoes single keyframes. Assemble writes `<name>_multiswap_plan_<date>_<no>.zip` for this Director.
 
-The user writes one description line per character, head to toe: race, age, face, hair, every garment, **the shoes
-and what the picture does not show** (a half-body picture: trousers and shoes). If you are asked to write those
-keyframe prompts, follow `skills/h3md-keyframe`. The routes below are for agents painting keyframes themselves.
+Character descriptions are optional: the agent writing the keyframe prompts describes each character from the picture,
+head to toe, and **asks the user** for what the picture does not show but a keyframe needs (a half-body picture:
+trousers and shoes). If you are asked to write those keyframe prompts, follow `skills/h3md-keyframe`.
+
+**What works:** fixed or steady camera (stage, dance, brief occlusion with faces soon visible again), 1 to 5 people,
+a GPU with 16 GB or more. **Not perfect:** crowded close-ups with people crossing, faces right at the lens, people
+walking in and out - someone may be swapped wrong. **Out of scope:** music videos with edited-in effects (clothes
+changing between frames, a face morphing into another person). The routes below are for agents painting keyframes themselves.
 
 **Two routes** - pick the one you can do; the other steps are shared.
 - **Route A: you can run code** (Claude Code, Codex, Cursor, or a local ComfyUI): crop -> edit -> paste back ->
