@@ -212,9 +212,19 @@ Needs (install yourself): the node pack **ComfyUI-Viggle-Remake** and the model
 [Viggle/Viggle-Remake](https://huggingface.co/Viggle/Viggle-Remake) (see its model card for the licence). Limits:
 output 1664x960 or 960x1664 (or 2560x1472) - the Director switches to it by itself if the Control Panel says otherwise; 90-345 frames per part (autosplit does it); up to 4 keyframes per part;
 window mode is off for these plans. Works best when each recast person and their character are close in hair length,
-build and gender; with big differences it is not perfect, but usable. The keyframe workflow tracks people by position:
-someone who leaves the frame and comes back may be taken for a new person (the info output warns). Thanks to Viggle
-for releasing Remake.
+build and gender; with big differences it is not perfect, but usable. Thanks to Viggle for releasing Remake.
+
+**What it can and cannot do.** The keyframe workflow has to know who is who in every moment (people tracking plus
+faces), so the source decides how far it goes:
+- **Works well:** a fixed or steady camera (a stage, a dance or band performance, a group singing), people who may
+  move around and be briefly hidden but soon show their faces again. Shot cuts between such shots are fine.
+- **Not perfect - check the cast panel and the keyframes, sometimes a person gets the wrong picture:** many people
+  crossing and changing places close to the camera, faces right up against the lens, people walking in and out all the
+  time. The tracker can split one person into two numbers or lose someone for a moment; Prepare never uses such frames
+  as keyframes, but a wrong match can remain.
+- **Not supported:** music videos with edited-in effects - a person changing clothes from one frame to the next, a face
+  morphing into another person's, transitions that blend two people. There the source frame itself holds two people at
+  once, so no keyframe can say who it is.
 
 ## Reporting a problem
 

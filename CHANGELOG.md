@@ -13,6 +13,8 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   多人换人关键帧新流程:**一个工作流两组,全用按钮**。第 1 组导出关键帧包,AI 按新 skill `skills/h3md-keyframe` 读图写 H3 Image 提示词回包(.h3kf / .json),第 2 组按钮导入、出图(每张约 25 秒)、原图 | 新图对比、单张重做按钮、打计划包。包名带日期和序号,不覆盖。
 - Example: `example_plans/H3MD_multiswap_3dancers_0.5.91.zip` - the three-dancer swap (17 s): the export package, the AI's answer, the plan and the result.
   示例:三人舞蹈换人(17 秒)的导出包、AI 回包、计划包和成片。
+- README: what the multi-person swap can and cannot do - works well with a fixed or steady camera; many people crossing close to the lens, faces against the lens and people walking in and out are not perfect (a person can get the wrong picture); music videos with edited-in morph effects (clothes changing between two frames, a face morphing into another person) are not supported.
+  说明里写清多人换人的上限:固定机位、镜头稳的效果好;人多贴脸交叉换位、频繁进出不完美,可能换错;后期加了变形特效(一帧换衣服、脸渐变换人)的 MV 不支持。
 
 ### Changed / 变更
 - Keyframe Prepare: identity by face - the faces of every sampled frame are grouped into people, and a track whose face turns into another person's (the tracker passed the number on at a crossing) is cut there; five men in the same white clothes keep one number each. The cast sheet shows each person bright and framed, the others dimmed.
