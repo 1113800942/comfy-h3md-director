@@ -9,6 +9,9 @@
 //    picture); click a line or a picked person to free it.  "Automatic" clears the choice (picture 1 = first to
 //    appear ...); "Run" queues the workflow - the tracking is reused, so it takes seconds.  The choice is written
 //    into 'mapping' as 图1换4号 ...
+//    0.5.91 (user 22:11): a picture can take SEVERAL people - drag a second line from the same picture to a person the
+//    tracker split off (a new number after a cut / turn / crossing): both numbers become one person.  A person still
+//    belongs to one picture only.
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
 
@@ -84,17 +87,26 @@ function buildRedo(node) {
   node.setDirtyCanvas?.(true, true);
 }
 
-export function parseCastMapping(text) {
+export function parseCastMapping(text) {           // picture -> [person numbers]
   const out = {};
   for (const m of String(text || "").matchAll(/(?:图|圖|picture|pic|image|img)\s*(\d+)[^\d\n,，;；。]*?(\d+)/gi)) {
-    out[Number(m[1])] = Number(m[2]);
+    const p = Number(m[1]), k = Number(m[2]);
+    for (const q of Object.keys(out)) out[q] = out[q].filter((x) => x !== k);   // a person: one picture (last wins)
+    (out[p] = out[p] || []).includes(k) || out[p].push(k);
   }
+  for (const q of Object.keys(out)) if (!out[q].length) delete out[q];
   return out;
 }
 
 export function castMappingText(map) {
-  return Object.keys(map).map(Number).sort((a, b) => a - b).map((p) => `图${p}换${map[p]}号`).join("\n");
+  const lines = [];
+  for (const p of Object.keys(map).map(Number).sort((a, b) => a - b))
+    for (const k of [...map[p]].sort((a, b) => a - b)) lines.push(`图${p}换${k}号`);
+  return lines.join("\n");
 }
+
+const unlink = (m, k) => { for (const q of Object.keys(m)) { m[q] = m[q].filter((x) => x !== k); if (!m[q].length) delete m[q]; } };
+const copyMap = (m) => Object.fromEntries(Object.entries(m).map(([p, v]) => [p, [...v]]));
 
 function buildCast(node) {
   const cast = node.__h3mdCast;
@@ -104,7 +116,7 @@ function buildCast(node) {
   const people = cast.people || [];
   let map = parseCastMapping(mapW.value);            // picture -> person
   const auto = !Object.keys(map).length;
-  if (auto) for (const q of people) if (q.picture) map[q.picture] = q.person;
+  if (auto) for (const q of people) if (q.picture) (map[q.picture] = map[q.picture] || []).push(q.person);
   const write = (m) => { mapW.value = castMappingText(m); mapW.callback?.(mapW.value); buildCast(node); };
 
   // one DOM panel: pictures on top, the cast below, a line from every picture to the person it replaces
@@ -122,7 +134,8 @@ function buildCast(node) {
     overflow: "hidden", userSelect: "none", fontFamily: "sans-serif", color: "#ddd", fontSize: "12px" });
   const head = document.createElement("div");
   head.textContent = (auto ? "Automatic: picture 1 = first to appear. " : "Your cast. ")
-    + "Drag a line from a picture to a person (or click a person: next free picture). Click a line or a picked person to free it.";
+    + "Drag a line from a picture to a person (or click a person: next free picture). One picture can take several numbers "
+    + "when the tracker split one person - drag another line from the same picture. Click a line or a picked person to free it.";
   Object.assign(head.style, { padding: "4px 8px", color: "#aaa" });
   el.append(head);
   const row = (top) => { const r = document.createElement("div");
@@ -142,9 +155,9 @@ function buildCast(node) {
     return c;
   };
   const picCard = {}, personCard = {};
-  const personOf = {}; for (const [p, k] of Object.entries(map)) personOf[k] = Number(p);
+  const personOf = {}; for (const [p, ks] of Object.entries(map)) for (const k of ks) personOf[k] = Number(p);
   for (const p of pics) {
-    const c = card(cast.thumbs?.[p], `picture ${p}`, map[p] ? `-> #${map[p]}` : "not used", map[p] ? "#ff8c00" : "#888");
+    const c = card(cast.thumbs?.[p], `picture ${p}`, map[p] ? `-> #${map[p].join(", #")}` : "not used", map[p] ? "#ff8c00" : "#888");
     c.title = cast.desc?.[p] || "";
     picRow.append(c); picCard[p] = c;
   }
@@ -153,12 +166,12 @@ function buildCast(node) {
     const c = card(cast.tiles?.[i], `#${q.person}  ${q.first}-${q.last} s`, p ? `<- picture ${p}` : "kept", p ? "#ff8c00" : "#50c8ff");
     castRow.append(c); personCard[q.person] = c;
     c.onclick = () => {
-      const m = auto ? {} : { ...map };
-      if (!auto && p) { delete m[p]; return write(m); }
+      const m = auto ? {} : copyMap(map);
+      if (!auto && p) { unlink(m, q.person); return write(m); }
       const used = new Set(Object.keys(m).map(Number));
       const free = pics.find((x) => !used.has(x));
-      if (free === undefined) { alertLater(`H3MD: all ${pics.length} pictures are used - free one first`); return; }
-      m[free] = q.person; write(m);
+      if (free === undefined) { alertLater(`H3MD: all ${pics.length} pictures are used - drag a line from a picture instead`); return; }
+      m[free] = [q.person]; write(m);
     };
   });
   const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
@@ -176,10 +189,10 @@ function buildCast(node) {
   };
   const drawLines = () => {
     svg.innerHTML = "";
-    for (const [p, k] of Object.entries(map)) {
+    for (const [p, ks] of Object.entries(map)) for (const k of ks) {
       if (!picCard[p] || !personCard[k]) continue;
       const [x1, y1] = centre(picCard[p], true), [x2, y2] = centre(personCard[k], false);
-      line(x1, y1, x2, y2, "#ff8c00", () => { const m = auto ? { ...map } : { ...map }; delete m[p]; write(m); });
+      line(x1, y1, x2, y2, "#ff8c00", () => { const m = copyMap(map); unlink(m, k); write(m); });
     }
   };
   requestAnimationFrame(drawLines);
@@ -207,9 +220,9 @@ function buildCast(node) {
         const hit = Object.entries(personCard).find(([, c]) => { const a = c.getBoundingClientRect();
           return e.clientX >= a.left && e.clientX <= a.right && e.clientY >= a.top && e.clientY <= a.bottom; });
         if (!hit) return;
-        const m = { ...map };
-        for (const [pp, kk] of Object.entries(m)) if (kk === Number(hit[0])) delete m[pp];   // one picture per person
-        m[p] = Number(hit[0]); write(m);
+        const m = copyMap(map), k = Number(hit[0]);
+        unlink(m, k);                                    // a person: one picture; a picture: one or more people
+        (m[p] = m[p] || []).push(k); write(m);
       };
       pc.addEventListener("pointermove", move); pc.addEventListener("pointerup", up);
       pc.addEventListener("pointercancel", up);

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import gc
 import io
+import copy
 import json
 import logging
 import math
@@ -844,13 +845,19 @@ class H3MDKeyframePrepare:
         frames, clean_notes = K.clean_frames(frames, face_boxes)   # 0.5.91: double / wide / hidden boxes
         LOG.info("%s %s", TAG, clean_notes[0])
         people = K.cast(frames)
-        order = [a["id"] for a in people]
         if not mp:
             mp = K.auto_cast(people, picset)
-        chosen = K.resolve(mp, people)
+        links = K.resolve(mp, people)
         LOG.info("%s cast (order of first appearance): %s", TAG, "; ".join(
             f"#{n} {a['first']:.1f}-{a['last']:.1f} s {a['side']}"
-            + next((f" <- picture {p}" for p, k, _ in chosen if k == n), " kept") for n, a in enumerate(people, 1)))
+            + next((f" <- picture {p}" for p, k, _ in links if k == n), " kept") for n, a in enumerate(people, 1)))
+        # 0.5.91 (user 22:11): numbers the user linked to the same picture are one person from here on; the cast
+        # sheet / panel keep showing every number (that is where the user links them)
+        frames_cast = copy.deepcopy(frames)
+        chosen, merged_away, merge_notes = K.merge_cast(frames, links)
+        for n_ in merge_notes:
+            LOG.info("%s %s", TAG, n_)
+        order = [a["id"] for a in people if a["id"] not in merged_away]
         ids = {pid for _, _, pid in chosen}
         moments = K.pick_moments(frames, ids, dur, max_gap_s)
         n_before = len(moments)
@@ -904,7 +911,7 @@ class H3MDKeyframePrepare:
             if seen_last[pid] < dur - max_gap_s:
                 warnings.append(f"picture {p} (person #{k}) is followed only up to {seen_last[pid]:.1f} s: after that "
                                 "the tracker lost them (left the frame or hidden?). Later keyframes miss this person.")
-        sheet, cast_crops = cast_sheet(small, frames, people, chosen)
+        sheet, cast_crops = cast_sheet(small, frames_cast, people, links)
         full = read_frames(path, [frames[i]["at"] for i, _ in moments], size)
         W, H = size
         pictures, job_moments = [], []
@@ -939,11 +946,11 @@ class H3MDKeyframePrepare:
             pbar.update(1)
         if slivers:
             LOG.info("%s only a strip at the frame edge, not recast there: %s", TAG, ", ".join(slivers))
-        names = {pid: (None if pid in ids else (looks.get(n) or
-                                                f"the unchanged performer #{n} (first seen at "
-                                                f"{people[n - 1]['first']:.1f} s on the {people[n - 1]['side']})"))
-                 for n, pid in enumerate(order, 1)}
-        if looks and len(looks) != len(order):
+        names = {a["id"]: (None if a["id"] in ids else (looks.get(n) or
+                                                        f"the unchanged performer #{n} (first seen at "
+                                                        f"{a['first']:.1f} s on the {a['side']})"))
+                 for n, a in enumerate(people, 1) if a["id"] not in merged_away}
+        if looks and len(looks) != len(people):
             warnings.append(f"people_at_start has {len(looks)} line(s) but the cast has {len(order)} people; "
                             "check the cast sheet.")
         prompt = K.swap_prompt(length, chosen, descs, len(order), changes, names, looks, people=people)
@@ -957,9 +964,9 @@ class H3MDKeyframePrepare:
         text = {"video": job["video"], "size": list(size), "frames": length, "seconds": round(dur, 2),
                 "people": len(order),
                 "cast": [{"person": n, "first_s": a["first"], "last_s": a["last"], "side": a["side"],
-                          "picture": next((p for p, k, _ in chosen if k == n), None)}
+                          "picture": next((p for p, k, _ in links if k == n), None)}
                          for n, a in enumerate(people, 1)],
-                "mapping": [{"picture": p, "person": k} for p, k, _ in chosen],
+                "mapping": [{"picture": p, "person": k} for p, k, _ in links],
                 "keyframes": [dict({"at": m["at"], "recast": [it["picture"] for it in m["items"]]},
                                    **({"spare": True} if m.get("backup") else {})) for m in job_moments],
                 "place_changes": [{"from": a, "to": b} for a, b, pr in changes if pr],
@@ -973,7 +980,7 @@ class H3MDKeyframePrepare:
             raise K.KeyframeError(f"{TAG} none of the chosen people was found at any keyframe. 一个要换的人都没找到。")
         cast_ui = {"pictures": picset, "people": [
             {"person": n, "first": round(a["first"], 1), "last": round(a["last"], 1),
-             "picture": next((p for p, k, _ in chosen if k == n), None)} for n, a in enumerate(people, 1)]}
+             "picture": next((p for p, k, _ in links if k == n), None)} for n, a in enumerate(people, 1)]}
         try:   # 02:20: thumbnails for the drag-a-line cast panel
             cast_ui["tiles"] = [thumb_b64(c) for c in cast_crops]
             cast_ui["thumbs"] = {str(p): thumb_b64(tensor_pil(pics[f"picture_{p}"])) for p in picset}

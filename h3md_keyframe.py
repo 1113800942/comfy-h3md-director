@@ -56,8 +56,11 @@ def cn_number(s: str) -> int:
 
 
 def parse_mapping(text: str) -> dict:
-    """optional override of the automatic cast: '图1换3号，图2换1号' / 'picture 1 -> 3' -> {1: 3, 2: 1} (picture ->
-    person number on the cast sheet = order of first appearance).  Empty -> {} = automatic."""
+    """optional override of the automatic cast: '图1换3号，图2换1号' / 'picture 1 -> 3' -> {1: [3], 2: [1]} (picture
+    -> person numbers on the cast sheet = order of first appearance).  Empty -> {} = automatic.
+    0.5.91 (user 22:11): ONE picture may take SEVERAL numbers ('图1换2号' + '图1换4号'): the tracker cut one person
+    into pieces (a new number after a cut, a turn, a crossing) - the user links every piece to the picture and they
+    become one person (merge_cast).  The user's links are final; the machine does not second-guess them."""
     out = {}
     if not (text or "").strip():
         return out
@@ -65,17 +68,18 @@ def parse_mapping(text: str) -> dict:
         p, k = int(m.group(1)), cn_number(m.group(2))
         if p < 1 or k < 1:
             raise KeyframeError(f"{TAG} '{m.group(0)}': pictures and people are counted from 1")
-        out[p] = k                          # 0.5.91 (02:49): a picture written twice - the last line wins
-                                            # (old text + a new choice below it must not stop the run)
+        ks = out.setdefault(p, [])
+        if k not in ks:
+            ks.append(k)
     if not out:
         raise KeyframeError(f"{TAG} mapping: leave it empty (automatic: picture 1 = the first person to appear, "
                             "picture 2 = the next ...) or write e.g. 图1换3号 / 'picture 1 -> 3' with the numbers of "
                             "the cast sheet. 留空 = 自动；或写 图1换3号（演员表上的编号）。")
-    ks = list(out.values())
+    ks = [k for v in out.values() for k in v]
     dup = sorted({k for k in ks if ks.count(k) > 1})
     if dup:
         raise KeyframeError(f"{TAG} person {dup} is given to two pictures. 同一个人对了两张图：{dup} 号。")
-    return dict(sorted(out.items()))
+    return {p: sorted(v) for p, v in sorted(out.items())}
 
 
 _DESC_NO = re.compile(r"^(?:图|圖|picture|pic)?\s*(\d+)\s*[:：.、)]\s*", re.I)
@@ -745,18 +749,52 @@ def auto_cast(people, pictures):
     if len(pics) > len(people):
         raise KeyframeError(f"{TAG} {len(pics)} pictures but only {len(people)} people are seen clearly in the clip. "
                             f"接了 {len(pics)} 张角色图，片子里只清楚出现 {len(people)} 个人。")
-    return {p: n for n, p in enumerate(pics, 1)}
+    return {p: [n] for n, p in enumerate(pics, 1)}
 
 
 def resolve(mapping: dict, people: list) -> list:
-    """{picture: person number} + cast(...) -> [(picture, person number, person id)]."""
+    """{picture: [person numbers]} + cast(...) -> [(picture, person number, person id)], one entry per LINK (a
+    picture linked to several numbers has several entries; merge_cast makes them one person)."""
     out = []
-    for p, k in mapping.items():
-        if k > len(people):
-            raise KeyframeError(f"{TAG} only {len(people)} people are on the cast sheet, #{k} does not exist. "
-                                f"演员表里只有 {len(people)} 个人，没有 {k} 号。")
-        out.append((p, k, people[k - 1]["id"]))
+    for p, ks in mapping.items():
+        for k in (ks if isinstance(ks, (list, tuple)) else [ks]):
+            if k > len(people):
+                raise KeyframeError(f"{TAG} only {len(people)} people are on the cast sheet, #{k} does not exist. "
+                                    f"演员表里只有 {len(people)} 个人，没有 {k} 号。")
+            out.append((p, k, people[k - 1]["id"]))
     return out
+
+
+def merge_cast(frames, links):
+    """0.5.91 (user 22:11): the numbers the user linked to one picture are one person.  links = resolve(...) (all
+    links).  In frames every linked id becomes the id of the picture's FIRST number; where two of them are boxed in the
+    same frame (a double box after a cut) the first number's box stays.  frames changed in place.
+    -> (chosen with one entry per picture, ids merged away, notes)"""
+    by_pic = {}
+    for p, k, pid in links:
+        by_pic.setdefault(p, []).append((k, pid))
+    chosen, gone, notes = [], set(), []
+    rename = {}
+    for p in sorted(by_pic):
+        lk = sorted(by_pic[p])
+        k0, pid0 = lk[0]
+        chosen.append((p, k0, pid0))
+        for k, pid in lk[1:]:
+            rename[pid] = pid0
+            gone.add(pid)
+        if len(lk) > 1:
+            notes.append(f"picture {p}: #{', #'.join(str(k) for k, _ in lk)} linked by you = one person (#{k0})")
+    if rename:
+        for f in frames:
+            who, have = [], {w[0] for w in f.get("who") or () if w[0] not in rename}
+            for pid, b in f.get("who") or ():
+                to = rename.get(pid, pid)
+                if pid in rename and to in have:
+                    continue                    # the picture's own number is boxed here already
+                have.add(to)
+                who.append([to, b])
+            f["who"] = sorted(who, key=lambda w: (w[1][0] + w[1][2]) / 2)
+    return chosen, gone, notes
 
 
 TWIN_MIN_S = 1.0       # 0.5.91 (user 16:11, 00154 cast #4 7.0-7.8 s; _022 keyframe 8): two ids seen together this

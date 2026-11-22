@@ -6,21 +6,50 @@ import h3md_keyframe as K
 
 
 def test_parse_mapping_zh_en():
-    assert K.parse_mapping("图1换左二，图2换左四") == {1: 2, 2: 4}
-    assert K.parse_mapping("picture 1 -> left 2; pic 3 replaces left #5") == {1: 2, 3: 5}
-    assert K.parse_mapping("图2换左第3个\n图1换左一") == {1: 1, 2: 3}
+    assert K.parse_mapping("图1换左二，图2换左四") == {1: [2], 2: [4]}
+    assert K.parse_mapping("picture 1 -> left 2; pic 3 replaces left #5") == {1: [2], 3: [5]}
+    assert K.parse_mapping("图2换左第3个\n图1换左一") == {1: [1], 2: [3]}
 
 
 def test_parse_mapping_cast_numbers():
     """0.5.91: numbers are cast numbers (order of first appearance); empty = automatic"""
     assert K.parse_mapping("") == {} and K.parse_mapping("  \n") == {}
-    assert K.parse_mapping("图1换3号，图2换1号") == {1: 3, 2: 1}
-    assert K.parse_mapping("picture 1 -> #3") == {1: 3}
+    assert K.parse_mapping("图1换3号，图2换1号") == {1: [3], 2: [1]}
+    assert K.parse_mapping("picture 1 -> #3") == {1: [3]}
 
 
-def test_parse_mapping_last_line_wins():
-    """02:49: old text plus a new choice below it ('picture 3 -> left 3' ... '图3换4号'): the last one wins"""
-    assert K.parse_mapping("picture 3 -> left 3\n图3换4号") == {3: 4}
+def test_parse_mapping_one_picture_several_people():
+    """0.5.91 (user 22:11): the tracker cut one person into #2 and #4 - both lines go to picture 1"""
+    assert K.parse_mapping("图1换2号\n图1换4号\n图2换3号") == {1: [2, 4], 2: [3]}
+    assert K.parse_mapping("picture 3 -> 3\n图3换3号") == {3: [3]}
+
+
+def test_merge_cast_makes_one_person():
+    """_040: the centre woman was #2 (0-2.8 s, 8.8 s on) and #4 (3.0-9.3 s, a double box at 8.8-9.3 s); the user
+    links both to picture 1 - one id everywhere, the double box dropped, the kept list loses #4"""
+    fr = []
+    for i in range(60):
+        t = i / 6.0
+        who = [[11, [0.1, 0.2, 0.3, 0.95]], [13, [0.7, 0.2, 0.9, 0.95]]]
+        if t < 2.8 or t >= 8.8:
+            who.append([12, [0.4, 0.2, 0.6, 0.95]])
+        if 3.0 <= t < 9.3:
+            who.append([14, [0.41, 0.25, 0.6, 0.9]])
+        fr.append({"at": t, "who": who})
+    people = K.cast(fr)
+    nums = {a["id"]: n for n, a in enumerate(people, 1)}
+    links = K.resolve({1: [nums[12], nums[14]], 2: [nums[11]], 3: [nums[13]]}, people)
+    chosen, gone, notes = K.merge_cast(fr, links)
+    assert [c[2] for c in chosen] == [12, 11, 13] and gone == {14} and notes
+    for f in fr:
+        ids = [w[0] for w in f["who"]]
+        assert 14 not in ids and ids.count(12) <= 1                 # double box at 8.8-9.3 s: one box left
+        cx = [w[1][0] + w[1][2] for w in f["who"]]
+        assert cx == sorted(cx)                                      # still left to right
+    # she is boxed everywhere except the real 2.8-3.0 s gap of the tracker
+    assert all(any(w[0] == 12 for w in f["who"]) for f in fr if f["at"] < 2.8 or f["at"] >= 3.0)
+    # the 8.8-9.3 s overlap keeps the picture's own (first) number's box
+    assert all(next(w[1] for w in f["who"] if w[0] == 12)[1] == 0.2 for f in fr if 8.8 <= f["at"] < 9.3)
 
 
 @pytest.mark.parametrize("bad", ["换人", "图1换左二，图2换左二"])
@@ -68,9 +97,9 @@ def _frames(n=60, fps=6.0):
 def test_cast_and_resolve():
     people = K.cast(_frames())
     assert [a["id"] for a in people] == [11, 12, 13]
-    assert K.resolve({1: 2}, people) == [(1, 2, 12)]
+    assert K.resolve({1: [2]}, people) == [(1, 2, 12)]
     with pytest.raises(K.KeyframeError):
-        K.resolve({1: 4}, people)
+        K.resolve({1: [4]}, people)
 
 
 def test_cast_order_of_appearance():
