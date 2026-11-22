@@ -892,11 +892,58 @@ def cut_at_bottom(box):
     return box[3] >= 1 - CLOSE_EDGE
 
 
+DARK_REL = 0.4           # 0.5.91 (user 23:15, _046 keyframe 9 at 16.83 s: the stage blacked out): a frame whose people
+                         # are lit less than this share of the clip's usual light is no keyframe - the edit model gets
+                         # nothing to read and the keyframe is no guide.  Light = the 90th percentile of the brightness
+                         # inside the people's boxes (their lit parts; dark clothes or a dark backdrop inside the box do
+                         # not count).  Measured on 4 clips: lit frames 0.56-0.77, blackouts 0.10-0.17; compared with
+                         # the clip's own median, so a clip that is dark all through loses nothing.
+
+
+def people_light(img, boxes):
+    """img uint8 [h, w, 3] RGB, boxes (0-1) -> the 90th percentile of the brightness (0-1) inside the boxes"""
+    import numpy as np
+    h, w = img.shape[:2]
+    y = img[..., 0] * 0.299 + img[..., 1] * 0.587 + img[..., 2] * 0.114
+    m = np.zeros((h, w), bool)
+    for b in boxes:
+        x0, y0, x1, y1 = int(b[0] * w), int(b[1] * h), int(round(b[2] * w)), int(round(b[3] * h))
+        m[max(0, y0):max(0, y1), max(0, x0):max(0, x1)] = True
+    v = y[m] if m.any() else y.ravel()
+    return float(np.percentile(v, 90)) / 255.0
+
+
+def mark_dark(frames, light, rel=DARK_REL):
+    """light: {frame index: people_light} for the frames with people.  Frames below rel x the clip's median get
+    f["dark"] = True (score() then skips them, so every keyframe rule takes the nearest lit frame instead).
+    -> notes"""
+    import statistics
+    vals = [v for v in light.values() if v is not None]
+    if len(vals) < 3:
+        return []
+    ref = statistics.median(vals)
+    dark = sorted(i for i, v in light.items() if v is not None and v < rel * ref)
+    for i in dark:
+        frames[i]["dark"] = True
+    if not dark:
+        return []
+    spans, a, b = [], dark[0], dark[0]
+    for i in dark[1:]:
+        if i == b + 1:
+            b = i
+        else:
+            spans.append((a, b)); a = b = i
+    spans.append((a, b))
+    return [f"too dark for a keyframe (people lit below {rel:.0%} of the clip's usual {ref:.2f}): "
+            + ", ".join(f"{frames[x]['at']:.2f}" + ("" if x == y else f"-{frames[y]['at']:.2f}") for x, y in spans)
+            + " s - the nearest lit frames are used. 太暗的帧不当关键帧，取前后最近的亮帧。"]
+
+
 def score(frames, i, chosen_ids):
     """(chosen people seen, smallest gap of a chosen person to anybody else (capped), -motion, mean height) or None
     (nobody chosen seen, or a close-up)"""
-    if frames[i].get("bad"):              # 0.5.91: a box spanning two people (clean_frames)
-        return None
+    if frames[i].get("bad") or frames[i].get("dark"):   # 0.5.91: a box spanning two people (clean_frames);
+        return None                                      # people too dark to read (mark_dark)
     vis = visible(frames[i])
     ch = [w for w in vis if w[0] in chosen_ids]
     if not ch or closeup(frames[i], chosen_ids):
@@ -928,7 +975,8 @@ def pick_moments(frames, chosen_ids, duration, max_gap=5.0):
             if s is not None and (bs is None or s > bs):
                 best, bs = i, s
         if best is None:
-            present = [i for i in cand if any(w[0] in chosen_ids for w in frames[i].get("who") or ())]
+            present = [i for i in cand if any(w[0] in chosen_ids for w in frames[i].get("who") or ())
+                       and not frames[i].get("dark")]
             usable = [i for i in present if not closeup(frames[i], chosen_ids)]
             if present and not usable:
                 # only close-ups here: no keyframe, look further on (the next mid shot carries the swap)
@@ -941,7 +989,8 @@ def pick_moments(frames, chosen_ids, duration, max_gap=5.0):
                                                      if w[0] in chosen_ids))
                 out.append((best, "swap"))
             else:
-                best = cand[len(cand) // 2]
+                lit = [i for i in cand if not frames[i].get("dark")] or cand
+                best = lit[len(lit) // 2]
                 out.append((best, "plain"))
         else:
             out.append((best, "swap"))
@@ -999,7 +1048,8 @@ def ensure_per_shot(frames, moments, chosen_ids, cuts, duration, settle=SHOT_SET
         if scored:
             out.append((max(scored)[1], "swap"))
         elif cand and not any(any(w[0] in chosen_ids for w in frames[i].get("who") or ()) for i in cand):
-            out.append((cand[len(cand) // 2], "plain"))
+            lit = [i for i in cand if not frames[i].get("dark")] or cand
+            out.append((lit[len(lit) // 2], "plain"))
         # else: the chosen people are there but only in close-ups - no keyframe (an edited close-up does more harm)
     return sorted(out, key=lambda m: frames[m[0]]["at"])
 
@@ -1142,6 +1192,7 @@ def finish_moments(frames, moments, chosen_ids, duration, max_gap=5.0, cuts=(), 
         j += 1
     if not out:
         cand = [i for i, f in enumerate(frames) if any(w[0] in chosen_ids for w in f.get("who") or ())]
+        cand = [i for i in cand if not frames[i].get("dark")] or cand
         if cand:
             best = max(cand, key=lambda i: (len([w for w in frames[i]["who"] if w[0] in chosen_ids]),
                                              -_motion(frames, i, frames[i]["who"][0][0])))
@@ -1206,8 +1257,8 @@ def ensure_cover(frames, moments, chosen_ids, duration, every=COVER_S, min_s=COV
     for t, n in sorted(gaps.items()):
         who = "a replaced person" if n == 1 else f"{n} replaced people"
         warns.append(f"{who} seen around {t:.1f} s {'has' if n == 1 else 'have'} no frame clear enough for a keyframe "
-                     f"there (close-ups): Remake may give {'him' if n == 1 else 'them'} another character's look. "
-                     f"{t:.1f} 秒附近有 {n} 个要换的人没有合适的关键帧（特写），可能换错。")
+                     f"there (close-ups or too dark): Remake may give {'him' if n == 1 else 'them'} another character's look. "
+                     f"{t:.1f} 秒附近有 {n} 个要换的人没有合适的关键帧（特写或太暗），可能换错。")
     return sorted(out, key=lambda m: frames[m[0]]["at"]), notes, warns
 
 

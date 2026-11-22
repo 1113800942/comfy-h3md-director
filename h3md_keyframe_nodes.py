@@ -844,6 +844,18 @@ class H3MDKeyframePrepare:
             LOG.info("%s %s", TAG, n_)
         frames, clean_notes = K.clean_frames(frames, face_boxes)   # 0.5.91: double / wide / hidden boxes
         LOG.info("%s %s", TAG, clean_notes[0])
+        try:   # 0.5.91 (user 23:15): frames where the people are too dark to read are no keyframes
+            at_i = {round(float(t_), 3): j for j, t_ in enumerate(times)}
+            light = {}
+            for i_, f_ in enumerate(frames):
+                j = at_i.get(round(float(f_["at"]), 3))
+                bx = [b for _, b in K.visible(f_)]
+                if j is not None and bx:
+                    light[i_] = K.people_light(small[j], bx)
+            for n_ in K.mark_dark(frames, light):
+                LOG.info("%s %s", TAG, n_)
+        except Exception as exc:
+            LOG.warning("%s brightness check skipped (%s)", TAG, exc)
         people = K.cast(frames)
         if not mp:
             mp = K.auto_cast(people, picset)

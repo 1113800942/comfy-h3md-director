@@ -243,3 +243,24 @@ def test_prepare_inputs_keep_old_widget_order():
     spec = KN.H3MDKeyframePrepare.INPUT_TYPES()
     assert list(spec["required"])[0] == "video"
     assert list(spec["optional"])[-3:] == ["source_video", "start_s", "end_s"]
+
+
+def test_dark_frames_are_no_keyframes():
+    """0.5.91 (user 23:15, _046 #9): the stage blacks out at 16.8-17.0 s - the keyframe moves to the nearest lit frame;
+    a clip that is dark all through loses nothing (the clip's own light is the yardstick)"""
+    fr = []
+    for i in range(60):
+        t = i / 6.0
+        fr.append({"at": t, "who": [[1, [0.2, 0.2, 0.35, 0.95]], [2, [0.6, 0.2, 0.75, 0.95]]]})
+    light = {i: (0.1 if 4.4 < f["at"] < 5.6 else 0.7) for i, f in enumerate(fr)}
+    notes = K.mark_dark(fr, light)
+    assert notes and all(bool(f.get("dark")) == (4.4 < f["at"] < 5.6) for f in fr)
+    assert K.score(fr, 27, {1, 2}) is None and K.score(fr, 20, {1, 2}) is not None
+    mom = K.pick_moments(fr, {1, 2}, 10.0, max_gap=5.0)
+    assert mom and not any(fr[i].get("dark") for i, _ in mom)
+    dim = [{"at": f["at"], "who": f["who"]} for f in fr]
+    assert K.mark_dark(dim, {i: 0.12 for i in range(len(dim))}) == [] and not any(f.get("dark") for f in dim)
+    img = np.zeros((40, 80, 3), np.uint8)
+    img[10:30, 10:20] = 200
+    assert abs(K.people_light(img, [[0.1, 0.2, 0.3, 0.8]]) - 200 / 255) < 0.02
+    assert K.people_light(img, [[0.6, 0.2, 0.9, 0.8]]) == 0.0
