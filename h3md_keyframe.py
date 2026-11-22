@@ -1145,7 +1145,7 @@ def ensure_cover(frames, moments, chosen_ids, duration, every=COVER_S, min_s=COV
 
 
 SPARE_GPU_GB = 16.0       # 0.5.91 seams (user 2026-11-21 19:03): the smallest GPU H3MD supports for the swap
-SPARE_LOOK = 0.25         # a spare is picked within this share of the gap around its target moment
+SPARE_MIN_STEP = 0.5      # a spare at least this far after the keyframe before it
 
 
 def spare_gap(max_new_frames: int) -> float:
@@ -1157,35 +1157,38 @@ def spare_gap(max_new_frames: int) -> float:
 def add_spares(frames, moments, chosen_ids, duration, max_gap_s, cuts=()):
     """0.5.91 seams (user 2026-11-21 19:03): spare keyframes.  The Director cuts a long shot so that every part's new
     frames begin on a keyframe (h3md_autosplit.plan_parts_kf); on a small GPU the parts are short and a long gap
-    between two keyframes holds a part start nobody reaches.  For every gap longer than max_gap_s (from spare_gap of
-    the smallest supported GPU) - also from the last keyframe to the end - spares are spread evenly in it, each the
-    best clear frame near its target (same score as the main picks, no close-up, not just after a cut).  A big GPU
-    never uses them; the plan marks them "backup".  -> (spare frame indices sorted, notes)"""
+    between two keyframes holds a part start nobody reaches.  Walking every gap longer than max_gap_s (from spare_gap
+    of the smallest supported GPU; also from the last keyframe to the end): the next spare is the best clear frame in
+    the later 40 % of the reach (as far on as possible, so few are needed), else any clear frame within reach; never a
+    close-up (H3 Image cannot redraw one at the right size), never just after a cut.  Where no clear frame is in reach
+    the gap is named.  A big GPU never uses them; the plan marks them "backup".  -> (spare frame indices, notes)"""
     if not moments or max_gap_s <= 0:
         return [], []
     last = duration - 2.0 / FPS
     ts = sorted(frames[i]["at"] for i, _ in moments)
     taken = set(i for i, _ in moments)
+    ok = {i for i, f in enumerate(frames) if i not in taken and f["at"] <= last
+          and not any(0.0 <= f["at"] - c < SHOT_SETTLE for c in cuts) and score(frames, i, chosen_ids) is not None}
     spares, notes = [], []
-    bounds = list(zip(ts, ts[1:] + [last]))
-    for a, b in bounds:
-        g = b - a
-        if g <= max_gap_s + 1e-6:
-            continue
-        k = int(math.ceil(g / max_gap_s)) - 1
-        for j in range(1, k + 1):
-            target = a + g * j / (k + 1)
-            win = g / (k + 1) * SPARE_LOOK
-            cand = [i for i, f in enumerate(frames) if abs(f["at"] - target) <= win and i not in taken
-                    and not any(0.0 <= f["at"] - c < SHOT_SETTLE for c in cuts)
-                    and score(frames, i, chosen_ids) is not None]
-            if not cand:
-                notes.append(f"no clear frame for a spare keyframe near {target:.2f} s (close-ups or nobody to "
-                             f"replace) - a small GPU may start a part there without one")
-                continue
-            best = max(cand, key=lambda i: (score(frames, i, chosen_ids)[0], -abs(frames[i]["at"] - target)))
+    for a, b in zip(ts, ts[1:] + [last]):
+        cur = a
+        while b - cur > max_gap_s + 1e-6:
+            reach = [i for i in ok if cur + SPARE_MIN_STEP <= frames[i]["at"] <= cur + max_gap_s]
+            late = [i for i in reach if frames[i]["at"] >= cur + 0.6 * max_gap_s]
+            if late:
+                best = max(late, key=lambda i: score(frames, i, chosen_ids))
+            elif reach:
+                best = max(reach, key=lambda i: frames[i]["at"])
+            else:
+                nxt = min((frames[i]["at"] for i in ok if cur + max_gap_s < frames[i]["at"] < b), default=b)
+                notes.append(f"no clear frame for a spare keyframe between {cur:.2f} and {nxt:.2f} s (close-ups or "
+                             f"nobody to replace): a small GPU may start a part there without one")
+                if nxt >= b:
+                    break
+                best = min((i for i in ok if frames[i]["at"] == nxt))
             spares.append(best)
-            taken.add(best)
+            ok.discard(best)
+            cur = frames[best]["at"]
     spares.sort(key=lambda i: frames[i]["at"])
     if spares:
         notes.append(f"{len(spares)} spare keyframe(s) at {[round(frames[i]['at'], 2) for i in spares]} s for GPUs "
