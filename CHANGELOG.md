@@ -54,10 +54,11 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
 - **#15 Keyframe Export: "could not read the frame at 0.00 s"** on videos whose first frame starts a little late
   (phone / screen recordings with an MP4 edit list): the frame reader stopped before keeping the frame it had just
   passed. Fixed as proposed by Alon-Dan, with a test. 首帧时间戳略晚的视频（手机 / 录屏）关键帧导出报"读不到 0.00 秒的画面"，已修。
-- **#16 latent upscaler link**: `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors` was moved by its author to the
-  `experiments/` folder of Alissonerdx/Minimax-H3-ComfyUI; the download links in the example workflows and the README
-  point there now, and the README names his current `h3_upscaler_lms_v0.1_fp32.safetensors` as the alternative
-  (thanks set-soft). 锐化版潜空间放大模型被作者移到 experiments/，示例工作流和 README 的下载链接已更新。
+- **#16 latent upscaler**: its author renamed `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors` to
+  `latent_upscaler/h3_upscaler_lms_v0.1_fp32.safetensors` (the same file, same sha256; the old name now sits in
+  `experiments/`), so the example workflows' download link failed. The example workflows now use the new name and
+  link; a copy under the old name works the same (thanks set-soft).
+  潜空间放大模型被作者改名为 `h3_upscaler_lms_v0.1_fp32.safetensors`（和旧的 sharpness 版是同一个文件），示例工作流已改用新名字和新链接，旧名字那份照样能用。
 - **#17**: the README model table now lists `H3 Motion_Repair_V2.safetensors` (FourBunny's BUNNY General Motion
   Continuity Repair V2; the same file is on JOKER141/MiniMax-H3-General-Motion-Continuity-Repair). README 模型表补上 Motion Repair 的来源。
 

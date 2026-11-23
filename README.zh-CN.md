@@ -222,7 +222,7 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
 2. 按下表安装需要的节点包，然后重启 ComfyUI。
 3. 不需要额外 `pip install`：H3MD 只用到 ComfyUI 自带的 torch、numpy、PyAV、Pillow、einops。
 4. 下载学习型潜空间放大器（推荐）放到 `models/latent_upscale_models/`：`minimax_h3_latent_upscaler_3d_fp16.safetensors`
-   或它的微调版（如 `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors`）。不放也能跑（`upscaler_model = none`，最近邻放大，效果差一些）。
+   或它的微调版（如 `h3_upscaler_lms_v0.1_fp32.safetensors`（即旧名字 `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors`））。不放也能跑（`upscaler_model = none`，最近邻放大，效果差一些）。
 
 **示例工作流**
 * `H3MD Director simple.json`（清爽版，**推荐从这里开始**）：总控台 + 导演台 + 预览，模型 / 采样 / 保存收在子图里；不用
@@ -448,7 +448,7 @@ latent 重叠接续，704×1280，`lowres_anchor = 1`。每段都和第 1 段比
 | `minimax_h3_video_vae_fp16.safetensors` | `vae` | huggingface.co/Comfy-Org/MiniMax-H3 |
 | `minimax_h3_audio_vae_fp32.safetensors` | `vae` | huggingface.co/Comfy-Org/MiniMax-H3 |
 | `mmh3-4b-ClipProj-v3.1-mlp.safetensors` | `clip_projections` | huggingface.co/NicoLab28/ClipProj-MiniMax-H3 |
-| `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors` | `latent_upscale_models` | huggingface.co/Alissonerdx/Minimax-H3-ComfyUI 的 `experiments/` 文件夹（作者已移到这里；他现在主推 `latent_upscaler/h3_upscaler_lms_v0.1_fp32.safetensors`，两个都能用，在 `upscaler_model` 里选） |
+| `h3_upscaler_lms_v0.1_fp32.safetensors` | `latent_upscale_models` | huggingface.co/Alissonerdx/Minimax-H3-ComfyUI 的 `latent_upscaler/` 文件夹（和旧名字 `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors` 是同一个文件，旧名字那份现在在 `experiments/`，sha256 相同；已经下载了哪个就用哪个） |
 | `H3 Motion_Repair_V2.safetensors` | `loras` | FourBunny 的「BUNNY General Motion Continuity Repair」V2：civitai.com/models/2890788，也在 huggingface.co/JOKER141/MiniMax-H3-General-Motion-Continuity-Repair（文件名 `Motion_Repair_V2.safetensors`，同一个文件，改名即可） |
 | `H3_Combat_V2.safetensors` | `loras` | huggingface.co/JOKER141/MiniMax-H3-Combat-Base-V2 |
 | `minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors` | `loras` | huggingface.co/lightx2v/Minimax-h3-Turbo |
@@ -568,7 +568,7 @@ H3MD 站在很多人的肩膀上。下面这些作者的代码、模型或公开
 - 👍 [Comfy-Org](https://github.com/comfyanonymous/ComfyUI)：ComfyUI 核心里给 MiniMax H3 用的 Context Windows，CCW 就是在它上面改的（上下文窗口的思路最早来自 Kosinkadink 的 [AnimateDiff-Evolved](https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved) context options）
 - 👍 [Luna-H3-Sampler](https://github.com/lunaaispace-eng/Luna-H3-Sampler)：两段式采样引擎（H3MD 内置，GPL-3.0）
 - 👍 [LBH-123-AI](https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler)：学习型潜空间放大器（MIT）
-- 👍 [Alissonerdx](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI)：sharpness 放大器和 lms LoRA
+- 👍 [Alissonerdx](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI)：lms（旧名 sharpness）放大器和 lms LoRA
 - 👍 [nkxx188/ComfyUI-MiniMaxH3-Easy](https://github.com/nkxx188/ComfyUI-MiniMaxH3-Easy)：高清条带分块的思路（MIT）
 - 👍 [Kijai](https://github.com/kijai/ComfyUI-KJNodes)：SageAttention / FeedForward 省显存补丁，DMAD 转换
 - 👍 [NicoLab28/ClipProj](https://github.com/nicolab28/ComfyUI-ClipProj)：4B 编码器投影，让小显存也能跑

@@ -319,7 +319,7 @@ videos or audio; untick **prompts** to leave the prompts out. It is only saved o
 3. No extra `pip install`: H3MD only uses torch, numpy, PyAV, Pillow and einops, which ship with ComfyUI.
 4. Recommended: a learned latent upscaler in `models/latent_upscale_models/`, e.g.
    `minimax_h3_latent_upscaler_3d_fp16.safetensors` or a fine-tune such as
-   `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors`. Without one, set `upscaler_model = none` (nearest, softer).
+   `h3_upscaler_lms_v0.1_fp32.safetensors` (= the older `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors`). Without one, set `upscaler_model = none` (nearest, softer).
 
 **Example workflows**
 * `H3MD Director simple.json` — **start here** (v0.3): Control Panel + Director + preview; models / sampler / save in
@@ -583,7 +583,7 @@ entry is not shown.
 | `minimax_h3_video_vae_fp16.safetensors` | `vae` | huggingface.co/Comfy-Org/MiniMax-H3 |
 | `minimax_h3_audio_vae_fp32.safetensors` | `vae` | huggingface.co/Comfy-Org/MiniMax-H3 |
 | `mmh3-4b-ClipProj-v3.1-mlp.safetensors` | `clip_projections` | huggingface.co/NicoLab28/ClipProj-MiniMax-H3 |
-| `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors` | `latent_upscale_models` | huggingface.co/Alissonerdx/Minimax-H3-ComfyUI, folder `experiments/` (moved there by its author; his current one is `latent_upscaler/h3_upscaler_lms_v0.1_fp32.safetensors` - either works, pick it in `upscaler_model`) |
+| `h3_upscaler_lms_v0.1_fp32.safetensors` | `latent_upscale_models` | huggingface.co/Alissonerdx/Minimax-H3-ComfyUI, folder `latent_upscaler/` (the same file as the older name `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors`, now in `experiments/` - same sha256; keep whichever you have) |
 | `H3 Motion_Repair_V2.safetensors` | `loras` | FourBunny's "BUNNY General Motion Continuity Repair" V2: civitai.com/models/2890788, also huggingface.co/JOKER141/MiniMax-H3-General-Motion-Continuity-Repair (`Motion_Repair_V2.safetensors`, same file - rename it) |
 | `H3_Combat_V2.safetensors` | `loras` | huggingface.co/JOKER141/MiniMax-H3-Combat-Base-V2 |
 | `minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors` | `loras` | huggingface.co/lightx2v/Minimax-h3-Turbo |
@@ -742,7 +742,7 @@ H3MD stands on many shoulders. Their code, models or openly shared findings gave
 - 👍 [Comfy-Org](https://github.com/comfyanonymous/ComfyUI): the core Context Windows for MiniMax H3 that CCW builds on (the context-window idea goes back to Kosinkadink's [AnimateDiff-Evolved](https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved) context options)
 - 👍 [Luna-H3-Sampler](https://github.com/lunaaispace-eng/Luna-H3-Sampler): two-pass sampling engine (bundled, GPL-3.0)
 - 👍 [LBH-123-AI](https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler): learned latent upscaler (MIT)
-- 👍 [Alissonerdx](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI): sharpness upscaler and lms LoRA
+- 👍 [Alissonerdx](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI): latent upscaler (lms, formerly named sharpness) and lms LoRA
 - 👍 [nkxx188/ComfyUI-MiniMaxH3-Easy](https://github.com/nkxx188/ComfyUI-MiniMaxH3-Easy): high-res strip tiling idea (MIT)
 - 👍 [Kijai](https://github.com/kijai/ComfyUI-KJNodes): SageAttention / feed-forward VRAM patches, DMAD conversion
 - 👍 [NicoLab28/ClipProj](https://github.com/nicolab28/ComfyUI-ClipProj): 4B encoder projection for small GPUs
