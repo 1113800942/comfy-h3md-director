@@ -67,6 +67,12 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   hidden (low on the floor) the original person can come back for about a second, the same place with another seed.
   Cut that move shorter, or use the multi-person swap (Remake). A half-body picture shows no trousers or shoes - say
   what they are. 普通参考换人在贴地、脸看不见的大动作里，原人可能回来约 1 秒，换种子同一位置；可剪短该动作或改用多人换人。半身照要写明裤子和鞋。
+- A long move with its reference video (e.g. 8-9 s) is slow in the high-res pass: the reference cannot be cut into
+  the VRAM-saving strips, so every strip carries all of it (measured: a 209-frame shot took 30 of the 40 minutes of a
+  13 s edit at 1664x960; a 107-frame one took 4.5). The strips are what keeps smaller cards from running out of
+  memory, so they stay. Keep moves at about 5 s each in Ref Splice (split the long ones) for faster high-res runs.
+  带参考视频的长动作段（8–9 秒）高清阶段很慢：参考视频不能跟着画面切条，每一条都带着整段参考（实测 209 帧那段占了 13 秒成片
+  40 分钟里的 30 分钟）。切条是防止小显存爆显存的保护，不改。剪辑时每个动作切到 5 秒左右，高清会快很多。
 
 ## [0.6.1] - 2026-11-22
 
