@@ -705,7 +705,9 @@ def _jpeg(arr, max_side: int = 768) -> bytes:
 
 
 AI_NOTE = ("For an AI: rewrite every segment's prompt in plan.json by the H3MD prompt skill, part 14 (Ref Splice). "
-           "Read this file and look at stills/ and media/ first. Keep lengths, overlaps, media and the order; change "
+           "Read this file and look at stills/ and media/ first. A half-body picture does not show trousers or shoes: "
+           "ASK the user what they are before writing (or the source person's own show up, e.g. in a close-up "
+           "of the legs). Keep lengths, overlaps, media and the order; change "
            "only the prompts. Save the result as a new package <name>_ai_<date>_<NNN>.zip (manifest + plan + media/, "
            "without this ai/ folder).")
 
