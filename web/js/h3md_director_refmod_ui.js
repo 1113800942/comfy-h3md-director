@@ -700,7 +700,7 @@ class DirectorEditor {
     }
     this.val = this.validation();
     // the global prompt lives inside the Shots section, directly under the shot card
-    this.root.append(this.renderBins(), this.renderWindowMode(), this.renderRemakeModule(), this.renderRefVideoHeight(), this.renderTimeline(), this.renderSegments());
+    this.root.append(this.renderBins(), this.renderWindowMode(), this.renderRefVideoHeight(), this.renderTimeline(), this.renderSegments());
     if (this.statOpen) this.root.append(this.renderStatPop());
     this.renderStatus();
     this.applyAutoSplitUI();
@@ -1025,6 +1025,8 @@ class DirectorEditor {
   }
 
   // Remake Swap module (2026-11-15, experimental): plan.swapEngine "remake" or key absent.
+  // 2026-11-22: no longer shown on the Director - the Control Panel style "多人互换" is the one switch (it sets the same
+  // plan.swapEngine); kept here unused in case it is needed again.
   // Default off. Turning the switch off must not strip segments[].keyframes or other saved fields.
   renderRemakeModule() {
     const p = this.plan;
