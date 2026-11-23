@@ -257,9 +257,12 @@ One reference clip often holds several moves you want in a different order, play
 5. Drag the package into the **H3MD Director** (or Import plan) and run as usual. Without pictures the plan keeps the
    people of the video; what a transition does is up to you. The Director itself is unchanged.
 
-Transitions (measured): no words = the model links the two poses itself (about 1 s); one simple move (kneel,
-crouch, fall and get up) needs about 1.5 s; over 2 s becomes its own text-only shot. Moves can land 0.3–0.5 s early —
-it is a link, not frame-exact choreography.
+Transitions (measured): no words = the model links the two poses itself (about 1 s). A transition **with words**
+is generated as its own short shot WITHOUT the reference video, carried by 39 frames on both sides - inside the
+reference the model copied the placeholder (a double exposure, a frozen pose) and ignored the words; on its own it
+did the clap, the crouch and the shout (2026-11-23). One simple move (kneel, crouch, clap, shout) needs about 1.5 s.
+Write the words in English as one full sentence with who does it (or let the AI step write them from the package).
+Moves can land 0.3–0.5 s early - it is a link, not frame-exact choreography.
 
 A move has no text box: it plays exactly as in the source. Words only go into a transition (empty = a plain link; filled = goes into the prompt) - that is where a new move goes.
 

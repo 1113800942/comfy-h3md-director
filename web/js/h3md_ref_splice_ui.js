@@ -123,8 +123,8 @@ function setupEditor(node) {
   const help = el("div", { color: "#999", fontSize: "11px" },
     "Upper track: only the edges move (where a move starts / ends). Lower track: the order - drag, duplicate, add " +
     "transitions. A transition with no words = the model links the two poses (≈1 s); one move (kneel...) ≈1.5 s; " +
-    "over 2 s = its own shot. Run = preview + plan package + the video output (connect Save Video to keep it). " +
-    "上轨只能拖边缘（起止）；下轨管顺序、复制、过渡。过渡不写字 = 自然衔接（约 1 秒）；一个动作约 1.5 秒；超过 2 秒自动成单独镜头。" +
+    "with words = its own short shot without the reference. Run = preview + plan package + the video output (connect Save Video to keep it). " +
+    "上轨只能拖边缘（起止）；下轨管顺序、复制、过渡。过渡不写字 = 自然衔接（约 1 秒）；写了字 = 单独生成一个不带参考视频的小镜头，一个动作约 1.5 秒。" +
     "运行 = 预览 + 计划包 + 视频输出（接 Save Video 存成品）。");
   const trackA = el("div", { position: "relative", height: "34px", background: "#222", borderRadius: "4px", overflow: "hidden", cursor: "pointer" });
   const trackB = el("div", { position: "relative", height: "44px", background: "#222", borderRadius: "4px", overflowX: "auto",

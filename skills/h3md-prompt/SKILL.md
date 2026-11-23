@@ -610,8 +610,10 @@ clip 8.0-9.75
 - Times = seconds of the SOURCE video; clips in the user's order, repeats allowed; start and end with a clip; never
   two gaps in a row. Optional lines: `style:`, `scene:`, `sound:`, `music:`, `subject:` (only to override the
   node's own who-is-who).
-- Transitions (measured, six low-res runs): just join = `gap 1` with **no words**; one simple move (kneel, crouch,
-  fall and get up) = about `gap 1.5: <the move>`; two moves ≈ 2.5–3 s; a dialogue beat over 2 s = `gap <s>: <what
-  happens, lines in <d>…</d>>` (the node makes it its own shot). Never write "natural transition", "smooth",
-  "no pause". Moves can land 0.3–0.5 s early.
+- Transitions (measured): just join = `gap 1` with **no words** (a short dissolve inside the shot); one simple move
+  (kneel, crouch, clap, shout, fall and get up) = about `gap 1.5: <the move>`; two moves ≈ 2.5–3 s; a dialogue beat =
+  `gap <s>: <what happens, lines in <d>…</d>>`. A transition with words is always its own shot without the reference
+  video (inside the reference the model copied the placeholder and ignored the words, 2026-11-23). Write the words in
+  English as one full sentence with who does it and where they end up (the next move's first pose). Never write
+  "natural transition", "smooth", "no pause". Moves can land 0.3–0.5 s early.
 - If you cannot see the video, ask the user where each move starts and ends (the node's player shows the time).

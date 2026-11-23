@@ -54,9 +54,13 @@ class Parse(unittest.TestCase):
         self.assertEqual([(i["kind"], i.get("sec")) for i in s["items"]], [("clip", None), ("gap", 1.0), ("clip", None)])
 
 
+# the same edit with no words on the 1.5 s transition: an empty transition stays inside the shot
+BASIC_EMPTY = BASIC.replace("gap 1.5: <Subject 1> drops onto one knee, then stands up", "gap 1.5")
+
+
 class Timeline(unittest.TestCase):
-    def test_short_transitions_stay_in_one_shot(self):
-        tl = S.build_timeline(S.parse_script(BASIC), 10.0)
+    def test_empty_short_transitions_stay_in_one_shot(self):
+        tl = S.build_timeline(S.parse_script(BASIC_EMPTY), 10.0)
         self.assertEqual(len(tl["shots"]), 1)
         s = tl["shots"][0]
         self.assertEqual(s["frames"], 48 + 36 + 48 + 24 + 42)
@@ -69,6 +73,22 @@ class Timeline(unittest.TestCase):
         ws = [o[3] for o in gap[4:-4]]
         self.assertTrue(all(a < b for a, b in zip(ws, ws[1:])) and 0 < ws[0] and ws[-1] < 1)
 
+    def test_words_make_a_text_shot(self):
+        # 11-23: a transition with words is its own shot WITHOUT the reference video (the model copied the
+        # placeholder inside a video shot); the stills between them are not a dissolve
+        tl = S.build_timeline(S.parse_script(BASIC), 10.0)
+        self.assertEqual([s["kind"] for s in tl["shots"]], ["video", "text", "video"])
+        a, t, b = tl["shots"]
+        self.assertEqual((a["overlap"], t["overlap"], b["overlap"]), (0, 39, 39))
+        self.assertEqual((a["frames"], t["frames"], b["frames"]), (48, 36, 48 + 24 + 42))
+        self.assertEqual(t["length"], 73)          # 39 + 36 = 75 -> nearest 5+17n (73), not 90: no long pause
+        self.assertEqual(b["ref_start"], 48 + 39)
+        held = tl["ops"][48:87]
+        self.assertTrue(all(o[0] == "src" for o in held))
+        self.assertEqual(held[0], ("src", 6.0 - 1 / 24))
+        self.assertEqual(held[-1], ("src", 0.0))
+        self.assertTrue(any(o[0] == "mix" for o in tl["ops"][87:]))   # the empty 1 s link is still a dissolve
+
     def test_long_transition_becomes_a_text_shot(self):
         sc = BASIC.replace("gap 1.5:", "gap 4:")
         tl = S.build_timeline(S.parse_script(sc), 10.0)
@@ -78,10 +98,10 @@ class Timeline(unittest.TestCase):
         self.assertEqual((a["overlap"], t["overlap"], b["overlap"]), (0, 39, 39))
         self.assertEqual(a["frames"], 48)
         self.assertEqual(t["frames"], 96)
-        self.assertEqual(t["length"], D.aligned_up(39 + 96))
-        # the next video shot starts after a 39-frame dissolve: its carried frames read the transition
+        self.assertEqual(t["length"], 141)         # 39 + 96 = 135 -> nearest 5+17n
+        # the next video shot starts after 39 still frames: its carried frames read them
         self.assertEqual(b["ref_start"], 48 + 39)
-        self.assertTrue(all(o[0] in ("src", "mix") for o in tl["ops"][48:87]))
+        self.assertTrue(all(o[0] == "src" for o in tl["ops"][48:87]))
         self.assertEqual(tl["ops"][b["ref_start"]], ("src", 0.0))
 
     def test_clip_past_the_end(self):
@@ -91,15 +111,16 @@ class Timeline(unittest.TestCase):
 
 class Prompts(unittest.TestCase):
     def test_times_and_tags(self):
-        sc = S.parse_script(BASIC)
+        sc = S.parse_script(BASIC_EMPTY)
         tl = S.build_timeline(sc, 10.0)
         plan = S.build_plan(sc, tl, "t", "H3MD_plans/t/t.mp4", True, [])
         p = plan["segments"][0]["prompt"]
-        self.assertIn("From 0.00 to 2.00 seconds, the people move exactly as in <Video 1>.", p)
-        self.assertIn("From 2.00 to 3.50 seconds, <Subject 1> drops onto one knee, then stands up.", p)
-        self.assertIn("From 3.50 to 5.50 seconds, the people move exactly as in <Video 1>.", p)
-        self.assertNotIn("From 5.50 to 6.50", p)                    # an empty transition gets no words
-        self.assertIn("From 6.50 to 8.25 seconds, the people move exactly as in <Video 1>.", p)
+        # time marks the Director moves with auto-split / window mode
+        self.assertIn("[0s] The people move exactly as in <Video 1>.", p)
+        self.assertIn("[3.5s] The people move exactly as in <Video 1>.", p)
+        self.assertIn("[6.5s] The people move exactly as in <Video 1>.", p)
+        self.assertNotIn("[2s]", p)                                  # an empty transition gets no words
+        self.assertNotIn("From ", p)
         self.assertIn("<Audio 1> is the sound of <Video 1>", p)
         for w in ("natural", "do not stop", "no pause"):
             self.assertNotIn(w, p.lower())
@@ -118,11 +139,11 @@ class Prompts(unittest.TestCase):
         self.assertEqual(txt["videos"], [])
         self.assertNotIn("<Video", txt["prompt"])
         self.assertNotIn("<Audio", txt["prompt"])
-        self.assertIn("From 1.62 to 5.62 seconds, <Subject 1> drops onto one knee", txt["prompt"])
+        self.assertIn("[1.62s] <Subject 1> drops onto one knee", txt["prompt"])
         third = plan["segments"][2]
         self.assertEqual(third["overlapIn"], 39)
         self.assertIn("For the first 1.62 seconds it holds the end of the previous moment", third["prompt"])
-        self.assertIn("From 1.62 to 3.62 seconds, the people move exactly as in <Video 1>.", third["prompt"])
+        self.assertIn("[1.62s] The people move exactly as in <Video 1>.", third["prompt"])
         self.assertEqual(third["videos"][0]["trimStart"], round(87 / 24, 6))
 
     def test_text_shot_without_pictures_uses_base_format(self):
@@ -194,15 +215,16 @@ class EndToEnd(unittest.TestCase):
             self.assertTrue(res["stem"].startswith("my_splice_") and res["stem"].endswith("_001"))
             self.assertTrue(os.path.isfile(res["zip"]) and os.path.isfile(res["preview"]))
             info = S.probe(res["preview"])
-            self.assertAlmostEqual(info["duration"] * 24, 198 + S.END_PAD, delta=1.5)
+            self.assertAlmostEqual(info["duration"] * 24, 48 + 39 + 114 + S.END_PAD, delta=1.5)
             self.assertTrue(info["has_audio"])
             import av
             with av.open(res["preview"]) as c:
                 lv = [float(f.to_ndarray(format="rgb24").mean()) for f in c.decode(c.streams.video[0])]
             self.assertAlmostEqual(lv[0], 120, delta=3)            # clip 4.0 s at 30 fps = level 120
             self.assertAlmostEqual(lv[47], 30 * (6 - 1 / 24), delta=3)
-            self.assertAlmostEqual(lv[84], 0, delta=3)             # clip 0-2 starts after the 1.5 s transition
-            self.assertTrue(10 < lv[66] < 170)                    # inside the dissolve
+            self.assertAlmostEqual(lv[87], 0, delta=3)             # clip 0-2 starts after 39 still frames
+            self.assertAlmostEqual(lv[60], 30 * (6 - 1 / 24), delta=3)   # still of the move's last frame
+            self.assertAlmostEqual(lv[80], 0, delta=3)             # still of the next move's first frame
             with zipfile.ZipFile(res["zip"]) as z:
                 names = set(z.namelist())
             self.assertIn("manifest.json", names)

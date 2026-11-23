@@ -12,8 +12,11 @@ Rules measured on 2026-11-22 (checklist "参考视频剪辑插件", runs 1-6, on
   * one simple move written for a transition (kneel, crouch, fall and get up) is done when it has ~1.5 s; time left
     over becomes a pause, too little time makes the next move start early (0.3-0.5 s early is normal);
   * a long transition (> 2 s, e.g. a dialogue beat) is really another shot: it becomes its own text-only shot,
-    continued with 39 frames on both sides, and the reference video holds a 39-frame dissolve before the next move so
-    the carried frames land on the transition, never on the move.
+    continued with 39 frames on both sides, and the reference video holds 39 still frames before the next move so
+    the carried frames land on the transition, never on the move;
+  * 2026-11-23 (H3MD_00179-181): a transition WITH WORDS of any length is such a text-only shot - inside the video shot
+    the model copied the placeholder (double exposure, frozen pose) whatever the words or LoRAs; alone it did them;
+    its length is the nearest 5+17n (rounding up left a pause).
 Only this node uses these rules; nothing else in H3MD changes.
 """
 
@@ -39,6 +42,10 @@ CATEGORY = "MiniMax H3/H3MD"
 FPS = D.FPS
 HOLD = 4                    # still frames kept at each end of a transition placeholder
 SHORT_GAP_MAX = 2.0         # seconds; a longer transition becomes its own text-only shot
+# 2026-11-23 (H3MD_00179 / 00180, user 00:51 "fix the placeholder"): a transition WITH WORDS is always its own
+# text-only shot.  Inside a video shot the model copied the placeholder of the spliced reference (double exposure
+# of the dissolve, a frozen pose) and ignored the words, with both LoRA styles; with no reference in those seconds
+# it can only follow the words.  An empty transition up to 2 s stays a dissolve link inside the shot.
 CARRY = 39                  # frames carried across the shots a long transition creates (an OVERLAP_STEPS value)
 END_PAD = 17                # still frames after the last clip: a shot is rounded UP to 5+17n (<= 16 frames more)
 AUDIO_RATE = 48000
@@ -161,6 +168,13 @@ def _placeholder(n: int, a_time: float, b_time: float) -> list:
     return ops
 
 
+def _hold_pair(n: int, a_time: float, b_time: float) -> list:
+    """n frames: still of a, then still of b - no dissolve (a shot's tail and the carried frames of the next shot
+    read these; a dissolve here came out as a double exposure)"""
+    h = n // 2
+    return [("src", a_time)] * h + [("src", b_time)] * (n - h)
+
+
 def build_timeline(script: dict, src_dur=None) -> dict:
     """-> {"ops": frame ops of the spliced video, "audio": audio ops, "shots": [...]}.
     ops: ("src", t) = source frame at t s; ("mix", ta, tb, w) = (1-w)*frame(ta) + w*frame(tb).
@@ -189,7 +203,7 @@ def build_timeline(script: dict, src_dur=None) -> dict:
         prev, nxt = items[k - 1], items[k + 1]
         a_time = _clip_frames(prev)[-1]
         b_time = nxt["a"]
-        if it["sec"] <= SHORT_GAP_MAX + 1e-9:
+        if it["sec"] <= SHORT_GAP_MAX + 1e-9 and not it["text"]:
             n = max(1, int(round(it["sec"] * FPS)))
             t0 = shot["frames"]
             ops.extend(_placeholder(n, a_time, b_time))
@@ -197,12 +211,13 @@ def build_timeline(script: dict, src_dur=None) -> dict:
             shot["frames"] += n
             shot["events"].append({"kind": "gap", "f0": t0, "f1": shot["frames"], "text": it["text"]})
             continue
-        # long transition: close this shot, add a text-only shot, the next clip starts a new shot carried by CARRY
+        # transition with words (or long): close this shot, add a text-only shot (no reference video), the next
+        # clip starts a new shot carried by CARRY
         shots.append(shot)
         n = max(1, int(round(it["sec"] * FPS)))
         shots.append({"kind": "text", "overlap": CARRY, "frames": n, "text": it["text"],
                       "events": [{"kind": "gap", "f0": 0, "f1": n, "text": it["text"]}]})
-        ops.extend(_placeholder(CARRY, a_time, b_time))   # the next shot's carried frames read this dissolve
+        ops.extend(_hold_pair(CARRY, a_time, b_time))   # read by the shot tail / the carried frames: stills
         audio.append(("sil", CARRY / FPS))
         shot = new_video_shot(CARRY)
     shots.append(shot)
@@ -210,7 +225,13 @@ def build_timeline(script: dict, src_dur=None) -> dict:
     ops.extend([("src", last[1] if last[0] == "src" else last[2])] * END_PAD)
     audio.append(("sil", END_PAD / FPS))
     for s in shots:
-        s["length"] = D.aligned_up(s["overlap"] + s["frames"])
+        if s["kind"] == "text":
+            # 11-23 (H3MD_00181): rounding UP made a 1.5 s transition 2.1 s and the rest became a pause - a text
+            # shot takes the NEAREST 5+17n length (at least 17 new frames)
+            k = max(int(math.ceil((s["overlap"] + 17 - 5) / 17)), int(round((s["overlap"] + s["frames"] - 5) / 17)))
+            s["length"] = 5 + 17 * k
+        else:
+            s["length"] = D.aligned_up(s["overlap"] + s["frames"])
     return {"ops": ops, "audio": audio, "shots": shots}
 
 
@@ -252,24 +273,27 @@ def shot_prompt(script: dict, shot: dict, n_pics: int, has_audio: bool, prev_tex
     style = script["style"] or "A realistic live-action scene, real-time speed, no slow motion."
     scene = script["scene"]
     subj_tags = _subject_tags(script)
+    # a text-only shot has no <Video 1>: who is who refers to the shot before (its last frames are carried over)
+    subject = [x.replace("<Video 1>", "the shot before") if shot["kind"] == "text" else x for x in script["subject"]]
     events = []
     for e in shot["events"]:
-        t0, t1 = _s(ov + e["f0"]), _s(ov + e["f1"])
+        t0 = f"{(ov + e['f0']) / FPS:.2f}".rstrip("0").rstrip(".") or "0"
         if e["kind"] == "clip" and shot["kind"] == "video":
-            events.append(f"From {t0} to {t1} seconds, the people move exactly as in <Video 1>.")
+            events.append(f"[{t0}s] The people move exactly as in <Video 1>.")
         elif e["text"]:
-            events.append(f"From {t0} to {t1} seconds, {e['text'].rstrip('. ')}.")
+            txt = e["text"].rstrip(". ")
+            events.append(f"[{t0}s] {txt[0].upper() + txt[1:]}.")
     body = " ".join(x for x in [scene, _opening(shot, prev_text)] + events if x)
     sound = script["sound"] or "The sound of the scene, matching the action on screen."
     music = script["music"] or "N/A"
 
     if shot["kind"] == "text" and n_pics == 0:   # no reference at all: base (T2VA) format
         plain = lambda s: _SUBJ_RE.sub(lambda m: f"person {m.group(1)}", s)
-        people = " ".join(plain(x) for x in script["subject"])
+        people = " ".join(plain(x) for x in subject)
         return (f"integrated_multimodal_description:\n{style} {plain(people)} {plain(body)}\n\n"
                 f"overall_soundscape:\n{plain(sound)}\n\nnon_diegetic_music:\n{music}")
 
-    defs = list(script["subject"])
+    defs = list(subject)
     kinds = ["reference generation"]
     if shot["kind"] == "video":
         defs.append("<Video 1> is the motion and camera reference: its moves, timing and camera framing.")
@@ -286,7 +310,7 @@ def shot_prompt(script: dict, shot: dict, n_pics: int, has_audio: bool, prev_tex
         gaps = any(e["kind"] == "gap" for e in shot["events"])
         ret.append("<Video 1> (appears in [Shot 1]): partially_preserved - its moves and camera framing are followed "
                    f"from {', '.join(wins)} seconds"
-                   + ("; between those moments it only shows a slow dissolve from one pose to the next." if gaps
+                   + ("; between those moments it only shows a short dissolve from one pose to the next." if gaps
                       else "."))
         if has_audio:
             ret.append("<Audio 1> (appears in [Shot 1]): reference - the impacts and atmosphere only.")
@@ -346,7 +370,7 @@ def report(script, tl, plan, notes) -> str:
         if s["kind"] == "video" and s["frames"] / FPS > D.MAX_REF_SECONDS:
             lines.append(f"    note: {s['frames'] / FPS:.1f} s of reference - the Director splits it by VRAM")
     for e in script["items"]:
-        if e["kind"] == "gap" and e["sec"] <= SHORT_GAP_MAX and e["text"] and e["sec"] < 1.2:
+        if e["kind"] == "gap" and e["text"] and e["sec"] < 1.2:
             lines.append(f"  hint: line {e['line']}: {e['sec']:g} s is short for a written move (about 1.5 s per move)")
     lines += [f"  tidied: {n}" for n in script.get("notes") or []]
     lines += [f"  director: {n}" for n in notes]
@@ -707,8 +731,8 @@ def export(src_path: str, edit_text: str, folder: str, name: str, pictures: dict
 
 # ------------------------------------------------------------------------------------------------------ node
 _EDIT_TIP = ("The edit, kept in step with the timeline above (you rarely type here). One line per item: "
-             "'clip 4.0-6.0' (a move plays as in the source), 'gap 1.5: one move' (gap with no words = natural link; over 2 s = its own "
-             "text-only shot). Empty + Run = a draft cut where the motion pauses. Optional lines: style: / scene: / "
+             "'clip 4.0-6.0' (a move plays as in the source), 'gap 1.5: one move' (gap with no words = natural link; with words or over 2 s = "
+             "its own text-only shot). Empty + Run = a draft cut where the motion pauses. Optional lines: style: / scene: / "
              "sound: / music: / subject:. 剪辑内容，和上面的时间轴同步；空着运行 = 自动出草稿。")
 
 
