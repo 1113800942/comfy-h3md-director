@@ -23,6 +23,7 @@ Only this node uses these rules; nothing else in H3MD changes.
 from __future__ import annotations
 
 import datetime
+import io
 import json
 import logging
 import math
@@ -370,6 +371,10 @@ def report(script, tl, plan, notes) -> str:
         if s["kind"] == "video" and s["frames"] / FPS > D.MAX_REF_SECONDS:
             lines.append(f"    note: {s['frames'] / FPS:.1f} s of reference - the Director splits it by VRAM")
     for e in script["items"]:
+        if e["kind"] == "gap" and has_cjk(e["text"]):
+            lines.append(f"  hint: line {e['line']}: the transition is not in English - H3 follows one full English "
+                         f"sentence best (who does what, how they end). Write it so, or let an AI rewrite the "
+                         f"package (ai/edit.json, H3MD skill part 14)")
         if e["kind"] == "gap" and e["text"] and e["sec"] < 1.2:
             lines.append(f"  hint: line {e['line']}: {e['sec']:g} s is short for a written move (about 1.5 s per move)")
     lines += [f"  tidied: {n}" for n in script.get("notes") or []]
@@ -681,7 +686,69 @@ def save_picture(t, path: str):
     KN.tensor_pil(t).save(path, "PNG")
 
 
-def export(src_path: str, edit_text: str, folder: str, name: str, pictures: dict = None, subjects=None) -> dict:
+_CJK = re.compile(r"[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]")
+
+
+def has_cjk(text: str) -> bool:
+    """Chinese / Japanese / Korean letters in a transition: H3 follows English best"""
+    return bool(_CJK.search(text or ""))
+
+
+def _jpeg(arr, max_side: int = 768) -> bytes:
+    from PIL import Image
+    im = Image.fromarray(arr)
+    im.thumbnail((max_side, max_side))
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", quality=88)
+    return buf.getvalue()
+
+
+AI_NOTE = ("For an AI: rewrite every segment's prompt in plan.json by the H3MD prompt skill, part 14 (Ref Splice). "
+           "Read this file and look at stills/ and media/ first. Keep lengths, overlaps, media and the order; change "
+           "only the prompts. Save the result as a new package <name>_ai_<date>_<NNN>.zip (manifest + plan + media/, "
+           "without this ai/ folder).")
+
+
+def edit_info(script, tl, info, src_name, pic_files, cast=None, links=None) -> dict:
+    """ai/edit.json: what the user cut, joined and meant, so an AI can write the prompts (2026-11-23)."""
+    items = []
+    for it in script["items"]:
+        if it["kind"] == "clip":
+            items.append({"kind": "move", "source_from": round(it["a"], 3), "source_to": round(it["b"], 3)})
+        else:
+            items.append({"kind": "transition", "seconds": it["sec"], "intent": it["text"],
+                          "own_shot": bool(it["text"]) or it["sec"] > SHORT_GAP_MAX})
+    shots = []
+    for k, s in enumerate(tl["shots"], 1):
+        ev = []
+        for e in s["events"]:
+            d = {"kind": "move" if e["kind"] == "clip" else "transition",
+                 "at": round((s["overlap"] + e["f0"]) / FPS, 2), "until": round((s["overlap"] + e["f1"]) / FPS, 2)}
+            if e["kind"] == "clip":
+                d["source"] = [round(x, 3) for x in e["src"]]
+            else:
+                d["intent"] = e["text"]
+            ev.append(d)
+        shots.append({"segment": k, "kind": "video" if s["kind"] == "video" else "text only (no reference video)",
+                      "length_frames": s["length"], "carried_frames": s["overlap"],
+                      "spliced_video_from": round(s["ref_start"] / FPS, 3) if s["kind"] == "video" else None,
+                      "events": ev})
+    people = (cast or {}).get("people") or []
+    who = []
+    for p, k in links or []:
+        a = people[k - 1] if 0 < k <= len(people) else {}
+        who.append({"picture": p, "picture_file": pic_files[sorted({q for q, _ in links}).index(p)]
+                    if pic_files else None, "replaces_person": k, "first_seen": round(a.get("first", 0.0), 1),
+                    "side": a.get("side"), "still": f"stills/person_{k}.jpg"})
+    return {"format": "h3md-ref-splice-edit", "version": 1, "node": f"H3MD Ref Splice {VERSION}", "for_ai": AI_NOTE,
+            "source": {"file": src_name, "seconds": round(info["duration"], 3), "width": info["width"],
+                       "height": info["height"]},
+            "edit": items, "segments": shots, "cast": who,
+            "others": "everyone not in 'cast' keeps their own look" if who else "nobody is replaced"}
+
+
+def export(src_path: str, edit_text: str, folder: str, name: str, pictures: dict = None, subjects=None,
+           cast=None, links=None, person_stills=None) -> dict:
     """splice + plan zip (manifest + plan + media) + a preview copy of the spliced video next to it.
     pictures: {picture number: IMAGE tensor or file path} (only the linked ones); subjects: prompt lines or None."""
     import zipfile
@@ -714,6 +781,20 @@ def export(src_path: str, edit_text: str, folder: str, name: str, pictures: dict
         z.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
         z.writestr("plan.json", json.dumps(plan, ensure_ascii=False, indent=2))
         z.write(preview, f"media/{vid_name}", compress_type=zipfile.ZIP_STORED)
+        # 2026-11-23: the AI part - not under media/, so the Director's import leaves it alone
+        ed = edit_info(script, tl, info, os.path.basename(src_path), pic_files, cast, links)
+        z.writestr("ai/edit.json", json.dumps(ed, ensure_ascii=False, indent=2))
+        n = 0
+        for k, it in enumerate(script["items"]):
+            if it["kind"] != "gap":
+                continue
+            n += 1
+            a_time, b_time = _clip_frames(script["items"][k - 1])[-1], script["items"][k + 1]["a"]
+            for tag, t in (("before", a_time), ("after", b_time)):
+                if t in frames:
+                    z.writestr(f"ai/stills/transition_{n}_{tag}.jpg", _jpeg(frames[t]))
+        for k, data in (person_stills or {}).items():
+            z.writestr(f"ai/stills/person_{k}.jpg", data)
         for p, f in zip(sorted(pictures or {}), pic_files):
             src = pictures[p]
             if isinstance(src, str):
@@ -776,7 +857,7 @@ class H3MDRefSplice:
         info = probe(src)
         pics = {int(k.split("_")[1]): v for k, v in pics.items() if k.startswith("picture_") and v is not None}
         ui = {}
-        subjects, links_used = None, []
+        subjects, links_used, cast, stills = None, [], None, {}
         if pics:
             try:
                 from . import h3md_keyframe as K
@@ -789,7 +870,14 @@ class H3MDRefSplice:
             mp = {p: (v if isinstance(v, (list, tuple)) else [v]) for p, v in mp.items() if p in pics}
             links_used = [(p, k) for p, ks in mp.items() for k in ks if 0 < k <= len(people)]
             subjects = subject_lines({"people": people}, links_used)
-            ui["h3md_cast"] = [json.dumps(cast_ui(frames, people, small, links_used, pics))]
+            cu = cast_ui(frames, people, small, links_used, pics)
+            ui["h3md_cast"] = [json.dumps(cu)]
+            cast = {"people": people}
+            import base64
+            for _, k in links_used:   # the cast panel's own tile of each replaced person, for the AI
+                tile = (cu.get("tiles") or [None] * k)[k - 1] if len(cu.get("tiles") or []) >= k else None
+                if tile and "," in tile:
+                    stills[k] = base64.b64decode(tile.split(",", 1)[1])
         splice = {"duration": info["duration"]}
         if not (edit or "").strip() or not parse_script_items_present(edit):
             # first run: a draft (cut where the motion pauses), exported at once like every later run
@@ -797,7 +885,7 @@ class H3MDRefSplice:
             splice["draft"] = edit
         folder, name = out_target(filename_prefix, folder_paths.get_output_directory())
         used_pics = {p: pics[p] for p in sorted({p for p, _ in links_used})}
-        res = export(src, edit, folder, name, used_pics, subjects)
+        res = export(src, edit, folder, name, used_pics, subjects, cast, links_used, stills)
         if splice.get("draft"):
             res["report"] = ("Draft (the video cut where the motion pauses) - change it on the tracks and Run again.\n"
                              + res["report"])

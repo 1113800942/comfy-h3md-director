@@ -402,7 +402,7 @@ function setupEditor(node) {
     return [el("span", {}, label), inp];
   }
   // the words of a block: a highlighted box on its own row (Enter = save, Shift+Enter = new line)
-  function txt(label, value, placeholder, set) {
+  function txt(label, value, placeholder, set, warnCjk) {
     const box = el("div", { display: "flex", flexDirection: "column", gap: "3px", marginTop: "4px" });
     const lab = el("div", { color: "#ffb347", fontWeight: "bold", fontSize: "12px" }, label);
     const inp = el("textarea", { width: "100%", minHeight: "46px", boxSizing: "border-box", background: "#2b2410", color: "#fff",
@@ -413,6 +413,15 @@ function setupEditor(node) {
     inp.onpointerdown = (e) => e.stopPropagation();
     inp.onkeydown = (e) => { e.stopPropagation(); if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); inp.blur(); } };
     box.append(lab, inp);
+    if (warnCjk) {   // 11-23: H3 follows one full English sentence best
+      const w = el("div", { color: "#ff6b6b", fontSize: "12px", display: "none" },
+        "⚠ 不是英文：H3 最认英文完整句子（谁做什么、最后停在什么姿势）。可以自己写英文，或交给 AI 按包补写（包里的 ai/edit.json）。" +
+        " Not English: H3 follows one full English sentence best - write one, or let an AI rewrite the package.");
+      const chk = () => { w.style.display = /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/.test(inp.value) ? "block" : "none"; };
+      inp.addEventListener("input", chk);
+      chk();
+      box.append(w);
+    }
     return box;
   }
   // split one move into two touching moves at the player's frame (every copy of it in the edit)
@@ -481,7 +490,7 @@ function setupEditor(node) {
       row.append(el("b", {}, "Transition 过渡"), ...num("seconds", it.sec, 0.5, (v) => { it.sec = Math.max(1 / FPS, v); }), del);
       insp.append(txt("✎ 这段过渡里发生什么（填了就写进 H3 提示词）· What happens in this transition (goes into the prompt)",
         it.text, "空着 = 自然衔接（Save Video 的成品里是淡化转场）· 填了 = 写进提示词，只写一个动作，例如：he drops onto one knee, then stands back up（约 1.5 秒）",
-        (v) => { it.text = v; }));
+        (v) => { it.text = v; }, true));
     }
   }
 

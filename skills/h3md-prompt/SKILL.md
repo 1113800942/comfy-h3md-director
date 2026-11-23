@@ -617,3 +617,39 @@ clip 8.0-9.75
   English as one full sentence with who does it and where they end up (the next move's first pose). Never write
   "natural transition", "smooth", "no pause". Moves can land 0.3–0.5 s early.
 - If you cannot see the video, ask the user where each move starts and ends (the node's player shows the time).
+
+### 14b. Rewriting a Ref Splice package (the AI step)
+
+The node writes working prompts, but it cannot see the video: it does not know who lies on the floor, which way the
+camera looks or what a picture shows. When the user hands you a package `<name>_<date>_<NNN>.zip` from the node,
+rewrite its prompts so they describe what is really on screen:
+
+1. **Read** `ai/edit.json` (the moves cut from the source, every transition with the user's intent, the segment table
+   with times, who replaces whom) and look at `ai/stills/` (the frame before and after every transition, a still of
+   every replaced person), `media/*.png` (the character pictures) and, if you can, the spliced video in `media/`.
+2. **Look at every picture before you write.** Never reuse descriptions from an earlier package. Whatever a picture
+   does not show (trousers and shoes on a half-body picture, the back of a costume) - **ask the user** before writing;
+   otherwise the original person's clothes come back.
+3. **Who is who:** one `<Subject N>` per replaced person, defined from its picture head to toe and tied to the
+   original person by a look the model can see ("takes the place of the young fighter in the black sleeveless top on
+   the left"); everyone else in one sentence ("Everyone else in <Video 1> keeps their own look"). No Subject per
+   bystander.
+4. **Video segments** (with `<Video 1>`): six sections; `<Video 1>` is `attribute_transfer` when people are replaced
+   (else `fully_preserved`); the scene, camera and positions as in the stills; the moves as `[Ns] The fight follows
+   <Video 1> exactly: <what happens>`. A segment with carried frames first says the state they hold (the end of the
+   segment before) - not "continuing from the previous shot".
+5. **Transition segments** (`text only`, no video): six sections with the pictures (base format when there are no
+   pictures); open with the carried state (from `transition_N_before.jpg`), then ONE English sentence at `[1.62s]`:
+   who does what, how everyone else moves, and the pose they end in (from `transition_N_after.jpg`, so the next move
+   starts cleanly). The user's intent may be in Chinese - translate it into that sentence. About 1.5 s per simple
+   move; never "natural / smooth / no pause".
+6. **Times** only as `[Ns]` or `At 00:12.0`, counted from the segment's own start (the Director moves them when it
+   splits a segment). Keep lengths, overlaps, media ids and order; leave `globalPrompt` empty (import keeps the
+   workflow's trigger words).
+7. **Save** a new package `<name>_ai_<date>_<NNN>.zip` (manifest + plan + `media/`, no `ai/` folder, never overwrite)
+   in `input/H3MD_plans/<name>_ai_<date>_<NNN>/`, check it with `h3md_plan_io.import_plan` (no problems), and tell the
+   user the full path. They drag it into the Director and run the low-res preview first.
+
+Known limit (tell the user when it applies): the plain reference swap can let the original person come back for about
+a second in a wild move with the face hidden (low on the floor); another seed rarely helps - cut that move shorter or
+use the multi-person swap (Remake).

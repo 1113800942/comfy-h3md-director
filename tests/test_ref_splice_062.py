@@ -230,6 +230,17 @@ class EndToEnd(unittest.TestCase):
             self.assertIn("manifest.json", names)
             self.assertIn(f"media/{res['stem']}.mp4", names)
             self.assertIn(f"media/{res['stem']}_picture1.png", names)
+            # 11-23: the AI part - what was cut, joined and meant, plus stills around each transition
+            self.assertIn("ai/edit.json", names)
+            self.assertIn("ai/stills/transition_1_before.jpg", names)
+            self.assertIn("ai/stills/transition_2_after.jpg", names)
+            with zipfile.ZipFile(res["zip"]) as z:
+                ed = json.loads(z.read("ai/edit.json"))
+            self.assertEqual([i["kind"] for i in ed["edit"]], ["move", "transition", "move", "transition", "move"])
+            self.assertEqual(ed["edit"][1]["intent"], "<Subject 1> drops onto one knee, then stands up")
+            self.assertTrue(ed["edit"][1]["own_shot"] and not ed["edit"][3]["own_shot"])
+            self.assertEqual([s["kind"][:4] for s in ed["segments"]], ["vide", "text", "vide"])
+            self.assertEqual(ed["segments"][1]["events"][0]["at"], 1.62)
             p0 = res["plan"]["segments"][0]["prompt"]
             self.assertIn("<Subject 1> is the person in <Picture 1>", p0)
             self.assertIn("takes the place of the person first seen on the right", p0)
@@ -241,6 +252,8 @@ class EndToEnd(unittest.TestCase):
             with open(res["zip"], "rb") as f:
                 imp = IO.import_plan(f.read(), inp, os.path.basename(res["zip"]))
             self.assertEqual(imp["problems"], [])
+            unpacked = os.listdir(os.path.join(inp, *json.loads(imp["plan_json"])["media"]["videos"][0]["file"].split("/")[:-1]))
+            self.assertFalse(any(f.endswith(".json") or f.startswith("transition") for f in unpacked), unpacked)
             iplan = json.loads(imp["plan_json"])
             files = [it["file"] for it in iplan["media"]["videos"] + iplan["media"]["images"]]
             for f in files:
@@ -263,6 +276,13 @@ class EndToEnd(unittest.TestCase):
             again = S.parse_script(S.edit_to_text(S.parse_script(BASIC)))
             self.assertEqual([(i["kind"], i.get("a"), i.get("sec")) for i in again["items"]],
                              [(i["kind"], i.get("a"), i.get("sec")) for i in S.parse_script(BASIC)["items"]])
+
+    def test_chinese_transition_hint(self):
+        self.assertTrue(S.has_cjk("鼓掌") and not S.has_cjk("he claps twice"))
+        sc = S.parse_script("clip 0-2\ngap 1.5: 鼓掌\nclip 3-5")
+        tl = S.build_timeline(sc, 10.0)
+        rep = S.report(sc, tl, S.build_plan(sc, tl, "t", "t.mp4", False, []), [])
+        self.assertIn("not in English", rep)
 
     def test_out_target(self):
         f, n = S.out_target("H3MD_plans/my splice", "/tmp/out")
