@@ -233,7 +233,8 @@ class EndToEnd(unittest.TestCase):
             p0 = res["plan"]["segments"][0]["prompt"]
             self.assertIn("<Subject 1> is the person in <Picture 1>", p0)
             self.assertIn("takes the place of the person first seen on the right", p0)
-            self.assertIn("<Subject 2> is the person first seen on the left", p0)
+            self.assertIn("Everyone else in <Video 1> keeps their own look", p0)
+            self.assertNotIn("<Subject 2>", p0)                   # bystanders get no Subject of their own
             # the Director's own importer unpacks it and finds every file
             inp = os.path.join(d, "input")
             os.makedirs(inp)

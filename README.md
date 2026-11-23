@@ -264,6 +264,8 @@ did the clap, the crouch and the shout (2026-11-23). One simple move (kneel, cro
 Write the words in English as one full sentence with who does it (or let the AI step write them from the package).
 Moves can land 0.3–0.5 s early - it is a link, not frame-exact choreography.
 
+Swapping people here is the plain reference swap (pictures + the reference video). It holds well, but in a wild move where the replaced person is low on the floor with the face hidden, the original person can come back for about a second (2026-11-23: same place with another seed). Cut or shorten that move, or use the multi-person swap (Remake) when the swap must hold everywhere. A half-body picture shows no trousers or shoes: say what they are, or the original person's keep showing.
+
 A move has no text box: it plays exactly as in the source. Words only go into a transition (empty = a plain link; filled = goes into the prompt) - that is where a new move goes.
 
 ## Reporting a problem

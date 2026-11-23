@@ -533,12 +533,12 @@ def subject_lines(cast: dict, links: list) -> list:
             "a person"
         lines.append(f"<Subject {s}> is the person in <Picture {tag_of[p]}>: face, hair, body and outfit exactly as in "
                      f"<Picture {tag_of[p]}>. In <Video 1> <Subject {s}> takes the place of {where}.")
-    for k, a in by_num.items():
-        if k in used:
-            continue
-        s += 1
-        lines.append(f"<Subject {s}> is {('the person first seen on the ' + a.get('side', 'screen'))} at "
-                     f"{a.get('first', 0):.1f} s in <Video 1>, with the same look as in <Video 1>.")
+    # 11-23 (plan ref_splice_20261123_002): one Subject per tracked bystander gave 10 extra Subjects (referee, crowd,
+    # the same people again after a tracking window) - the people who are not replaced get one sentence instead
+    if lines and len(used) < len(by_num):
+        lines.append("Everyone else in <Video 1> keeps their own look from <Video 1>.")
+    elif not lines:
+        lines = list(KEEP_PEOPLE)
     return lines
 
 
