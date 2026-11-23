@@ -168,33 +168,76 @@ def _synthetic_video(path, seconds=10, fps=30, w=64, h=48):
 
 
 class EndToEnd(unittest.TestCase):
-    def test_splice_files(self):
+    def test_export_package(self):
+        import zipfile
+        import h3md_plan_io as IO
         with tempfile.TemporaryDirectory() as d:
             src = os.path.join(d, "src.mp4")
             _synthetic_video(src, seconds=10, fps=30, w=64, h=48)
-            inp = os.path.join(d, "input")
-            os.makedirs(inp)
-            res = S.run_splice(src, BASIC, "my splice", inp)
-            self.assertTrue(res["plan_path"].endswith(".json") and os.path.isfile(res["video_path"]))
-            stem = os.path.basename(os.path.dirname(res["plan_path"]))
-            self.assertTrue(stem.startswith("my_splice_") and stem.endswith("_001"))
-            info = S.probe(res["video_path"])
+            out = os.path.join(d, "output", "H3MD_plans")
+            pic = os.path.join(d, "hero.png")
+            from PIL import Image
+            Image.new("RGB", (32, 48), (200, 50, 50)).save(pic)
+            subj = S.subject_lines({"people": [{"first": 0.0, "side": "left"}, {"first": 0.0, "side": "right"}]},
+                                   [(1, 2)])
+            res = S.export(src, BASIC.replace("subject:", "#subject:"), out, "my_splice", {1: pic}, subj)
+            self.assertTrue(res["stem"].startswith("my_splice_") and res["stem"].endswith("_001"))
+            self.assertTrue(os.path.isfile(res["zip"]) and os.path.isfile(res["preview"]))
+            info = S.probe(res["preview"])
             self.assertAlmostEqual(info["duration"] * 24, 198 + S.END_PAD, delta=1.5)
             self.assertTrue(info["has_audio"])
             import av
-            with av.open(res["video_path"]) as c:
+            with av.open(res["preview"]) as c:
                 lv = [float(f.to_ndarray(format="rgb24").mean()) for f in c.decode(c.streams.video[0])]
             self.assertAlmostEqual(lv[0], 120, delta=3)            # clip 4.0 s at 30 fps = level 120
             self.assertAlmostEqual(lv[47], 30 * (6 - 1 / 24), delta=3)
             self.assertAlmostEqual(lv[84], 0, delta=3)             # clip 0-2 starts after the 1.5 s transition
-            mid = lv[66]
-            self.assertTrue(10 < mid < 170)                        # inside the dissolve: between both ends
+            self.assertTrue(10 < lv[66] < 170)                    # inside the dissolve
+            with zipfile.ZipFile(res["zip"]) as z:
+                names = set(z.namelist())
+            self.assertIn("manifest.json", names)
+            self.assertIn(f"media/{res['stem']}.mp4", names)
+            self.assertIn(f"media/{res['stem']}_picture1.png", names)
+            p0 = res["plan"]["segments"][0]["prompt"]
+            self.assertIn("<Subject 1> is the person in <Picture 1>", p0)
+            self.assertIn("takes the place of the person first seen on the right", p0)
+            self.assertIn("<Subject 2> is the person first seen on the left", p0)
+            # the Director's own importer unpacks it and finds every file
+            inp = os.path.join(d, "input")
+            os.makedirs(inp)
+            with open(res["zip"], "rb") as f:
+                imp = IO.import_plan(f.read(), inp, os.path.basename(res["zip"]))
+            self.assertEqual(imp["problems"], [])
+            iplan = json.loads(imp["plan_json"])
+            files = [it["file"] for it in iplan["media"]["videos"] + iplan["media"]["images"]]
+            for f in files:
+                self.assertTrue(os.path.isfile(os.path.join(inp, f)), f)
+            S.check_plan(iplan)
             # a second run never overwrites the first
-            res2 = S.run_splice(src, BASIC, "my splice", inp)
-            self.assertTrue(os.path.dirname(res2["plan_path"]).endswith("_002"))
-            with open(res["plan_path"], encoding="utf-8") as f:
-                plan = json.load(f)
-            self.assertEqual(plan["media"]["videos"][0]["file"], f"H3MD_plans/{stem}/{stem}.mp4")
+            res2 = S.export(src, BASIC, out, "my_splice")
+            self.assertTrue(res2["stem"].endswith("_002"))
+
+    def test_draft_and_text(self):
+        with tempfile.TemporaryDirectory() as d:
+            src = os.path.join(d, "src.mp4")
+            _synthetic_video(src, seconds=6, fps=30, w=64, h=48)
+            draft = S.draft_script(src, 6.0)
+            sc = S.parse_script(draft)
+            clips = [i for i in sc["items"] if i["kind"] == "clip"]
+            self.assertEqual(clips[0]["a"], 0.0)
+            self.assertLessEqual(clips[-1]["b"], 6.0)
+            S.build_timeline(sc, 6.0)
+            again = S.parse_script(S.edit_to_text(S.parse_script(BASIC)))
+            self.assertEqual([(i["kind"], i.get("a"), i.get("sec")) for i in again["items"]],
+                             [(i["kind"], i.get("a"), i.get("sec")) for i in S.parse_script(BASIC)["items"]])
+
+    def test_out_target(self):
+        f, n = S.out_target("H3MD_plans/my splice", "/tmp/out")
+        self.assertTrue(f.replace("\\", "/").endswith("/tmp/out/H3MD_plans") and n == "my_splice")
+        with self.assertRaises(S.SpliceError):
+            S.out_target("../../etc/x", "/tmp/out")
+        f, n = S.out_target("D:/plans/abc", "/tmp/out")
+        self.assertEqual((f, n), ("D:/plans", "abc"))
 
 
 if __name__ == "__main__":

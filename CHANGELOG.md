@@ -5,25 +5,31 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
 ## [0.6.2] - 2026-11-22
 
 ### Added / 新增
-- **H3MD Ref Splice** node (`h3md_ref_splice.py`, example workflow `H3MD_Ref_Splice_0.6.2.json`): cut several moves out of
-  one reference video in any order (repeats allowed), join them and write a spliced reference video plus a ready plan
-  (`input/H3MD_plans/<name>_<date>_<NNN>/`, Import plan in the Director). Asked for on GitHub
-  (`<Video 1, time=a to b>`); done outside the Director, which is unchanged. A short script drives it
-  (`clip a-b: ...`, `gap s: ...`, `subject:`, `picture:`, `style:`, `scene:`, `sound:`, `music:`). Transitions up to
-  2 s stay in the shot as a placeholder of 4 still frames, a cross-dissolve and 4 still frames (six low-res runs on
-  2026-11-22: two still halves made the model stand still); a longer one becomes its own text-only shot, continued by
-  39 frames, and the reference holds a 39-frame dissolve before the next move so the carried frames land on the
-  transition. Each shot's six-field prompt is built with all times filled in; the plan is checked with the Director's
-  own parser before anything is written; the source sound is a soft reference (not locked); globalPrompt stays empty
-  so the workflow's trigger words are kept.
-  新增 **H3MD Ref Splice** 节点：从一条参考视频里按任意顺序（可重复）取几段动作，拼成一条参考视频并写好计划（导演台 Import plan 导入）。
-  来自 GitHub 用户的需求（`<Video 1, time=a to b>`），在导演台外面完成，导演台不改。≤ 2 秒的过渡留在镜头内，用"首尾各停 4 帧 + 中间淡化"
-  占位（11-22 六次低清实测：整段停帧会让人站着不动）；更长的过渡自动拆成单独的纯文字镜头，前后各接续 39 帧，参考视频在下一招前放 39 帧淡化，
-  让接续帧落在过渡上。每个镜头的六段式提示词由节点按时间填好；写文件前先用导演台自己的解析器检查；原声作软参考、不锁定；globalPrompt 留空，保留工作流原有的触发词。
-- H3MD skill part 14 "Ref Splice" (EN + 中文), read only when this node is used: script format and the measured
-  transition rules (1 s with no words to just join; about 1.5 s for one simple move; over 2 s = its own shot; never
-  write "natural transition / no pause"; moves can land 0.3–0.5 s early). The skill's earlier parts are unchanged.
-  H3MD 技能新增第 14 节「参考视频剪辑」（中英），只在用这个节点时读；前面各节一字未改。
+- **H3MD Ref Splice** node (`h3md_ref_splice.py`, `web/js/h3md_ref_splice_ui.js`, example workflow
+  `H3MD_Ref_Splice_0.6.2.json`): a small video editor in front of the Director. Asked for on GitHub
+  (`<Video 1, time=a to b>`): cut several moves out of ONE reference video, use them in any order (repeats allowed)
+  with short transitions, played by your own characters. On the node: a player (source / spliced result), a source
+  track (drag a clip's edges to set its start / end), an edit track (drag to reorder, duplicate, add transitions,
+  click to edit), the cast panel of the keyframe Prepare node (drag a line from a picture to the person it replaces;
+  default picture 1 = first to appear) and a text box with the same edit (an AI can write it). First run with no
+  clips = a draft cut where the motion pauses. Each run writes a preview and a plan package
+  `output/H3MD_plans/<name>_<date>_<NNN>.zip` (spliced video + pictures + plan; never overwritten) for the Director,
+  which is unchanged. Transitions up to 2 s stay in the shot as 4 still frames + a cross-dissolve + 4 still frames
+  (six low-res runs on 2026-11-22: two still halves made the model stand still); a longer one becomes its own
+  text-only shot carried by 39 frames on both sides. Prompts (six fields, times filled in, who is who from the cast
+  links) are built by the node; the plan is checked with the Director's own parser; the source sound is a soft
+  reference; globalPrompt stays empty so the workflow's trigger words are kept.
+  新增 **H3MD Ref Splice** 节点：导演台前面的小剪辑器（来自 GitHub 用户的需求）。从一条参考视频里剪出几个动作，任意顺序（可重复）加短过渡，
+  用自己的角色来演。节点上有播放器（原片 / 拼好的结果）、原视频轨（拖色块边缘定起止）、剪辑轨（拖动排序、复制、加过渡、点击修改）、
+  关键帧那一步的人物拖线面板（从图拖线到人，默认图 1 = 第一个出场的人），以及同步的文字框（AI 也可以写）。第一次空着运行 = 按动作停顿自动出草稿。
+  每次运行出预览和计划包 `output/H3MD_plans/<名字>_<日期>_<序号>.zip`（拼好的视频 + 角色图 + 计划，不覆盖），导演台不改。≤ 2 秒的过渡用
+  「首尾各停 4 帧 + 中间淡化」（11-22 六次低清实测），更长的自动拆成单独的纯文字镜头。提示词由节点按时间和人物对应写好；原声作软参考；
+  globalPrompt 留空，保留工作流原有的触发词。
+- H3MD skill part 14 "Ref Splice" (EN + 中文): read only when this node is used — mostly a pointer to the node's
+  editor, plus the edit text format and the measured transition rules for an AI asked to write the edit. Parts 1–13
+  are unchanged. 技能新增第 14 节，只在用这个节点时读；前 13 节不变。
+- The keyframe UI's cast panel (`buildCast`) is exported so the new node reuses it; its behaviour is unchanged.
+  关键帧界面的人物面板改为导出供新节点复用，行为不变。
 
 ## [0.6.1] - 2026-11-22
 

@@ -592,49 +592,25 @@ Picture number**. Define each Subject by look and by the performer it replaces; 
 
 ## 14. Ref Splice — ONLY when the user uses the H3MD Ref Splice node (0.6.2)
 
-**Read this part only when the user wants to cut several moves out of one reference video and put them in a new
-order through the `H3MD Ref Splice` node. In every other case ignore this part completely.** It adds to the rules
-above and replaces none of them; everything in sections 1–13 still applies to the shots this node makes.
+**Read this part only when the user uses the `H3MD Ref Splice` node (cut several moves out of one reference video
+and put them in a new order). In every other case ignore this part completely.** It adds to sections 1–13 and
+replaces none of them.
 
-What the node does: the user loads the source video into it and pastes a short **splice script** that you write. The
-node cuts the clips, joins them, writes a spliced reference video and a ready plan (`input/H3MD_plans/<name>_<date>_<NNN>/<...>.json`,
-imported with the Director's *Import plan* button). It computes every time, length, overlap and tag itself, so you
-only write the script — never a plan JSON for this.
-
-### 14.1 Script (one line per item, English, times = seconds of the SOURCE video)
+The node is operated by hand on its own editor (player, source track, edit track, cast panel); it writes the times,
+lengths, overlaps, tags, who-is-who and the plan package itself. Help the user with the editor first. Only when the
+user asks you to write the edit, give the text for the node's `edit` box:
 ```
-subject: <Subject 1> is the fighter in the black sleeveless top and navy wide-leg trousers.
-subject: <Subject 2> is the bearded heavyweight in black armour.
-picture: my_chars/hero.png          (optional, a file in ComfyUI's input folder -> <Picture 1>, <Picture 2> ...)
-style: A realistic live-action tournament fight, real-time speed, sharp impacts, no slow motion.
-scene: A side-on medium-wide shot of a wooden fight floor in a packed indoor arena, warm spotlights.
 clip 4.0-6.0: they trade kicks
-gap 1.5: <Subject 1> drops onto one knee with one hand on the floor, then stands back up
-clip 0.0-2.0: a low kick, a front kick and a spinning back kick
+gap 1.5: he drops onto one knee with one hand on the floor, then stands back up
+clip 0.0-2.0: a low kick and a spinning back kick
 gap 1
-clip 8.0-9.75: a flying flip kick knocks <Subject 2> onto his back
-sound: A loud arena crowd, thuds of kicks on armour, a heavy crash as he hits the floor.
-music: N/A
+clip 8.0-9.75: a flying flip kick
 ```
-- Clips in the user's order; the same part may be used again; the script starts and ends with a clip; never two gaps
-  in a row. `1:05.5` style times are accepted.
-- `subject:` lines describe looks only (with pictures: "`<Subject 1>` is the man in `<Picture 1>`"); no times.
-- A clip's words say what happens in it, short; the move itself comes from the video.
-
-### 14.2 Transitions (measured, 2026-11-22, six low-res runs)
-| What the user wants between two clips | Write |
-|---|---|
-| just join them | `gap 1` with **no words** — the model links the two poses by itself |
-| one simple move (kneel, crouch, fall and get up, step back) | `gap 1.5: <the move>` — only that move |
-| two moves | about `gap 2.5`–`gap 3` with both moves |
-| a dialogue / acting beat of several seconds | `gap <its length>: <what happens, lines in <d>…</d>>` — over 2 s the node makes it its own text-only shot automatically |
-
-- The length is the user's choice; the numbers above are what worked when the user names none.
-- Never write "natural transition", "smooth", "no pause", "keeps moving": it fights the model's own link.
-- Time left over in a gap becomes standing still; too little makes the next move start early. Moves usually land
-  0.3–0.5 s early — tell the user it is a link, not frame-exact choreography.
-- Do not write a long move list into a 1–1.5 s gap: in 24–36 frames the model does at most one.
-
-### 14.3 Hand over
-Give the script in one block and say: load the source video into the node (Load Video), paste the script, run it,
-then *Import plan* the `.json` it reports; run the low-res pass first.
+- Times = seconds of the SOURCE video; clips in the user's order, repeats allowed; start and end with a clip; never
+  two gaps in a row. Optional lines: `style:`, `scene:`, `sound:`, `music:`, `subject:` (only to override the
+  node's own who-is-who).
+- Transitions (measured, six low-res runs): just join = `gap 1` with **no words**; one simple move (kneel, crouch,
+  fall and get up) = about `gap 1.5: <the move>`; two moves ≈ 2.5–3 s; a dialogue beat over 2 s = `gap <s>: <what
+  happens, lines in <d>…</d>>` (the node makes it its own shot). Never write "natural transition", "smooth",
+  "no pause". Moves can land 0.3–0.5 s early.
+- If you cannot see the video, ask the user where each move starts and ends (the node's player shows the time).

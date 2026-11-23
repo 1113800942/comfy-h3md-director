@@ -239,28 +239,24 @@ faces), so the source decides how far it goes:
   before, so the plan does not depend on the GPU. Below 16 GB it is not supported. A stretch made only of close-ups cannot hold a
   keyframe at all; if a part has to start there, the Director names the second in its notes.
 
-## Ref Splice: several moves from one reference video (0.6.2)
+## Ref Splice: several moves from one reference video, your own characters (0.6.2)
 
-One reference clip often holds several moves you want in a different order, with a short link or a beat in between.
-The **H3MD Ref Splice** node does the cutting for you: load the source video, paste a short script (your AI writes it
-from the H3MD skill, part 14), run. It writes a spliced reference video and a ready plan to
-`input/H3MD_plans/<name>_<date>_<NNN>/`; click **Import plan** in the Director and run as usual. The Director itself
-is unchanged.
+One reference clip often holds several moves you want in a different order, played by your own characters. The
+**H3MD Ref Splice** node is a small video editor for that (example workflow `H3MD_Ref_Splice_0.6.2.json`):
 
-```
-clip 4.0-6.0: they trade kicks
-gap 1.5: he drops onto one knee, then stands back up
-clip 0.0-2.0: a low kick and a spinning back kick
-gap 1
-clip 8.0-9.75: a flying flip kick
-```
+1. Drag the reference video into **Load Video**; optionally connect your character pictures to `picture_1..5`.
+2. **Run once**: a draft edit appears (the video cut where the motion pauses) and, with pictures, the cast panel
+   (the people of the video; drag a line from a picture to the person it replaces — default: picture 1 = first
+   person to appear).
+3. **Edit on the node**: on the source track drag a block's edges to set where a move starts / ends (the player jumps
+   to that frame); on the edit track drag blocks to reorder, duplicate a move, add transitions.
+4. **Run**: the spliced preview plays on the node and a plan package `output/H3MD_plans/ref_splice_<date>_<NNN>.zip`
+   is written (never overwritten). Not right? Change it and run again.
+5. Drag the package into the **H3MD Director** (or Import plan) and run as usual. The Director itself is unchanged.
 
-- Clips in any order; the same part can be used again; one video input only.
-- `gap 1` with no words: the model links the two poses itself. One simple move needs about 1.5 s. A gap over 2 s
-  (a dialogue beat) becomes its own text-only shot automatically.
-- Transitions are joined by a short cross-dissolve placeholder (measured: still frames make the model stand still).
-- Moves can land 0.3–0.5 s early; it is a link, not frame-exact choreography.
-- Example workflow: `example_workflows/H3MD_Ref_Splice_0.6.2.json`.
+Transitions (measured): no words = the model links the two poses itself (about 1 s); one simple move (kneel,
+crouch, fall and get up) needs about 1.5 s; over 2 s becomes its own text-only shot. Moves can land 0.3–0.5 s early —
+it is a link, not frame-exact choreography.
 
 ## Reporting a problem
 

@@ -22,6 +22,7 @@ from __future__ import annotations
 import datetime
 import json
 import logging
+import math
 import os
 import re
 
@@ -445,83 +446,315 @@ def write_video(path: str, frames_by_time: dict, ops, audio=None):
                 c.mux(p)
 
 
-def out_folder(input_dir: str, name: str, today=None) -> str:
-    day = (today or datetime.date.today()).strftime("%Y%m%d")
-    base = os.path.join(input_dir, PLANS_SUBDIR)
-    for k in range(1, 1000):
-        d = os.path.join(base, f"{name}_{day}_{k:03d}")
-        if not os.path.exists(d):
-            return d
-    raise SpliceError(f"{TAG} too many runs named {name} today")
-
 
 def safe_name(name: str) -> str:
     n = re.sub(r"[^A-Za-z0-9_-]+", "_", (name or "").strip()).strip("_")
     return n or "ref_splice"
 
 
-def run_splice(src_path: str, script_text: str, name: str, input_dir: str) -> dict:
-    """the whole job; returns {"plan_path", "video_path", "report", "plan"}"""
-    script = parse_script(script_text)
+def out_target(prefix: str, output_dir: str):
+    """like ComfyUI's save nodes: a prefix inside the output folder ('H3MD_plans/ref_splice'), or an absolute path.
+    -> (folder, name)"""
+    p = (prefix or "").strip().strip('"').replace("\\", "/") or "H3MD_plans/ref_splice"
+    if os.path.isabs(p) or re.match(r"^[A-Za-z]:/", p):
+        folder, name = os.path.dirname(p), os.path.basename(p)
+    else:
+        sub, name = os.path.dirname(p), os.path.basename(p)
+        folder = os.path.abspath(os.path.join(output_dir, sub))
+        if not folder.startswith(os.path.abspath(output_dir)):
+            raise SpliceError(f"{TAG} filename_prefix must stay inside the output folder (or be an absolute path)")
+    return folder, safe_name(name)
+
+
+def stamp(folder: str, name: str, today=None) -> str:
+    """'<name>_<YYYYMMDD>_<NNN>' - NNN = next free number of the day, so nothing is ever overwritten"""
+    day = (today or datetime.date.today()).strftime("%Y%m%d")
+    pre = f"{name}_{day}_"
+    used = [0]
+    if os.path.isdir(folder):
+        for f in os.listdir(folder):
+            m = re.match(re.escape(pre) + r"(\d{3})(?!\d)", f)
+            if m:
+                used.append(int(m.group(1)))
+    return f"{pre}{max(used) + 1:03d}"
+
+
+# ---------------------------------------------------------------------------------------- people (cast)
+def subject_lines(cast: dict, links: list) -> list:
+    """who is who in the prompt: linked people -> '<Subject k> is the person in <Picture j>' + where in the video;
+    the others keep their look from the video.  links: [(picture, person number)] (several numbers per picture =
+    one person the tracker split)."""
+    people = cast.get("people") or []
+    by_num = {k: a for k, a in enumerate(people, 1)}
+    pics = sorted({p for p, _ in links})
+    tag_of = {p: j for j, p in enumerate(pics, 1)}       # <Picture j> = j-th picture in the plan
+    lines, used, s = [], set(), 0
+    for p in pics:
+        nums = sorted(k for q, k in links if q == p)
+        used.update(nums)
+        a = by_num.get(nums[0], {})
+        s += 1
+        where = f"the person first seen on the {a.get('side', 'screen')} at {a.get('first', 0):.1f} s" if a else \
+            "a person"
+        lines.append(f"<Subject {s}> is the person in <Picture {tag_of[p]}>: face, hair, body and outfit exactly as in "
+                     f"<Picture {tag_of[p]}>. In <Video 1> <Subject {s}> takes the place of {where}.")
+    for k, a in by_num.items():
+        if k in used:
+            continue
+        s += 1
+        lines.append(f"<Subject {s}> is {('the person first seen on the ' + a.get('side', 'screen'))} at "
+                     f"{a.get('first', 0):.1f} s in <Video 1>, with the same look as in <Video 1>.")
+    return lines
+
+
+def people_cast(path: str, info: dict):
+    """the keyframe Prepare tracking (SAM3 people + cuts + faces + re-identification), shared cache with it.
+    -> (frames, people, small)"""
+    try:
+        from . import h3md_keyframe_nodes as KN, h3md_keyframe as K
+    except ImportError:
+        import h3md_keyframe_nodes as KN
+        import h3md_keyframe as K
+    size = K.target_size(info["width"], info["height"])
+    dur = K.plan_length(int(info["duration"] * K.FPS + 1e-6)) / K.FPS
+    tkey = (os.path.abspath(path), os.path.getsize(path), tuple(size), 0.4, 8, round(dur, 3))
+    hit = KN._TRACK_CACHE.get(tkey)
+    K.FRAME_ASPECT = size[0] / float(size[1])
+    if hit is not None:
+        times, small, per_frame, reid_joins, reid_unsure, face_boxes, cuts = hit
+        LOG.info("%s people: tracking reused", TAG)
+    else:
+        times, small = KN.sample_frames(path, dur, size)
+        per_frame = K.link_windows(KN.track_people(small, threshold=0.4, max_people=8))[:len(times)]
+        try:
+            cuts = KN.detect_cuts(path)
+        except Exception:
+            cuts = []
+        faces, face_boxes = {}, {}
+        try:
+            obs = KN.face_observations(path, times, per_frame, size, boxes_out=face_boxes)
+            faces = {(i, pid): (emb, w) for i, pid, emb, w in obs}
+        except Exception as exc:
+            LOG.info("%s faces not read (%s)", TAG, exc)
+        try:
+            per_frame, reid_joins, reid_unsure, _ = K.identify(per_frame, times, cuts, faces,
+                                                               K.look_samples(small, per_frame))
+        except Exception as exc:
+            reid_joins, reid_unsure = [], []
+            LOG.info("%s identification skipped (%s)", TAG, exc)
+        KN._TRACK_CACHE.clear()
+        KN._TRACK_CACHE[tkey] = (times, small, per_frame, reid_joins, reid_unsure, face_boxes, cuts)
+    frames = K.report(per_frame, times)
+    frames, _ = K.merge_twins(frames)
+    frames, _ = K.clean_frames(frames, face_boxes)
+    return frames, K.cast(frames), small
+
+
+def cast_ui(frames, people, small, links, pics: dict) -> dict:
+    """the drag-a-line panel of the keyframe Prepare node (same message, same widget 'mapping')"""
+    try:
+        from . import h3md_keyframe_nodes as KN
+    except ImportError:
+        import h3md_keyframe_nodes as KN
+    picset = sorted(pics)
+    ui = {"pictures": picset, "people": [
+        {"person": n, "first": round(a["first"], 1), "last": round(a["last"], 1),
+         "picture": next((p for p, k in links if k == n), None)} for n, a in enumerate(people, 1)]}
+    try:
+        _, crops = KN.cast_sheet(small, frames, people, [(p, k, people[k - 1]["id"]) for p, k in links
+                                                          if 0 < k <= len(people)])
+        ui["tiles"] = [KN.thumb_b64(c) for c in crops]
+        ui["thumbs"] = {str(p): KN.thumb_b64(KN.tensor_pil(pics[p])) for p in picset}
+    except Exception as exc:
+        LOG.warning("%s cast panel pictures failed: %s", TAG, exc)
+    return ui
+
+
+# ------------------------------------------------------------------------------------------------ draft
+def draft_script(path: str, duration: float, min_len=1.5, max_clips=8) -> str:
+    """first run with an empty edit: cut the video where the motion is lowest (between moves), keep the original
+    order, a 1 s transition between clips - a template to change on the timeline"""
+    try:
+        from . import h3md_autosplit as AS
+    except ImportError:
+        import h3md_autosplit as AS
+    prof = AS.motion_profile(path, 0.0, duration) or []
+    n = len(prof)
+    cuts = []
+    if n > 10:
+        m = np.convolve(np.asarray([v or 0.0 for v in prof], np.float32), np.ones(7) / 7.0, mode="same")
+        cand = sorted(range(3, n - 3), key=lambda i: m[i])
+        for i in cand:
+            t = i / FPS
+            if t < min_len or duration - t < min_len or any(abs(t - c) < min_len for c in cuts):
+                continue
+            if m[i] > float(np.median(m)):
+                break
+            cuts.append(t)
+            if len(cuts) >= max_clips - 1:
+                break
+    edges = [0.0] + sorted(cuts) + [math.floor(duration * FPS) / FPS]
+    lines = ["# draft: the video cut where the motion pauses; change it on the timeline, then Run"]
+    for k, (a, b) in enumerate(zip(edges, edges[1:])):
+        if k:
+            lines.append("gap 1")
+        lines.append(f"clip {a:.2f}-{b:.2f}")
+    return "\n".join(lines) + "\n"
+
+
+def edit_to_text(script: dict) -> str:
+    out = [f"{k}: {v}" for k in ("picture", "subject") for v in script[k]]
+    out += [f"{k}: {script[k]}" for k in ("style", "scene", "summary") if script[k]]
+    for it in script["items"]:
+        if it["kind"] == "clip":
+            out.append(f"clip {it['a']:g}-{it['b']:g}" + (f": {it['text']}" if it["text"] else ""))
+        else:
+            out.append(f"gap {it['sec']:g}" + (f": {it['text']}" if it["text"] else ""))
+    out += [f"{k}: {script[k]}" for k in ("sound", "music") if script[k]]
+    return "\n".join(out) + "\n"
+
+
+# ------------------------------------------------------------------------------------------------ export
+def save_picture(t, path: str):
+    try:
+        from . import h3md_keyframe_nodes as KN
+    except ImportError:
+        import h3md_keyframe_nodes as KN
+    KN.tensor_pil(t).save(path, "PNG")
+
+
+def export(src_path: str, edit_text: str, folder: str, name: str, pictures: dict = None, subjects=None) -> dict:
+    """splice + plan zip (manifest + plan + media) + a preview copy of the spliced video next to it.
+    pictures: {picture number: IMAGE tensor or file path} (only the linked ones); subjects: prompt lines or None."""
+    import zipfile
+    script = parse_script(edit_text)
+    if subjects and not script["subject"]:
+        script["subject"] = list(subjects)
     info = probe(src_path)
-    pictures = []
-    for p in script["picture"]:
-        f = p.strip().strip('"').replace("\\", "/")
-        if not os.path.isfile(f if os.path.isabs(f) else os.path.join(input_dir, f)):
-            raise SpliceError(f"{TAG} picture not found in ComfyUI's input folder: {f}")
-        pictures.append(f)
     tl = build_timeline(script, info["duration"])
-    folder = out_folder(input_dir, safe_name(name))
-    stem = os.path.basename(folder)
-    rel_video = f"{PLANS_SUBDIR}/{stem}/{stem}.mp4"
-    plan = build_plan(script, tl, stem, rel_video, info["has_audio"], pictures,
+    os.makedirs(folder, exist_ok=True)
+    stem = stamp(folder, name)
+    vid_name = f"{stem}.mp4"
+    pic_files = [f"{stem}_picture{p}.png" for p in sorted(pictures or {})]
+    plan = build_plan(script, tl, stem, vid_name, info["has_audio"], pic_files,
                       canvas_for(info["width"], info["height"]))
-    notes = check_plan(plan)       # before writing anything: refuse a plan the Director would refuse
+    notes = check_plan(plan)
     times = [op[1] for op in tl["ops"] if op[0] == "src"] + [t for op in tl["ops"] if op[0] == "mix"
                                                              for t in (op[1], op[2])]
     frames = read_frames(src_path, times)
     audio = splice_audio(read_audio(src_path), tl["audio"]) if info["has_audio"] else None
-    os.makedirs(folder, exist_ok=False)
-    video_path = os.path.join(folder, f"{stem}.mp4")
-    write_video(video_path, frames, tl["ops"], audio)
-    plan_path = os.path.join(folder, f"{stem}.json")
-    with open(plan_path, "w", encoding="utf-8") as f:
-        json.dump(plan, f, ensure_ascii=False, indent=2)
-    rep = report(script, tl, plan, notes) + f"\n  plan: {plan_path}\n  import it in the Director (Import plan)"
+    preview = os.path.join(folder, f"{stem}_preview.mp4")
+    write_video(preview, frames, tl["ops"], audio)
+    zip_path = os.path.join(folder, f"{stem}.zip")
+    manifest = {"format": "h3md-plan", "plan_version": 1, "name": stem, "width": plan["width"],
+                "height": plan["height"], "fps": FPS, "with_media": True,
+                "media": [{"kind": "videos", "id": "ref", "file": vid_name, "included": True,
+                           "zip": f"media/{vid_name}"}]
+                + [{"kind": "images", "id": i["id"], "file": i["file"], "included": True, "zip": f"media/{i['file']}"}
+                   for i in plan["media"]["images"]]}
+    with zipfile.ZipFile(zip_path, "w") as z:
+        z.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+        z.writestr("plan.json", json.dumps(plan, ensure_ascii=False, indent=2))
+        z.write(preview, f"media/{vid_name}", compress_type=zipfile.ZIP_STORED)
+        for p, f in zip(sorted(pictures or {}), pic_files):
+            src = pictures[p]
+            if isinstance(src, str):
+                z.write(src, f"media/{f}")
+            else:
+                tmp = os.path.join(folder, f"_{f}")
+                save_picture(src, tmp)
+                z.write(tmp, f"media/{f}")
+                os.remove(tmp)
+    rep = report(script, tl, plan, notes) + (f"\n  package: {zip_path}\n  drag it into the H3MD Director (or Import "
+                                             f"plan) and run the low-res pass first")
     LOG.info("%s %s", TAG, rep)
-    return {"plan_path": plan_path, "video_path": video_path, "report": rep, "plan": plan}
+    return {"zip": zip_path, "preview": preview, "report": rep, "plan": plan, "stem": stem}
 
 
 # ------------------------------------------------------------------------------------------------------ node
+_EDIT_TIP = ("The edit, kept in step with the timeline above (you rarely type here). One line per item: "
+             "'clip 4.0-6.0: what happens', 'gap 1.5: one move' (gap with no words = natural link; over 2 s = its own "
+             "text-only shot). Empty + Run = a draft cut where the motion pauses. Optional lines: style: / scene: / "
+             "sound: / music: / subject:. 剪辑内容，和上面的时间轴同步；空着运行 = 自动出草稿。")
+
+
 class H3MDRefSplice:
     @classmethod
     def INPUT_TYPES(cls):
+        pics = {f"picture_{i}": ("IMAGE", {"tooltip": f"Character picture {i}: drag a line from it to the person it "
+                                                      f"replaces on the cast panel (default: picture 1 = first "
+                                                      f"person to appear). 角色图{i}。"}) for i in range(1, 6)}
         return {"required": {
-            "video": ("VIDEO", {"tooltip": "the source reference video (Load Video node: drag the file in)"}),
-            "script": ("STRING", {"multiline": True, "default": DEFAULT_SCRIPT, "tooltip":
-                       "one line per item: clip a-b: what happens / gap seconds: optional one move / subject: / "
-                       "picture: / style: / scene: / sound: / music:. Ask your AI to write it (H3MD skill, Ref "
-                       "Splice part)."}),
-            "name": ("STRING", {"default": "ref_splice", "tooltip": "English name of the plan folder"}),
-        }}
+            "video": ("VIDEO", {"tooltip": "The reference video: connect a Load Video node and drag the file in. "
+                                           "参考视频：接「加载视频」，把文件拖进去。"}),
+            "edit": ("STRING", {"multiline": True, "default": "", "tooltip": _EDIT_TIP}),
+            "mapping": ("STRING", {"multiline": True, "default": "", "tooltip":
+                        "Who becomes whom, written by the cast panel (picture 1 -> person 3). Empty = automatic: "
+                        "picture 1 = first person to appear. 由人物面板写入；空 = 自动。"}),
+            "filename_prefix": ("STRING", {"default": "H3MD_plans/ref_splice", "tooltip":
+                                "Where the plan package goes, like ComfyUI's save nodes: inside the output folder "
+                                "(default output/H3MD_plans/ref_splice_<date>_<NNN>.zip), or an absolute path. "
+                                "计划包存放位置：默认在 output 里。"}),
+        }, "optional": pics}
 
     RETURN_TYPES = ("STRING", "STRING")
-    RETURN_NAMES = ("plan_path", "report")
+    RETURN_NAMES = ("package", "report")
     FUNCTION = "run"
     OUTPUT_NODE = True
     CATEGORY = CATEGORY
-    DESCRIPTION = ("Cut moves out of one reference video in any order, join them with short transitions and write "
-                   "the spliced video + a Director plan (Import plan). The Director itself is unchanged.")
+    DESCRIPTION = ("Cut moves out of one reference video, put them in any order with short transitions, choose who "
+                   "your character pictures replace, preview, and get a plan package for the H3MD Director. "
+                   "从一条参考视频里剪出动作、自由排序加过渡、指定角色图换谁，预览后得到导演台计划包。")
 
-    def run(self, video, script, name):
+    def run(self, video, edit, mapping, filename_prefix, **pics):
         import folder_paths
         src = video.get_stream_source() if hasattr(video, "get_stream_source") else None
         if not (isinstance(src, str) and os.path.isfile(src)):
-            tmp = os.path.join(folder_paths.get_temp_directory(), "h3md_ref_splice_source.mp4")
-            video.save_to(tmp)
-            src = tmp
-        res = run_splice(src, script, name, folder_paths.get_input_directory())
-        return {"ui": {"text": [res["report"]]}, "result": (res["plan_path"], res["report"])}
+            src = os.path.join(folder_paths.get_temp_directory(), "h3md_ref_splice_source.mp4")
+            video.save_to(src)
+        info = probe(src)
+        pics = {int(k.split("_")[1]): v for k, v in pics.items() if k.startswith("picture_") and v is not None}
+        ui = {}
+        subjects, links_used = None, []
+        if pics:
+            try:
+                from . import h3md_keyframe as K
+            except ImportError:
+                import h3md_keyframe as K
+            frames, people, small = people_cast(src, info)
+            mp = K.parse_mapping(mapping)
+            if not mp:
+                mp = K.auto_cast(people, sorted(pics))
+            mp = {p: (v if isinstance(v, (list, tuple)) else [v]) for p, v in mp.items() if p in pics}
+            links_used = [(p, k) for p, ks in mp.items() for k in ks if 0 < k <= len(people)]
+            subjects = subject_lines({"people": people}, links_used)
+            ui["h3md_cast"] = [json.dumps(cast_ui(frames, people, small, links_used, pics))]
+        splice = {"duration": info["duration"]}
+        if not (edit or "").strip() or not parse_script_items_present(edit):
+            splice["draft"] = draft_script(src, info["duration"])
+            rep = (f"H3MD Ref Splice {VERSION}: draft made ({info['duration']:.2f} s video) - change it on the "
+                   "timeline (drag the clips, add transitions), then Run again for the preview and the package."
+                   + (f"\n  people: {len(subjects)} (drag lines on the cast panel to change who is who)"
+                      if subjects else ""))
+            ui["h3md_splice"] = [json.dumps(splice)]
+            ui["text"] = [rep]
+            return {"ui": ui, "result": ("", rep)}
+        folder, name = out_target(filename_prefix, folder_paths.get_output_directory())
+        used_pics = {p: pics[p] for p in sorted({p for p, _ in links_used})}
+        res = export(src, edit, folder, name, used_pics, subjects)
+        out_dir = os.path.abspath(folder_paths.get_output_directory())
+        if os.path.abspath(res["preview"]).startswith(out_dir):
+            rel = os.path.relpath(os.path.dirname(res["preview"]), out_dir).replace("\\", "/")
+            splice["preview"] = {"filename": os.path.basename(res["preview"]), "subfolder": "" if rel == "." else rel,
+                                 "type": "output"}
+        splice["package"] = res["zip"]
+        ui["h3md_splice"] = [json.dumps(splice)]
+        ui["text"] = [res["report"]]
+        return {"ui": ui, "result": (res["zip"], res["report"])}
+
+
+def parse_script_items_present(text: str) -> bool:
+    return any(_CLIP_RE.match(x.strip()) for x in (text or "").splitlines())
 
 
 NODE_CLASS_MAPPINGS = {"H3MDRefSplice": H3MDRefSplice}

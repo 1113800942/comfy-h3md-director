@@ -33,7 +33,7 @@
     "your_source_video.mp4",
     "image"
    ],
-   "title": "Source video (drag the reference video in)"
+   "title": "Reference video (drag it in)"
   },
   {
    "id": 2,
@@ -43,8 +43,8 @@
     60
    ],
    "size": [
-    560,
-    620
+    780,
+    1180
    ],
    "flags": {},
    "order": 1,
@@ -54,11 +54,36 @@
      "name": "video",
      "type": "VIDEO",
      "link": 1
+    },
+    {
+     "name": "picture_1",
+     "type": "IMAGE",
+     "link": null
+    },
+    {
+     "name": "picture_2",
+     "type": "IMAGE",
+     "link": null
+    },
+    {
+     "name": "picture_3",
+     "type": "IMAGE",
+     "link": null
+    },
+    {
+     "name": "picture_4",
+     "type": "IMAGE",
+     "link": null
+    },
+    {
+     "name": "picture_5",
+     "type": "IMAGE",
+     "link": null
     }
    ],
    "outputs": [
     {
-     "name": "plan_path",
+     "name": "package",
      "type": "STRING",
      "links": []
     },
@@ -72,8 +97,9 @@
     "Node name for S&R": "H3MDRefSplice"
    },
    "widgets_values": [
-    "# H3MD Ref Splice - one line per item, times in seconds of the source video\nsubject: <Subject 1> is the fighter in the black sleeveless top and navy wide-leg trousers.\nsubject: <Subject 2> is the bearded heavyweight in black armour.\nstyle: A realistic live-action tournament fight, real-time speed, sharp impacts, no slow motion.\nscene: A side-on medium-wide shot of a wooden fight floor in a packed indoor arena, warm spotlights.\nclip 4.0-6.0: they trade kicks\ngap 1.5: <Subject 1> drops onto one knee with one hand on the floor, then stands back up\nclip 0.0-2.0: a low kick, a front kick and a spinning back kick\ngap 1\nclip 8.0-9.75: a flying flip kick knocks <Subject 2> onto his back\nsound: A loud arena crowd, thuds of kicks on armour, a heavy crash as he hits the floor.\nmusic: N/A\n",
-    "ref_splice"
+    "",
+    "",
+    "H3MD_plans/ref_splice"
    ]
   },
   {
@@ -85,7 +111,7 @@
    ],
    "size": [
     320,
-    230
+    330
    ],
    "flags": {},
    "order": 2,
@@ -94,7 +120,7 @@
    "outputs": [],
    "properties": {},
    "widgets_values": [
-    "H3MD Ref Splice 0.6.2\n1. Drag the source video into Load Video.\n2. Paste the splice script (ask your AI: H3MD skill, part 14 Ref Splice).\n3. Run. The node writes input/H3MD_plans/<name>_<date>_<NNN>/ (spliced video + plan .json).\n4. In the H3MD Director click Import plan and pick that .json, then run the low-res pass first.\n\n1. 把原视频拖进 Load Video。\n2. 粘贴剪辑脚本（让 AI 按 H3MD 技能第 14 节写）。\n3. 运行，节点写出 input/H3MD_plans/<名字>_<日期>_<序号>/（拼好的视频 + 计划 .json）。\n4. 在导演台点 Import plan 选这个 .json，先跑低清。"
+    "H3MD Ref Splice 0.6.2\n1. Drag the reference video into Load Video. Optional: connect your character pictures (Load Image) to picture_1..5.\n2. Run once: a draft edit (the video cut where the motion pauses) and, with pictures, the cast panel.\n3. Edit on the node: drag the blocks on the source track (start / end), reorder on the edit track, add transitions (no words = natural link; one move ~1.5 s). Drag lines from pictures to people on the cast panel.\n4. Run: preview on the node + a plan package in output/H3MD_plans/. Not right? change it and run again.\n5. Drag the package into the H3MD Director (or Import plan), run the low-res pass first.\n\n1. 把参考视频拖进 Load Video；可选：把角色图接到 picture_1..5。\n2. 运行一次：自动出草稿（按动作停顿切开）；接了角色图会出现人物面板。\n3. 在节点上剪：上轨拖色块定起止，下轨拖动排顺序，加过渡（不写字 = 自然衔接；一个动作约 1.5 秒）；在人物面板上从图拖线到人。\n4. 运行：节点上出预览 + output/H3MD_plans/ 里的计划包。不对就改了再跑。\n5. 把计划包拖进导演台（或 Import plan），先跑低清。"
    ]
   }
  ],
@@ -112,7 +138,7 @@
  "config": {},
  "extra": {
   "ds": {
-   "scale": 0.8,
+   "scale": 0.75,
    "offset": [
     40,
     40
