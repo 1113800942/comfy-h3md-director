@@ -24,8 +24,8 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
 - **AI step**: every package also carries `ai/edit.json` (the moves, each transition's length and intent, the
   segment table, who replaces whom) and `ai/stills/` (the frames around each transition, each replaced person), so the
   user's AI can rewrite the prompts from what is really on screen (H3MD skill part 14b) and save a new package. The
-  Director's import skips `ai/` quietly. A transition not written in English gets a red hint on the node and in the
-  report.
+  Director's import skips `ai/` quietly. A transition may be written in Chinese: the AI step translates it; for a direct run the node
+  suggests one full English sentence.
 - **Director**: the Remake Swap checkbox is no longer shown - the Control Panel style 多人互换 is the one switch.
 - Skill part 14 / 14b (EN + 中文): read only when this node is used.
   新增 **H3MD Ref Splice** 节点（导演台前的小剪辑器，来自 GitHub 用户的需求）：从一条参考视频里剪出几个动作，任意排序（可重复）、中间加过渡，用自己的角色来演，
@@ -35,7 +35,7 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   **过渡**：空着 = 镜头里一段短淡化，模型自己衔接；**写了字**的过渡单独成一个**不带参考视频**的小镜头，前后各 39 帧续接（放在参考视频里时模型照抄占位画面、不理文字；
   单独生成后鼓掌、蹲下、大喊都做出来了，换人后也一样），长度取最近的 5+17n。
   **AI 补写**：包里另带 `ai/edit.json`（剪了哪几段、每个过渡的秒数和意图、各段时间表、谁换谁）和 `ai/stills/`（过渡前后画面、被换的人），用户的 AI 按 skill 14b 看图重写提示词、
-  另存新包；导演台导入时自动跳过 `ai/`。过渡不是英文时节点和报告会提示。
+  另存新包；导演台导入时自动跳过 `ai/`。过渡可以写中文（AI 补写时会翻译）；不经过 AI 直接跑时，节点提示最好写成英文完整句子。
   **导演台**：不再显示「Remake Swap 换人模块」开关，多人换人只从总控台「多人互换」进入。
 
 ### Fixed / 修复
