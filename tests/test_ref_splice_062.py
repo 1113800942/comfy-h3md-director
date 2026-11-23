@@ -35,6 +35,9 @@ class Parse(unittest.TestCase):
         self.assertEqual(len(s["subject"]), 2)
         self.assertEqual(s["items"][1]["sec"], 1.5)
         self.assertEqual(s["items"][3]["text"], "")
+        # 22:49: words on a move are dropped (a move plays as in the source) and the report says so
+        self.assertEqual(s["items"][0]["text"], "")
+        self.assertTrue(any("words on a move ignored" in n for n in s["notes"]))
         self.assertEqual(S.parse_time("1:05.5"), 65.5)
 
     def test_errors(self):

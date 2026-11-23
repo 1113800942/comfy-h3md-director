@@ -261,6 +261,8 @@ Transitions (measured): no words = the model links the two poses itself (about 1
 crouch, fall and get up) needs about 1.5 s; over 2 s becomes its own text-only shot. Moves can land 0.3–0.5 s early —
 it is a link, not frame-exact choreography.
 
+A move has no text box: it plays exactly as in the source. Words only go into a transition (empty = a plain link; filled = goes into the prompt) - that is where a new move goes.
+
 ## Reporting a problem
 
 In the H3MD Director click **Report 诊断报告** (next to Export plan) and attach the .zip from `output/H3MD_reports/`

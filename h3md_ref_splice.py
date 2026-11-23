@@ -102,7 +102,7 @@ def parse_script(text: str) -> dict:
             a, b = parse_time(m.group(1)), parse_time(m.group(2))
             if b - a < MIN_CLIP:
                 raise SpliceError(f"{TAG} line {n}: clip {a:g}-{b:g} is shorter than 5 frames")
-            items.append({"kind": "clip", "a": a, "b": b, "text": (m.group(3) or "").strip(), "line": n})
+            items.append({"kind": "clip", "a": a, "b": b, "text": "", "dropped": (m.group(3) or "").strip(), "line": n})
             continue
         m = _GAP_RE.match(line)
         if m:
@@ -127,6 +127,10 @@ def parse_script(text: str) -> dict:
     # a transition joins two clips: ones at either end are dropped, several in a row keep the first (said in the
     # report) - an edit left like that by a reorder still runs
     notes, tidy = [], []
+    for it in items:   # a move plays as in the source; words on it would only fight the reference
+        if it["kind"] == "clip" and it.get("dropped"):
+            notes.append(f"line {it['line']}: words on a move ignored (a move plays as in the source; "
+                         f"put a new move in a transition)")
     for it in items:
         if it["kind"] == "gap" and (not tidy or tidy[-1]["kind"] == "gap"):
             notes.append(f"line {it['line']}: transition dropped ({'two in a row' if tidy else 'at the start'})")
@@ -704,7 +708,7 @@ def export(src_path: str, edit_text: str, folder: str, name: str, pictures: dict
 
 # ------------------------------------------------------------------------------------------------------ node
 _EDIT_TIP = ("The edit, kept in step with the timeline above (you rarely type here). One line per item: "
-             "'clip 4.0-6.0: what happens', 'gap 1.5: one move' (gap with no words = natural link; over 2 s = its own "
+             "'clip 4.0-6.0' (a move plays as in the source), 'gap 1.5: one move' (gap with no words = natural link; over 2 s = its own "
              "text-only shot). Empty + Run = a draft cut where the motion pauses. Optional lines: style: / scene: / "
              "sound: / music: / subject:. 剪辑内容，和上面的时间轴同步；空着运行 = 自动出草稿。")
 

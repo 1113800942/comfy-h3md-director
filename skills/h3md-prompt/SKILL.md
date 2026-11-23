@@ -600,12 +600,13 @@ The node is operated by hand on its own editor (player, source track, edit track
 lengths, overlaps, tags, who-is-who and the plan package itself. Help the user with the editor first. Only when the
 user asks you to write the edit, give the text for the node's `edit` box:
 ```
-clip 4.0-6.0: they trade kicks
+clip 4.0-6.0
 gap 1.5: he drops onto one knee with one hand on the floor, then stands back up
-clip 0.0-2.0: a low kick and a spinning back kick
+clip 0.0-2.0
 gap 1
-clip 8.0-9.75: a flying flip kick
+clip 8.0-9.75
 ```
+- A clip has no words: the move plays exactly as in the source (words there would fight the reference and are ignored). A new move goes in a transition.
 - Times = seconds of the SOURCE video; clips in the user's order, repeats allowed; start and end with a clip; never
   two gaps in a row. Optional lines: `style:`, `scene:`, `sound:`, `music:`, `subject:` (only to override the
   node's own who-is-who).

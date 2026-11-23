@@ -30,7 +30,7 @@ export function parseEdit(text) {
     const l = raw.trim();
     if (!l) continue;
     let m = l.match(CLIP_RE);
-    if (m) { items.push({ kind: "clip", a: ptime(m[1]), b: ptime(m[2]), text: (m[3] || "").trim() }); continue; }
+    if (m) { items.push({ kind: "clip", a: ptime(m[1]), b: ptime(m[2]), text: "" }); continue; }
     m = l.match(GAP_RE);
     if (m) { items.push({ kind: "gap", sec: Number(m[1]), text: (m[2] || "").trim() }); continue; }
     if (/^#\s*draft/i.test(l)) continue;
@@ -59,7 +59,7 @@ export function fromSlots({ clips, gaps }) {
 export function editText(model) {
   const out = [...model.meta];
   for (const it of model.items) {
-    if (it.kind === "clip") out.push(`clip ${fmt(it.a)}-${fmt(it.b)}` + (it.text ? `: ${it.text}` : ""));
+    if (it.kind === "clip") out.push(`clip ${fmt(it.a)}-${fmt(it.b)}`);
     else out.push(`gap ${fmt(it.sec)}` + (it.text ? `: ${it.text}` : ""));
   }
   return out.join("\n") + (out.length ? "\n" : "");
@@ -477,8 +477,6 @@ function setupEditor(node) {
           S.model.items = fromSlots(sl); S.sel = S.model.items.indexOf(copy); write(); render();
         }, "use this move again, right after it (with a 1 s transition)"),
         button("+ Transition after", () => addGap()), del);
-      insp.append(txt("✎ 这段动作的说明（可选，会写进 H3 提示词）· What happens in this move (optional, goes into the prompt)",
-        it.text, "空着也行：动作本身照原片 · empty is fine: the move follows the source", (v) => { it.text = v; }));
     } else {
       row.append(el("b", {}, "Transition 过渡"), ...num("seconds", it.sec, 0.5, (v) => { it.sec = Math.max(1 / FPS, v); }), del);
       insp.append(txt("✎ 这段过渡里发生什么（填了就写进 H3 提示词）· What happens in this transition (goes into the prompt)",

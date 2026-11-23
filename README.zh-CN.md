@@ -181,6 +181,8 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
 
 过渡（实测）：不写字 = 模型自己把两个姿势连起来（约 1 秒）；一个简单动作（跪下、蹲下、倒地再起）约 1.5 秒；超过 2 秒自动成为单独的纯文字镜头。动作可能早 0.3–0.5 秒，这是衔接，不是逐帧精确的编排。
 
+动作块没有文字框：动作完全照原片。只有过渡可以写字（空着 = 自然衔接；填了 = 写进提示词），新动作就写在过渡里。
+
 ## 反馈问题
 
 在导演台点 **Report 诊断报告**（在 Export plan 旁边），把 `output/H3MD_reports/` 里的 zip 附到 [GitHub issue](../../issues)。
