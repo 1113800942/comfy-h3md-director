@@ -252,7 +252,7 @@ One reference clip often holds several moves you want in a different order, play
    starts / ends; the player jumps to that frame. The lower track ("play order") is for the order: drag to reorder,
    duplicate a move, add transitions; where two moves touch, dragging their shared edge moves the cut between them, and a move can be split at the playhead or merged with the next. The nodes player shows only the edit: **▶ Play the edit** plays it straight away, without a run (watch the original on the Load Video node).
 4. **Run**: the spliced preview plays on the node, a plan package `output/H3MD_plans/ref_splice_<date>_<NNN>.zip`
-   is written (never overwritten), and the `video` output carries the spliced video — connect **Save Video** to keep
+   is written (never overwritten; its full path shows in the **Plan package** box next to the node, ready to copy), and the `video` output carries the spliced video — connect **Save Video** to keep
    the edit as a finished file without H3. Not right? Change it and run again.
 5. Drag the package into the **H3MD Director** (or Import plan) and run as usual. Without pictures the plan keeps the
    people of the video; what a transition does is up to you. The Director itself is unchanged.
