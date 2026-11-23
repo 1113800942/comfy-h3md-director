@@ -129,7 +129,7 @@ function setupEditor(node) {
   const trackA = el("div", { position: "relative", height: "34px", background: "#222", borderRadius: "4px", overflow: "hidden", cursor: "pointer" });
   const trackB = el("div", { position: "relative", height: "44px", background: "#222", borderRadius: "4px", overflowX: "auto",
     display: "flex", gap: "3px", padding: "3px", boxSizing: "border-box" });
-  const insp = el("div", { display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap", minHeight: "28px" });
+  const insp = el("div", { display: "flex", flexDirection: "column", gap: "4px", minHeight: "28px" });
   const playBtn = button("▶ Play the edit", () => (S.playing ? stopPlay() : playEdit()),
     "plays the moves in the edit's order now, without running; a transition shows as a pause. To watch the original, "
     + "use the Load Video node. / 按剪辑顺序直接播放（不用运行），过渡处停顿。看原片请用 Load Video 节点。");
@@ -145,7 +145,7 @@ function setupEditor(node) {
     button("↺ Reset", () => reset(), "throw this edit away and make a fresh draft (you can still Undo) / 重置为新草稿"));
   const title = (s) => el("div", { color: "#bbb", fontSize: "11px", fontWeight: "bold" }, s);
   const keep = () => { for (const c of root.children) c.style.flexShrink = "0"; };
-  root.append(bar, video, title("原片位置 · where each move is in the source — drag a block's EDGES to make it longer / shorter"),
+  root.append(bar, video, title("原片位置 · 拖色块两头的白色条纹 = 改这段从几秒到几秒；黄线 = 播放头，拖它看任意画面 · drag the striped ENDS of a block to change it; the yellow line is the playhead"),
     trackA, title("播放顺序 · the order they play in — drag blocks to reorder, click one to change it"), trackB, controls, insp, help);
   keep();
   const w = node.addDOMWidget("h3md_splice_editor", "editor", root, { serialize: false, hideOnZoom: false,
@@ -236,7 +236,25 @@ function setupEditor(node) {
   let head = null;
   function drawHead() {
     if (S.mode !== "source" || !S.dur) { if (head) head.style.display = "none"; return; }
-    if (!head || head.parentNode !== trackA) { head = el("div", { position: "absolute", top: 0, bottom: 0, width: "2px", background: "#fff", pointerEvents: "none" }); trackA.append(head); }
+    if (!head || head.parentNode !== trackA) {
+      head = el("div", { position: "absolute", top: 0, bottom: 0, width: "14px", marginLeft: "-7px", cursor: "col-resize",
+        zIndex: 5, touchAction: "none" });
+      head.append(el("div", { position: "absolute", left: "6px", top: 0, bottom: 0, width: "2px", background: "#ffd400", pointerEvents: "none" }),
+        el("div", { position: "absolute", left: "1px", top: 0, width: 0, height: 0, borderLeft: "6px solid transparent",
+          borderRight: "6px solid transparent", borderTop: "8px solid #ffd400", pointerEvents: "none" }));
+      head.title = "playhead (yellow): drag it to look at any frame; 'Split at playhead' cuts here / 播放头：拖动查看任意画面，切开就在这里";
+      head.onpointerdown = (e) => {
+        e.preventDefault(); e.stopPropagation(); stopPlay();
+        try { head.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+        const r = trackA.getBoundingClientRect();
+        const go = (ev) => { ev.stopPropagation(); video.currentTime = Math.max(0, Math.min(S.dur, ((ev.clientX - r.left) / r.width) * S.dur));
+          timeLab.textContent = `${video.currentTime.toFixed(2)} s`; head.style.left = `${(video.currentTime / S.dur) * 100}%`; };
+        const up = (ev) => { ev.stopPropagation(); head.removeEventListener("pointermove", go); head.removeEventListener("pointerup", up);
+          head.removeEventListener("pointercancel", up); try { head.releasePointerCapture(ev.pointerId); } catch { /* ignore */ } };
+        head.addEventListener("pointermove", go); head.addEventListener("pointerup", up); head.addEventListener("pointercancel", up);
+      };
+      trackA.append(head);
+    }
     head.style.display = "block";
     head.style.left = `${(video.currentTime / S.dur) * 100}%`;
   }
@@ -275,7 +293,7 @@ function setupEditor(node) {
       b.onpointerdown = (e) => { e.stopPropagation(); S.sel = i; if (S.mode === "source") video.currentTime = it.a; render(); };
       for (const side of ["a", "b"]) {
         const h = el("div", { position: "absolute", top: 0, bottom: 0, width: "8px", [side === "a" ? "left" : "right"]: 0,
-          background: "rgba(255,255,255,0.55)", cursor: "ew-resize", touchAction: "none" });
+          background: "repeating-linear-gradient(0deg,rgba(255,255,255,0.85) 0 2px,rgba(0,0,0,0.25) 2px 4px)", cursor: "ew-resize", touchAction: "none" });
         h.title = side === "a" ? "drag: where this move starts" : "drag: where this move ends";
         h.onpointerdown = (e) => dragA(e, i, b, h, side);
         b.append(h);
@@ -383,13 +401,19 @@ function setupEditor(node) {
     inp.onpointerdown = (e) => e.stopPropagation();
     return [el("span", {}, label), inp];
   }
-  function txt(value, placeholder, set) {
-    const inp = el("input", { flex: "1 1 240px", minWidth: "160px", background: "#222", color: "#ddd", border: "1px solid #555" });
+  // the words of a block: a highlighted box on its own row (Enter = save, Shift+Enter = new line)
+  function txt(label, value, placeholder, set) {
+    const box = el("div", { display: "flex", flexDirection: "column", gap: "3px", marginTop: "4px" });
+    const lab = el("div", { color: "#ffb347", fontWeight: "bold", fontSize: "12px" }, label);
+    const inp = el("textarea", { width: "100%", minHeight: "46px", boxSizing: "border-box", background: "#2b2410", color: "#fff",
+      border: "2px solid #ff8c00", borderRadius: "4px", padding: "4px 6px", fontSize: "13px", resize: "vertical" });
     inp.value = value || ""; inp.placeholder = placeholder;
-    inp.onchange = () => { set(inp.value.trim()); write(); render(); };
+    const save = () => { const v = inp.value.trim(); if (v !== (value || "")) { set(v); write(); render(); } };
+    inp.onchange = save;
     inp.onpointerdown = (e) => e.stopPropagation();
-    inp.onkeydown = (e) => e.stopPropagation();
-    return inp;
+    inp.onkeydown = (e) => { e.stopPropagation(); if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); inp.blur(); } };
+    box.append(lab, inp);
+    return box;
   }
   // split one move into two touching moves at the player's frame (every copy of it in the edit)
   function splitMove(it) {
@@ -429,7 +453,9 @@ function setupEditor(node) {
   function inspector() {
     insp.innerHTML = "";
     const i = S.sel, it = S.model.items[i];
-    if (!it) { insp.append(el("span", { color: "#888" }, "click a block on the edit track to change it")); return; }
+    if (!it) { insp.append(el("span", { color: "#888" }, "click a block on the lower track to change it / 点下轨的色块来修改")); return; }
+    const row = el("div", { display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" });
+    insp.append(row);
     const del = button("Delete", () => {
       if (it.kind === "gap") S.model.items.splice(i, 1);          // the two moves then join directly
       else {
@@ -441,9 +467,8 @@ function setupEditor(node) {
     });
     if (it.kind === "clip") {
       const d = S.dur || 1e9;
-      insp.append(el("b", {}, `Clip`), ...num("from", it.a, 0.05, (v) => { it.a = snap(Math.max(0, Math.min(v, it.b - 5 / FPS))); }),
+      row.append(el("b", {}, `Move ${clipKeys(S.model.items)[i] + 1}`), ...num("from", it.a, 0.05, (v) => { it.a = snap(Math.max(0, Math.min(v, it.b - 5 / FPS))); }),
         ...num("to", it.b, 0.05, (v) => { it.b = snap(Math.min(d, Math.max(v, it.a + 5 / FPS))); }),
-        txt(it.text, "what happens (optional, short)", (v) => { it.text = v; }),
         button("Split at playhead", () => splitMove(it), "cut this move in two at the frame shown in the player (move the playhead with the edges or by clicking the upper track) / 在播放器当前画面处切成两段"),
         button("Merge with next move", () => mergeMove(it), "join this move with the move that follows it in the source / 和原片里紧接着的下一段合并"),
         button("Duplicate", () => {
@@ -452,9 +477,13 @@ function setupEditor(node) {
           S.model.items = fromSlots(sl); S.sel = S.model.items.indexOf(copy); write(); render();
         }, "use this move again, right after it (with a 1 s transition)"),
         button("+ Transition after", () => addGap()), del);
+      insp.append(txt("✎ 这段动作的说明（可选，会写进 H3 提示词）· What happens in this move (optional, goes into the prompt)",
+        it.text, "空着也行：动作本身照原片 · empty is fine: the move follows the source", (v) => { it.text = v; }));
     } else {
-      insp.append(el("b", {}, "Transition"), ...num("seconds", it.sec, 0.5, (v) => { it.sec = Math.max(1 / FPS, v); }),
-        txt(it.text, "empty = natural link · or ONE move, e.g. he drops onto one knee, then stands up (about 1.5 s)", (v) => { it.text = v; }), del);
+      row.append(el("b", {}, "Transition 过渡"), ...num("seconds", it.sec, 0.5, (v) => { it.sec = Math.max(1 / FPS, v); }), del);
+      insp.append(txt("✎ 这段过渡里发生什么（填了就写进 H3 提示词）· What happens in this transition (goes into the prompt)",
+        it.text, "空着 = 自然衔接（Save Video 的成品里是淡化转场）· 填了 = 写进提示词，只写一个动作，例如：he drops onto one knee, then stands back up（约 1.5 秒）",
+        (v) => { it.text = v; }));
     }
   }
 
