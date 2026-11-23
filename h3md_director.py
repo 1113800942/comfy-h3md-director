@@ -677,6 +677,10 @@ def parse_plan(plan_json, width: int = 0, height: int = 0, continuity: bool = Fa
             # action given to exactly one window (no action replayed by two windows)
             auto = WIN.auto_window_prompts(seg["prompt"], length, window_mode["length"], window_mode["overlap"],
                                            chain=bool(window_mode.get("chain")))
+            if not auto and int(length) > int(window_mode["length"]) and AS.loose_times(sys.modules[__name__], seg["prompt"]):
+                notes.append(f"WARNING segment {n}: times written in words "
+                             f"({'; '.join(AS.loose_times(sys.modules[__name__], seg['prompt'])[:3])}) are not split "
+                             f"between the windows; write them as [12s] or At 00:12.0")
             if auto:
                 seg["windowPrompts"] = [{k: a[k] for k in ("start", "end", "prompt")} for a in auto]
                 if auto[0].get("removed"):

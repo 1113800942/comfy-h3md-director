@@ -423,7 +423,7 @@ def auto_window_prompts(prompt: str, total_frames: int, length: int, overlap: in
     return out
 
 
-def resolve_window(parts, a, b, lo, hi, origin=0, fps: int = FPS):
+def resolve_window(parts, a, b, lo, hi, origin=0, fps: int = FPS, precision: int = 0):
     """One window's prompt from a parsed timed prompt (split_timed_prompt): the shot text in force at the window
     centre, the actions whose time falls in the window's OWN span [lo, hi) (each action in exactly one window) with
     their time inside the window, else NO_NEW_ACTION.  a, b, lo, hi are frames on the timeline; the marks count from
@@ -434,7 +434,7 @@ def resolve_window(parts, a, b, lo, hi, origin=0, fps: int = FPS):
     shot = [t for sec, t in shots if origin + sec * fps <= mid]
     mine = [(sec, t) for sec, t in acts if lo <= origin + sec * fps < hi]
     # the time inside this window, so H3 places the action near the right second (11-07: about one window off)
-    action = " ".join(f"At about {max(0.0, (origin + sec * fps - a) / fps):.0f} s into this part, "
+    action = " ".join(f"At about {max(0.0, (origin + sec * fps - a) / fps):.{precision}f} s into this part, "
                       f"{t[0].lower() + t[1:]}" for sec, t in mine if t) if mine else NO_NEW_ACTION
     own = " ".join(x for x in (shot[-1] if shot else "", " ".join(t for _, t in mine)) if x)
     body = " ".join(x for x in (common, shot[-1] if shot else "", action) if x)
@@ -442,13 +442,14 @@ def resolve_window(parts, a, b, lo, hi, origin=0, fps: int = FPS):
             "events": len(mine), "own": own if shots else None, "removed": removed}
 
 
-def timed_window_prompt(prompt: str, a: int, b: int, lo: int, hi: int, origin: int = 0, fps: int = FPS):
+def timed_window_prompt(prompt: str, a: int, b: int, lo: int, hi: int, origin: int = 0, fps: int = FPS,
+                        precision: int = 0):
     """3e (11-08): a group part's prompt for one window: its time marks resolved for this window (resolve_window),
     or the prompt unchanged when it has no marks.  (prompt, events or None)"""
     parts = split_timed_prompt(prompt)
     if parts is None:
         return prompt, None
-    r = resolve_window(parts, a, b, lo, hi, origin, fps)
+    r = resolve_window(parts, a, b, lo, hi, origin, fps, precision)
     return r["prompt"], r["events"]
 
 

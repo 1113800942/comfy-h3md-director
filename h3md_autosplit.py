@@ -24,6 +24,13 @@ Each part's video refs start at the source time of its first NEW frame (trimStar
 rule (video_window_origin = trimStart - overlapIn/24) maps every part frame to the same source time as the unsplit
 shot; a video lock follows by rule, a locked audio file and standalone reference audios advance by the part's
 offset.  Parts carry shotIndex / autoPart / autoParts (not "shot": the old refwindow advance stays inactive).
+
+0.6.2 (user 2026-11-22 23:57, plan ref_splice_007): the prompt is translated too.  Before, every part got the whole
+shot's prompt, so the time marks ('[12s] ...', 'At 00:12.7 ...') of part 2 were read from part 2's own start - 6.4 s
+late in that plan, and actions past its end were lost; only media (video trims, audio, keyframes) were moved.  Now
+each part gets the actions whose time falls in its own new frames, timed from the part's start ("At about 3.4 s into
+this part, ..."; the same resolver as window mode), "No new action ..." when it has none, and a summary length that
+matches the part.  Cut points also avoid the first 1.5 s of a timed action.  Prompts without time marks: unchanged.
 """
 
 from __future__ import annotations
@@ -32,6 +39,7 @@ import copy
 import logging
 import math
 import os
+import re
 
 LOG = logging.getLogger("H3MD")
 _TAG = "[H3MD AutoSplit]"
@@ -43,6 +51,11 @@ CALIB_AVAIL_GIB = 31.84 - 0.68 - 2.0   # RTX 5090, Windows default reserve, --vr
 MIN_PART_CONTENT = 48               # never create a part with less than 2 s of new content
 NUDGE_UNITS = 1                     # cut points may move +-1 x 17 frames (0.71 s) towards a quieter moment
 FALLBACK_VIDEO_SIZE = (720, 1280)   # unknown reference size: a typical vertical 720p clip
+ACTION_GUARD = 36                   # 0.6.2: a cut point avoids the first 1.5 s after a timed action starts
+# 0.6.2: times written in words ('from 3.4 to 4.9 seconds', 'at 7 s') are not time marks - a split cannot move them
+LOOSE_TIME = re.compile(r"\b(?:from|at|by|until)\s+\d+(?:\.\d+)?\s*(?:s|sec|secs|seconds)\b|"
+                        r"\b\d+(?:\.\d+)?\s*(?:-|to)\s*\d+(?:\.\d+)?\s*seconds\b", re.I)
+SECONDS_WORD = re.compile(r"(\d+(?:\.\d+)?)-second\b")
 
 
 def token_budget(raw: dict, limit_tokens: int, avail_bytes: int | None = None) -> dict:
@@ -199,9 +212,10 @@ def max_length(D, seg, sizes, width, height, mode, budget, extra=0, cap=2000, pr
     return best
 
 
-def plan_parts(content: int, ov0: int, lmax: int, motion=None):
+def plan_parts(content: int, ov0: int, lmax: int, motion=None, avoid=None):
     """Content frames of each part (list) or None when no useful split exists.
-    content = shot length - ov0; part 1 = ov0 + c1 frames, part j>1 = AUTO_OVERLAP + cj frames."""
+    content = shot length - ov0; part 1 = ov0 + c1 frames, part j>1 = AUTO_OVERLAP + cj frames.
+    avoid = content frames where a timed action starts: a cut is not put in its first ACTION_GUARD frames (0.6.2)."""
     r0 = content % 17                       # 5 for a first shot / cut, 0 for a continued shot
     cap1_u = (lmax - ov0 - r0) // 17        # 17-frame units part 1 may carry
     capn_u = (lmax - AUTO_OVERLAP) // 17
@@ -221,10 +235,13 @@ def plan_parts(content: int, ov0: int, lmax: int, motion=None):
             give = min(us[0] - cap1_u, capn_u - us[j])
             us[0] -= give
             us[j] += give
-    if motion:
+    if motion or avoid:
         def frame_score(f):                 # motion around content frame f (window +-3 frames)
+            busy = 1e3 if any(0 <= f - t < ACTION_GUARD for t in avoid or ()) else 0.0
+            if not motion:
+                return busy
             lo, hi = max(0, f - 3), min(len(motion), f + 4)
-            return sum(motion[lo:hi]) / max(1, hi - lo) if hi > lo else 0.0
+            return busy + (sum(motion[lo:hi]) / max(1, hi - lo) if hi > lo else 0.0)
         for j in range(n - 1):              # boundary between part j and j+1
             best_d, best_s = 0, None
             for d in range(-NUDGE_UNITS, NUDGE_UNITS + 1):
@@ -320,6 +337,35 @@ def drop_spares(seg: dict) -> dict:
     return seg
 
 
+def action_frames(D, prompt: str) -> list:
+    """Shot frames of the timed actions of a prompt ('[12s] ...', 'At 00:12.7 ...'); [] without time marks."""
+    parts = D.WIN.split_timed_prompt(prompt)
+    return [] if parts is None else sorted(int(round(sec * D.FPS)) for sec, _ in parts[3])
+
+
+def loose_times(D, prompt: str) -> list:
+    """0.6.2: times written in words in the prompt body (not time marks): a split part cannot move them."""
+    if D.WIN.split_timed_prompt(prompt) is not None:
+        return []
+    return [m.group(0) for m in LOOSE_TIME.finditer(prompt or "")]
+
+
+def fix_summary_seconds(D, prompt: str, shot_len: int, part_len: int) -> str:
+    """0.6.2: 'a 15.1-second shot' in the summary -> the part's own length (only numbers within 1 s of the shot's: the
+    shot may have grown to follow its reference video)."""
+    heads = list(D.WIN.SECTION.finditer(prompt or ""))
+    m = next((h for h in heads if h.group(1) == "summary"), None)
+    if m is None:
+        return prompt
+    end = next((h.start() for h in heads if h.start() > m.end()), len(prompt))
+    shot_s, part_s = shot_len / D.FPS, part_len / D.FPS
+
+    def rep(x):
+        v = float(x.group(1))
+        return f"{part_s:.1f}-second" if abs(v - shot_s) <= 1.0 else x.group(0)
+    return prompt[:m.end()] + SECONDS_WORD.sub(rep, prompt[m.end():end]) + prompt[end:]
+
+
 def split_segment(D, seg: dict, media: dict, contents: list) -> list:
     """seg (a parsed shot) -> its parts.  contents = new frames per part (plan_parts)."""
     s0, ov0, fps = int(seg["startFrame"]), int(seg["overlapIn"]), D.FPS
@@ -367,6 +413,13 @@ def split_segment(D, seg: dict, media: dict, contents: list) -> list:
                 near = min([k for k in seg["keyframes"] if not k.get("backup")] or seg["keyframes"],
                            key=lambda k: abs(int(k["frame"]) - mid))
                 p["keyframesNear"] = [{"image": near["image"], "frame": int(near["frame"]) - (start - s0)}]
+        # 0.6.2: the part's own prompt - the actions of its new frames, timed from the part's start
+        a = start - s0
+        lo, hi = (a if j == 0 else a + ov), a + p["length"]
+        text, events = D.WIN.timed_window_prompt(seg["prompt"], a, hi, lo, hi, 0, fps, precision=1)
+        if events is not None:
+            p["prompt"], p["partEvents"] = text, events
+        p["prompt"] = fix_summary_seconds(D, p["prompt"], int(seg["length"]), int(p["length"]))
         p["shotIndex"] = seg["index"]
         p["autoPart"], p["autoParts"] = j, len(contents)
         p["labels"] = D.compute_labels(p, media)
@@ -424,7 +477,8 @@ def apply(D, segments: list, media: dict, raw: dict, width: int, height: int, mo
                     prof = motion(seg, content)
                 except Exception:
                     prof = None
-            contents = plan_parts(content, ov0, lmax, prof) if lmax else None
+            avoid = [f - ov0 for f in action_frames(D, seg["prompt"]) if f >= ov0]
+            contents = plan_parts(content, ov0, lmax, prof, avoid) if lmax else None
         n = seg["index"] + 1
         if contents and len(contents) == 1 and est <= budget:   # Remake cap only, fits whole after all
             out.append(drop_spares(seg))
@@ -435,7 +489,8 @@ def apply(D, segments: list, media: dict, raw: dict, width: int, height: int, mo
                          f"usefully (max part {lmax} f); lower the resolution or the reference count")
             out.append(drop_spares(seg))
             continue
-        if is_light(seg, extra):
+        timed = D.WIN.split_timed_prompt(seg["prompt"]) is not None
+        if is_light(seg, extra) and not timed:
             notes.append(f"WARNING segment {n}: a shot without a reference video is split automatically - every part "
                          f"gets the whole prompt, so later parts may replay its opening (cut / sound restart). "
                          f"Better: split it by hand into shots with their own prompts, or shorten it")
@@ -453,6 +508,15 @@ def apply(D, segments: list, media: dict, raw: dict, width: int, height: int, mo
                      f"cuts at {', '.join(cuts)} of the shot's new content"
                      f"{', cut points checked against the reference motion' if prof else ''}"
                      f"{', every part starts on a keyframe' if uncovered == [] else ''})")
+        if timed:
+            notes.append(f"segment {n}: time marks given to the parts, each timed from its own start (actions per "
+                         f"part: {', '.join(str(p.get('partEvents', 0)) for p in parts)})")
+        else:
+            loose = loose_times(D, seg["prompt"])
+            if loose:
+                notes.append(f"WARNING segment {n}: times written in words ({'; '.join(loose[:3])}) cannot follow the "
+                             f"split - every part reads them from its own start. Write them as [12s] or At 00:12.0 "
+                             f"so each part gets its own actions")
         if uncovered is not None:
             spares = sum(1 for p in parts[1:] if any(k.get("backup") for k in p.get("keyframes") or ()))
             if spares:

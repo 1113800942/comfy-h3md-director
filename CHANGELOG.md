@@ -33,6 +33,22 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
 - The keyframe UI's cast panel (`buildCast`) is exported so the new node reuses it; its behaviour is unchanged.
   关键帧界面的人物面板改为导出供新节点复用，行为不变。
 
+### Fixed / 修复
+- **Auto-split now splits the prompt too** (`h3md_autosplit.py`, found with plan ref_splice_007 at 1920x1088). A shot
+  over the VRAM budget is cut into parts; the reference video, audio and keyframes were moved to each part, but every
+  part got the WHOLE shot's prompt, so a time mark (`[12s] ...`, `At 00:12.7 ...`) was read from the part's own start
+  (6.4 s late in part 2 of that plan) and actions past the part's end were lost. Now each part gets only the actions
+  of its own new frames, timed from its start (`At about 5.3 s into this part, ...`, the window-mode resolver), "No new
+  action ..." when it has none, and a summary length that matches the part; cut points avoid the first 1.5 s of a
+  timed action when the GPU allows. Untimed prompts are unchanged. Times written in words ("from 3.4 to 4.9
+  seconds") cannot be moved: the Director now warns about them (auto-split and window mode) - write `[12s]` or
+  `At 00:12.0`. Local logs: 21 of 48 Director runs in the last two weeks were auto-split; most were swap / motion-copy
+  runs whose motion comes from the reference video, which is why the wrong text times went unnoticed.
+  **自动拆段现在连提示词一起拆**：以前超显存的镜头切成几段时，参考视频、音频、关键帧都平移了，但每段拿到的是整段提示词，
+  `[12s]`、`At 00:12.7` 这类时间被当成从这一段开头算（那个计划的第 2 段晚了 6.4 秒），超出这一段的动作直接丢了。现在每段只拿自己新画面里的动作，
+  时间从这一段开头算，没有动作时写“没有新动作”，summary 的时长也改成这一段的；显存允许时切点避开动作开始后的 1.5 秒。没有时间标记的提示词不变。
+  用文字写的时间（"from 3.4 to 4.9 seconds"）没法平移，导演台会提示改成 `[12s]` 或 `At 00:12.0`。
+
 ## [0.6.1] - 2026-11-22
 
 ### Changed / 变更
