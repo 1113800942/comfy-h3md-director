@@ -448,7 +448,8 @@ latent 重叠接续，704×1280，`lowres_anchor = 1`。每段都和第 1 段比
 | `minimax_h3_video_vae_fp16.safetensors` | `vae` | huggingface.co/Comfy-Org/MiniMax-H3 |
 | `minimax_h3_audio_vae_fp32.safetensors` | `vae` | huggingface.co/Comfy-Org/MiniMax-H3 |
 | `mmh3-4b-ClipProj-v3.1-mlp.safetensors` | `clip_projections` | huggingface.co/NicoLab28/ClipProj-MiniMax-H3 |
-| `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors` | `latent_upscale_models` | huggingface.co/Alissonerdx/Minimax-H3-ComfyUI |
+| `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors` | `latent_upscale_models` | huggingface.co/Alissonerdx/Minimax-H3-ComfyUI 的 `experiments/` 文件夹（作者已移到这里；他现在主推 `latent_upscaler/h3_upscaler_lms_v0.1_fp32.safetensors`，两个都能用，在 `upscaler_model` 里选） |
+| `H3 Motion_Repair_V2.safetensors` | `loras` | FourBunny 的「BUNNY General Motion Continuity Repair」V2：civitai.com/models/2890788，也在 huggingface.co/JOKER141/MiniMax-H3-General-Motion-Continuity-Repair（文件名 `Motion_Repair_V2.safetensors`，同一个文件，改名即可） |
 | `H3_Combat_V2.safetensors` | `loras` | huggingface.co/JOKER141/MiniMax-H3-Combat-Base-V2 |
 | `minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors` | `loras` | huggingface.co/lightx2v/Minimax-h3-Turbo |
 | `sam3.1_multiplex_fp16.safetensors` | `checkpoints` | huggingface.co/Comfy-Org/sam3.1 |

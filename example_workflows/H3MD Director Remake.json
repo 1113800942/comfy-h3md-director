@@ -5017,7 +5017,7 @@
       },
       {
         "name": "h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors",
-        "url": "https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI/resolve/main/latent_upscaler/h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors",
+        "url": "https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI/resolve/main/experiments/h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors",
         "directory": "latent_upscale_models",
         "hash": "7b70711ebf13051bac4b637247f2e6f0db5e1c6da88af3f28ad0165c6483c8c4",
         "hash_type": "sha256"

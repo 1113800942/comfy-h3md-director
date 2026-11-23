@@ -51,6 +51,15 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   which is why the wrong text times went unnoticed. The RunningHub pack gets the same fix as **0.5.5-rh3**.
   **自动拆段现在连提示词一起拆**：以前每段拿整段提示词，后面段的时间错位、超出的动作丢失；现在每段只拿自己新画面里的动作，时间从本段开头算，summary 时长改成本段，
   切点避开动作开始后的 1.5 秒。没写时间的提示词不变；用文字写的时间会提示改成 `[12s]` 或 `At 00:12.0`。RunningHub 包同步修复为 0.5.5-rh3。
+- **#15 Keyframe Export: "could not read the frame at 0.00 s"** on videos whose first frame starts a little late
+  (phone / screen recordings with an MP4 edit list): the frame reader stopped before keeping the frame it had just
+  passed. Fixed as proposed by Alon-Dan, with a test. 首帧时间戳略晚的视频（手机 / 录屏）关键帧导出报"读不到 0.00 秒的画面"，已修。
+- **#16 latent upscaler link**: `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors` was moved by its author to the
+  `experiments/` folder of Alissonerdx/Minimax-H3-ComfyUI; the download links in the example workflows and the README
+  point there now, and the README names his current `h3_upscaler_lms_v0.1_fp32.safetensors` as the alternative
+  (thanks set-soft). 锐化版潜空间放大模型被作者移到 experiments/，示例工作流和 README 的下载链接已更新。
+- **#17**: the README model table now lists `H3 Motion_Repair_V2.safetensors` (FourBunny's BUNNY General Motion
+  Continuity Repair V2; the same file is on JOKER141/MiniMax-H3-General-Motion-Continuity-Repair). README 模型表补上 Motion Repair 的来源。
 
 ### Known limits / 已知限制
 - Ref Splice swaps people with the plain reference swap (pictures + reference video): in a wild move with the face
