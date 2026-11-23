@@ -95,11 +95,11 @@ class Prompts(unittest.TestCase):
         tl = S.build_timeline(sc, 10.0)
         plan = S.build_plan(sc, tl, "t", "H3MD_plans/t/t.mp4", True, [])
         p = plan["segments"][0]["prompt"]
-        self.assertIn("From 0.00 to 2.00 seconds, as in <Video 1>: they trade kicks.", p)
+        self.assertIn("From 0.00 to 2.00 seconds, the people move exactly as in <Video 1>.", p)
         self.assertIn("From 2.00 to 3.50 seconds, <Subject 1> drops onto one knee, then stands up.", p)
-        self.assertIn("From 3.50 to 5.50 seconds, as in <Video 1>: a low kick.", p)
+        self.assertIn("From 3.50 to 5.50 seconds, the people move exactly as in <Video 1>.", p)
         self.assertNotIn("From 5.50 to 6.50", p)                    # an empty transition gets no words
-        self.assertIn("From 6.50 to 8.25 seconds, as in <Video 1>: a flip kick.", p)
+        self.assertIn("From 6.50 to 8.25 seconds, the people move exactly as in <Video 1>.", p)
         self.assertIn("<Audio 1> is the sound of <Video 1>", p)
         for w in ("natural", "do not stop", "no pause"):
             self.assertNotIn(w, p.lower())
@@ -122,7 +122,7 @@ class Prompts(unittest.TestCase):
         third = plan["segments"][2]
         self.assertEqual(third["overlapIn"], 39)
         self.assertIn("For the first 1.62 seconds it holds the end of the previous moment", third["prompt"])
-        self.assertIn("From 1.62 to 3.62 seconds, as in <Video 1>: a low kick.", third["prompt"])
+        self.assertIn("From 1.62 to 3.62 seconds, the people move exactly as in <Video 1>.", third["prompt"])
         self.assertEqual(third["videos"][0]["trimStart"], round(87 / 24, 6))
 
     def test_text_shot_without_pictures_uses_base_format(self):

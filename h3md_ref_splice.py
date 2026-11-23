@@ -256,8 +256,7 @@ def shot_prompt(script: dict, shot: dict, n_pics: int, has_audio: bool, prev_tex
     for e in shot["events"]:
         t0, t1 = _s(ov + e["f0"]), _s(ov + e["f1"])
         if e["kind"] == "clip" and shot["kind"] == "video":
-            txt = e["text"].rstrip(". ") if e["text"] else "the people move exactly as in <Video 1>"
-            events.append(f"From {t0} to {t1} seconds, as in <Video 1>: {txt}.")
+            events.append(f"From {t0} to {t1} seconds, the people move exactly as in <Video 1>.")
         elif e["text"]:
             events.append(f"From {t0} to {t1} seconds, {e['text'].rstrip('. ')}.")
     body = " ".join(x for x in [scene, _opening(shot, prev_text)] + events if x)
