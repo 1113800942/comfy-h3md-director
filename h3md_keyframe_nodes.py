@@ -163,14 +163,16 @@ def read_frames(path, times, size):
             t = float(fr.pts * vs.time_base)
             while k < len(want) and want[k] < t - 0.5 / 24:
                 k += 1
-            if k >= len(want):
-                break
             for j in (k - 1, k, k + 1):
                 if 0 <= j < len(want):
                     d = abs(want[j] - t)
                     if d < best.get(want[j], 1e9):
                         best[want[j]] = d
                         out[want[j]] = fr.to_image()
+            # GitHub #15 (Alon-Dan): stop only AFTER recording - a video whose first frame starts later than 0.5/24 s
+            # (MP4 edit list) passed every wanted time on its first frame and broke before keeping any of them
+            if k >= len(want):
+                break
             if want and t > want[-1] + 0.5:
                 break
     res = {}
