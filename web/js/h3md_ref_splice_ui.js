@@ -113,7 +113,8 @@ function setupEditor(node) {
   const editW = wget(node, "edit");
   const S = node.__rs = { model: parseEdit(editW?.value), sel: -1, dur: 0, mode: "source", resultUrl: null, srcUrl: null };
   const root = el("div", { display: "flex", flexDirection: "column", gap: "6px", fontFamily: "sans-serif", fontSize: "12px",
-    color: "#ddd", background: "#161616", padding: "6px", borderRadius: "6px", height: "100%", boxSizing: "border-box" });
+    color: "#ddd", background: "#161616", padding: "6px", borderRadius: "6px", height: "100%", boxSizing: "border-box",
+    overflowY: "auto" });
   const bar = el("div", { display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" });
   const video = el("video", { width: "100%", height: "220px", background: "#000", objectFit: "contain", borderRadius: "4px" });
   video.controls = false; video.preload = "auto"; video.muted = false; video.style.cursor = "pointer";
@@ -125,7 +126,7 @@ function setupEditor(node) {
     "over 2 s = its own shot. Run = preview + plan package + the video output (connect Save Video to keep it). " +
     "上轨只能拖边缘（起止）；下轨管顺序、复制、过渡。过渡不写字 = 自然衔接（约 1 秒）；一个动作约 1.5 秒；超过 2 秒自动成单独镜头。" +
     "运行 = 预览 + 计划包 + 视频输出（接 Save Video 存成品）。");
-  const trackA = el("div", { position: "relative", height: "48px", background: "#222", borderRadius: "4px", overflow: "hidden", cursor: "pointer" });
+  const trackA = el("div", { position: "relative", height: "34px", background: "#222", borderRadius: "4px", overflow: "hidden", cursor: "pointer" });
   const trackB = el("div", { position: "relative", height: "44px", background: "#222", borderRadius: "4px", overflowX: "auto",
     display: "flex", gap: "3px", padding: "3px", boxSizing: "border-box" });
   const insp = el("div", { display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap", minHeight: "28px" });
@@ -141,10 +142,12 @@ function setupEditor(node) {
     button("+ Transition after", () => addGap(), "a 1 s transition after the selected block"),
     button("Run", () => app.queuePrompt?.(0, 1), "preview + plan package (first run with no clips = a draft)"));
   const title = (s) => el("div", { color: "#bbb", fontSize: "11px", fontWeight: "bold" }, s);
+  const keep = () => { for (const c of root.children) c.style.flexShrink = "0"; };
   root.append(bar, video, title("原片位置 · where each move is in the source — drag a block's EDGES to make it longer / shorter"),
     trackA, title("播放顺序 · the order they play in — drag blocks to reorder, click one to change it"), trackB, controls, insp, help);
+  keep();
   const w = node.addDOMWidget("h3md_splice_editor", "editor", root, { serialize: false, hideOnZoom: false,
-    getMinHeight: () => 520, getMaxHeight: () => 520 });
+    getMinHeight: () => 600, getMaxHeight: () => 600 });
   w.__h3mdSplice = true;
 
   function show() {          // the player always reads the source; what it plays is the edit
@@ -230,13 +233,22 @@ function setupEditor(node) {
     // source track
     trackA.innerHTML = ""; head = null;
     if (!dur) trackA.append(el("div", { color: "#888", padding: "14px 8px" }, "connect a Load Video node with the source video (then the source track appears)"));
+    // each move once (copies in the edit share it), sorted by source time; a second row only for overlaps
+    const firstOf = [], rowEnd = [-1, -1];
+    items.forEach((it, i) => { if (it.kind === "clip" && !firstOf.some((j) => keys[j] === keys[i])) firstOf.push(i); });
+    firstOf.sort((x, y) => items[x].a - items[y].a);
+    const rowOf = {};
+    for (const i of firstOf) { const r = items[i].a >= rowEnd[0] - 1e-3 ? 0 : 1; rowOf[i] = r; rowEnd[r] = Math.max(rowEnd[r], items[i].b); }
+    const two = Object.values(rowOf).includes(1);
+    trackA.style.height = two ? "56px" : "34px";
     items.forEach((it, i) => {
-      if (it.kind !== "clip" || !dur) return;
-      const row = (i / 2) % 2 ? 1 : 0;
-      const b = el("div", { position: "absolute", top: row ? "25px" : "3px", height: "20px", left: `${(it.a / dur) * 100}%`,
-        width: `${Math.max(0.5, ((it.b - it.a) / dur) * 100)}%`, background: COLORS[keys[i] % COLORS.length], opacity: S.sel === i ? 1 : 0.8,
-        border: S.sel === i ? "2px solid #fff" : "1px solid #000", boxSizing: "border-box", borderRadius: "3px", cursor: "pointer",
-        fontSize: "11px", color: "#000", overflow: "hidden", whiteSpace: "nowrap", padding: "0 9px", touchAction: "none" },
+      if (it.kind !== "clip" || !dur || !(i in rowOf)) return;
+      const row = rowOf[i];
+      const sel = S.sel >= 0 && keys[S.sel] === keys[i];
+      const b = el("div", { position: "absolute", top: row ? "30px" : "4px", height: "24px", left: `${(it.a / dur) * 100}%`,
+        width: `${Math.max(0.5, ((it.b - it.a) / dur) * 100)}%`, background: COLORS[keys[i] % COLORS.length], opacity: sel ? 1 : 0.85,
+        border: sel ? "2px solid #fff" : "1px solid #000", boxSizing: "border-box", borderRadius: "3px", cursor: "pointer",
+        fontSize: "11px", lineHeight: "22px", color: "#000", overflow: "hidden", whiteSpace: "nowrap", padding: "0 9px", touchAction: "none" },
         `Move ${keys[i] + 1} · ${fmt(it.a)}-${fmt(it.b)}s`);
       b.title = `move ${keys[i] + 1}: ${fmt(it.a)}-${fmt(it.b)} s of the source - drag the left / right edge (an edge shared with the next move moves both)`;
       b.__item = it;
