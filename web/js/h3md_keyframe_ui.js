@@ -108,7 +108,7 @@ export function castMappingText(map) {
 const unlink = (m, k) => { for (const q of Object.keys(m)) { m[q] = m[q].filter((x) => x !== k); if (!m[q].length) delete m[q]; } };
 const copyMap = (m) => Object.fromEntries(Object.entries(m).map(([p, v]) => [p, [...v]]));
 
-function buildCast(node) {
+export function buildCast(node) {
   const cast = node.__h3mdCast;
   const mapW = wget(node, "mapping");
   if (!cast || !mapW) return;

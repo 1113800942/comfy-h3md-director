@@ -169,6 +169,23 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
   对不上的那一段接着上一段带过来的 39 帧继续,所以计划和显卡无关。16G 以下不支持。全是特写的一段里本来就做不了
   关键帧,如果某一段必须从那里开始,导演台会在运行说明里写出是第几秒。
 
+## 参考视频剪辑（Ref Splice，0.6.2）：从一条参考视频里取几段动作，换成自己的角色
+
+一条参考视频里常常有好几个动作，你想换个顺序、用自己的角色来演。**H3MD Ref Splice** 节点就是为这个做的小剪辑器（示例工作流 `H3MD_Ref_Splice_0.6.2.json`）：
+
+1. 把参考视频拖进 **Load Video**；可选：把角色图接到 `picture_1..5`。
+2. **先运行一次**：自动出一份草稿（按画面动作的停顿切开）；接了角色图会出现人物面板（视频里的人；从图拖线到要替换的人，默认图 1 = 第一个出场的人）。
+3. **在节点上剪**：上轨（原片位置）只能拖色块两头的白色条纹，定一个动作的起止；黄线是播放头（拖它看任意画面，切开就在这里）；下轨（播放顺序）管顺序：拖动排序、复制动作、加过渡；两段相接处拖动分界线，切点就在两段之间移动；还可以在播放头处切开、和后一段合并；顶上有撤销 / 重置。点过渡块，在橙色框里写这段过渡发生什么。节点上的播放器只播剪辑后的效果：**▶ Play the edit** 不用运行就按剪辑顺序播放（看原片用 Load Video 节点）。
+4. **运行**：节点上播放拼好的预览，同时写出计划包 `output/H3MD_plans/ref_splice_<日期>_<序号>.zip`（完整路径显示在节点旁的 **Plan package / 计划包** 框里，可以直接复制）（不会覆盖旧的）；节点的 `video` 输出就是拼好的视频，接 **Save Video** 可以不经过 H3 直接存成成品。不对就改了再跑。
+5. **让提示词更好（推荐）**：节点看不到画面，写的提示词比较粗。把包交给装了 H3MD skill 的 AI（第 14b 部分）：它读包里的 `ai/edit.json` 和截图，图上看不到的（裤子、鞋）先问你，重写全部提示词，交回 `<名字>_ai_<日期>_<序号>.zip`。
+6. 把计划包拖进 **H3MD 导演台**（或 Import plan），先跑低清预览。不接角色图时，计划保留视频里原来的人；过渡里做什么由你决定。
+
+过渡（实测）：不写字 = 模型自己把两个姿势连起来（约 1 秒）。**写了字**的过渡会单独生成一个不带参考视频的小镜头，前后各用 39 帧续接——放在参考视频里时，模型会照抄占位画面（重影、定格）而不理文字；单独生成后鼓掌、蹲下、大喊都做出来了（2026-11-23 实测）。一个简单动作（跪下、蹲下、鼓掌、大喊）约 1.5 秒。文字用英文写成带主语的完整句子（或交给 AI 按包写）。动作可能早 0.3–0.5 秒，这是衔接，不是逐帧精确的编排。
+
+这里的换人是普通的参考换人（角色图 + 参考视频），大多数时候很稳；但在被换的人贴地、脸朝下这类大幅度动作里，原人可能回来约 1 秒（2026-11-23 实测，换种子同一位置复现）。可以把这个动作剪掉或缩短；要求每一秒都换对时，请用多人换人（Remake）流程。半身照看不到裤子和鞋：要写明是什么，否则会沿用原人的。
+
+动作块没有文字框：动作完全照原片。只有过渡可以写字（空着 = 自然衔接；填了 = 写进提示词），新动作就写在过渡里。
+
 ## 反馈问题
 
 在导演台点 **Report 诊断报告**（在 Export plan 旁边），把 `output/H3MD_reports/` 里的 zip 附到 [GitHub issue](../../issues)。
@@ -205,7 +222,7 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
 2. 按下表安装需要的节点包，然后重启 ComfyUI。
 3. 不需要额外 `pip install`：H3MD 只用到 ComfyUI 自带的 torch、numpy、PyAV、Pillow、einops。
 4. 下载学习型潜空间放大器（推荐）放到 `models/latent_upscale_models/`：`minimax_h3_latent_upscaler_3d_fp16.safetensors`
-   或它的微调版（如 `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors`）。不放也能跑（`upscaler_model = none`，最近邻放大，效果差一些）。
+   或它的微调版（如 `h3_upscaler_lms_v0.1_fp32.safetensors`（即旧名字 `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors`））。不放也能跑（`upscaler_model = none`，最近邻放大，效果差一些）。
 
 **示例工作流**
 * `H3MD Director simple.json`（清爽版，**推荐从这里开始**）：总控台 + 导演台 + 预览，模型 / 采样 / 保存收在子图里；不用
@@ -431,7 +448,8 @@ latent 重叠接续，704×1280，`lowres_anchor = 1`。每段都和第 1 段比
 | `minimax_h3_video_vae_fp16.safetensors` | `vae` | huggingface.co/Comfy-Org/MiniMax-H3 |
 | `minimax_h3_audio_vae_fp32.safetensors` | `vae` | huggingface.co/Comfy-Org/MiniMax-H3 |
 | `mmh3-4b-ClipProj-v3.1-mlp.safetensors` | `clip_projections` | huggingface.co/NicoLab28/ClipProj-MiniMax-H3 |
-| `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors` | `latent_upscale_models` | huggingface.co/Alissonerdx/Minimax-H3-ComfyUI |
+| `h3_upscaler_lms_v0.1_fp32.safetensors` | `latent_upscale_models` | huggingface.co/Alissonerdx/Minimax-H3-ComfyUI 的 `latent_upscaler/` 文件夹（和旧名字 `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors` 是同一个文件，旧名字那份现在在 `experiments/`，sha256 相同；已经下载了哪个就用哪个） |
+| `H3 Motion_Repair_V2.safetensors` | `loras` | FourBunny 的「BUNNY General Motion Continuity Repair」V2：civitai.com/models/2890788，也在 huggingface.co/JOKER141/MiniMax-H3-General-Motion-Continuity-Repair（文件名 `Motion_Repair_V2.safetensors`，同一个文件，改名即可） |
 | `H3_Combat_V2.safetensors` | `loras` | huggingface.co/JOKER141/MiniMax-H3-Combat-Base-V2 |
 | `minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors` | `loras` | huggingface.co/lightx2v/Minimax-h3-Turbo |
 | `sam3.1_multiplex_fp16.safetensors` | `checkpoints` | huggingface.co/Comfy-Org/sam3.1 |
@@ -550,7 +568,7 @@ H3MD 站在很多人的肩膀上。下面这些作者的代码、模型或公开
 - 👍 [Comfy-Org](https://github.com/comfyanonymous/ComfyUI)：ComfyUI 核心里给 MiniMax H3 用的 Context Windows，CCW 就是在它上面改的（上下文窗口的思路最早来自 Kosinkadink 的 [AnimateDiff-Evolved](https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved) context options）
 - 👍 [Luna-H3-Sampler](https://github.com/lunaaispace-eng/Luna-H3-Sampler)：两段式采样引擎（H3MD 内置，GPL-3.0）
 - 👍 [LBH-123-AI](https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler)：学习型潜空间放大器（MIT）
-- 👍 [Alissonerdx](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI)：sharpness 放大器和 lms LoRA
+- 👍 [Alissonerdx](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI)：lms（旧名 sharpness）放大器和 lms LoRA
 - 👍 [nkxx188/ComfyUI-MiniMaxH3-Easy](https://github.com/nkxx188/ComfyUI-MiniMaxH3-Easy)：高清条带分块的思路（MIT）
 - 👍 [Kijai](https://github.com/kijai/ComfyUI-KJNodes)：SageAttention / FeedForward 省显存补丁，DMAD 转换
 - 👍 [NicoLab28/ClipProj](https://github.com/nicolab28/ComfyUI-ClipProj)：4B 编码器投影，让小显存也能跑

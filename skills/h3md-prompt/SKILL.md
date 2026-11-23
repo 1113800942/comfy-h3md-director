@@ -589,3 +589,92 @@ Picture number**. Define each Subject by look and by the performer it replaces; 
       photo is the original (no local retouching).
 - [ ] When the user wants to import: one valid plan JSON block whose lengths, overlaps, offsets and prompts match the shots above.
 - [ ] Plan .zip: `manifest.json` + `plan.json` + flat `media/` with every picture / song the plan names, no `workflow.json`.
+
+## 14. Ref Splice — ONLY when the user uses the H3MD Ref Splice node (0.6.2)
+
+**Read this part only when the user uses the `H3MD Ref Splice` node (cut several moves out of one reference video
+and put them in a new order). In every other case ignore this part completely.** It adds to sections 1–13 and
+replaces none of them.
+
+The node is operated by hand on its own editor (player, source track, edit track, cast panel); it writes the times,
+lengths, overlaps, tags, who-is-who and the plan package itself. Help the user with the editor first. Only when the
+user asks you to write the edit, give the text for the node's `edit` box:
+```
+clip 4.0-6.0
+gap 1.5: he drops onto one knee with one hand on the floor, then stands back up
+clip 0.0-2.0
+gap 1
+clip 8.0-9.75
+```
+- A clip has no words: the move plays exactly as in the source (words there would fight the reference and are ignored). A new move goes in a transition.
+- Times = seconds of the SOURCE video; clips in the user's order, repeats allowed; start and end with a clip; never
+  two gaps in a row. Optional lines: `style:`, `scene:`, `sound:`, `music:`, `subject:` (only to override the
+  node's own who-is-who).
+- Transitions (measured): just join = `gap 1` with **no words** (a short dissolve inside the shot); one simple move
+  (kneel, crouch, clap, shout, fall and get up) = about `gap 1.5: <the move>`; two moves ≈ 2.5–3 s; a dialogue beat =
+  `gap <s>: <what happens, lines in <d>…</d>>`. A transition with words is always its own shot without the reference
+  video (inside the reference the model copied the placeholder and ignored the words, 2026-11-23). Write the words in
+  English as one full sentence with who does it and where they end up (the next move's first pose). Never write
+  "natural transition", "smooth", "no pause". Moves can land 0.3–0.5 s early.
+- If you cannot see the video, ask the user where each move starts and ends (the node's player shows the time).
+
+### 14b. Rewriting a Ref Splice package (the AI step)
+
+The node writes working prompts, but it cannot see the video: it does not know who lies on the floor, which way the
+camera looks or what a picture shows. When the user hands you a package `<name>_<date>_<NNN>.zip` from the node,
+rewrite its prompts from what is really on screen. The people work is the same as in the keyframe skill
+(h3md-keyframe 2b-5): describe the characters from their pictures, ask for what the pictures do not show, bind each
+character to its place.
+
+**1. Check the package first.** `ai/edit.json` (the moves cut from the source, every transition with the user's
+intent, the segment table with times, `cast` = which picture replaces which tracked person), `ai/stills/`
+(`transition_N_before/after.jpg`, `person_K.jpg` for every replaced person), `media/*.png` (the character pictures),
+`media/*.mp4` (the spliced video), `plan.json`. If something is missing, stop and tell the user what and how to fix it
+("run Ref Splice again"). Several tracked numbers can belong to one picture (the tracker split one person, or boxed
+only a leg in a close-up): they are the same person.
+
+**2. The characters - describe them, ask for what the pictures do not show.** Look at every picture; never reuse a
+description from an earlier package. A `subject:` line the user wrote is right - use it and only add what it lacks.
+Compare what the video shows of each replaced person (the stills, a close-up of the legs, the back in a turn, the feet)
+with what the picture shows. A half-body picture has no trousers or shoes, a front picture no back: **ask the user -
+all characters in one message - and wait.** Never invent them, or the source person's own come back. Ask only about
+what the video shows. Then fix **one sentence per character**, head to toe: face, age, hair, every garment, the shoes,
+and what they do not have ("bare hands", "no hat"). The same sentence goes into every segment.
+
+**3. Who is who.** One `<Subject N>` per character, with its sentence, tied to the person it replaces by **place, role
+and build** as seen in the stills ("takes the place of the smaller fighter who starts on the left"), not by that
+person's clothes - naming the source clothes invites them back. In a frame with several similar people, name the
+place every time. Everyone else in one sentence ("Everyone else in <Video 1> keeps their own look"); no Subject per
+bystander. Left and right are the sides of the image.
+
+**4. Video segments** (with `<Video 1>`): six sections; `<Video 1>` is `attribute_transfer` when people are replaced
+("its moves, timing, camera and place are kept; only <Subject 1> and <Subject 2> are new"), else `fully_preserved`; the
+scene, camera and positions as in the stills; the moves as `[Ns] The fight follows <Video 1> exactly: <what happens>`
+- what really happens, read from the video, not guessed. A segment with carried frames first says the state they hold
+(the end of the segment before), not "continuing from the previous shot".
+
+**5. Transition segments** (`text only`, no video): six sections with the pictures (base format when there are none);
+open with the carried state (`transition_N_before.jpg`), then ONE English sentence at `[1.62s]`: who does what, how
+everyone else moves, and the pose they end in (`transition_N_after.jpg`, so the next move starts cleanly). The user's
+intent may be in Chinese - translate it into that sentence. About 1.5 s per simple move; never "natural / smooth / no
+pause". Describe poses you see; do not invent motion the user did not ask for.
+
+**6. Times** only as `[Ns]` or `At 00:12.0`, counted from the segment's own start (the Director moves them when it
+splits a segment). Keep lengths, overlaps, media ids and order; leave `globalPrompt` empty (import keeps the
+workflow's trigger words).
+
+**7. Check before you answer**, segment by segment, against the stills and the video:
+- every character the same sentence everywhere; trousers / shoes written whenever the legs or feet show;
+- no source clothing word on a replaced person; the right Subject at the right place;
+- each transition: carried state, one sentence, end pose that matches the next move;
+- times inside each segment, after its carried frames.
+If you are not sure about something, ask instead of guessing.
+
+**8. Answer**: a new package `<name>_ai_<date>_<NNN>.zip` (manifest + plan + `media/`, no `ai/` folder, never
+overwrite) in `input/H3MD_plans/<name>_ai_<date>_<NNN>/`, checked with `h3md_plan_io.import_plan` (no problems); give
+the user the full path. They drag it into the Director and run the low-res preview first. If you cannot make files,
+give the rewritten prompts segment by segment for the user to paste into the Director.
+
+Known limit (tell the user when it applies): the plain reference swap can let the source person come back for about a
+second in a wild move with the face hidden (low on the floor); another seed rarely helps - cut that move shorter or use
+the multi-person swap (Remake).

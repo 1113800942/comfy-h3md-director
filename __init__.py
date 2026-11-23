@@ -68,6 +68,10 @@ def _m_h3md_keyframe_nodes():
     from . import h3md_keyframe_nodes as m
     return m
 
+def _m_h3md_ref_splice():
+    from . import h3md_ref_splice as m
+    return m
+
 def _m_h3md_director_refmod():
     from . import h3md_director_refmod as m
     return m
@@ -88,6 +92,7 @@ for _name, _load in (
         ("h3md_control_panel", _m_h3md_control_panel),
         ("h3md_window", _m_h3md_window),
         ("h3md_keyframe_nodes", _m_h3md_keyframe_nodes),
+        ("h3md_ref_splice", _m_h3md_ref_splice),
         ("h3md_director_refmod", _m_h3md_director_refmod),
 ):
     try:

@@ -239,6 +239,39 @@ faces), so the source decides how far it goes:
   before, so the plan does not depend on the GPU. Below 16 GB it is not supported. A stretch made only of close-ups cannot hold a
   keyframe at all; if a part has to start there, the Director names the second in its notes.
 
+## Ref Splice: several moves from one reference video, your own characters (0.6.2)
+
+One reference clip often holds several moves you want in a different order, played by your own characters. The
+**H3MD Ref Splice** node is a small video editor for that (example workflow `H3MD_Ref_Splice_0.6.2.json`):
+
+1. Drag the reference video into **Load Video**; optionally connect your character pictures to `picture_1..5`.
+2. **Run once**: a draft edit appears (the video cut where the motion pauses) and, with pictures, the cast panel
+   (the people of the video; drag a line from a picture to the person it replaces — default: picture 1 = first
+   person to appear).
+3. **Edit on the node**: the upper track ("where in the source") only lets you drag the striped ends of a block -
+   where a move starts / ends; the yellow line is the playhead (drag it to see any frame; "Split" cuts there). The lower track ("play order") is for the order: drag to reorder,
+   duplicate a move, add transitions; where two moves touch, dragging their shared edge moves the cut between them, and a move can be split at the playhead or merged with the next; Undo / Reset are at the top. Click a transition
+   to write what happens in it (the orange box). The nodes player shows only the edit: **▶ Play the edit** plays it straight away, without a run (watch the original on the Load Video node).
+4. **Run**: the spliced preview plays on the node, a plan package `output/H3MD_plans/ref_splice_<date>_<NNN>.zip`
+   is written (never overwritten; its full path shows in the **Plan package** box next to the node, ready to copy), and the `video` output carries the spliced video — connect **Save Video** to keep
+   the edit as a finished file without H3. Not right? Change it and run again.
+5. **Better prompts (recommended)**: the node cannot see the picture, so its prompts are plain. Hand the package to
+   your AI with the H3MD skill (part 14b): it reads `ai/edit.json` and the stills in the package, asks about anything
+   the pictures do not show (trousers, shoes), rewrites every prompt and returns `<name>_ai_<date>_<NNN>.zip`.
+6. Drag the package into the **H3MD Director** (or Import plan) and run the low-res preview first. Without pictures
+   the plan keeps the people of the video; what a transition does is up to you.
+
+Transitions (measured): no words = the model links the two poses itself (about 1 s). A transition **with words**
+is generated as its own short shot WITHOUT the reference video, carried by 39 frames on both sides - inside the
+reference the model copied the placeholder (a double exposure, a frozen pose) and ignored the words; on its own it
+did the clap, the crouch and the shout (2026-11-23). One simple move (kneel, crouch, clap, shout) needs about 1.5 s.
+Write the words in English as one full sentence with who does it (or let the AI step write them from the package).
+Moves can land 0.3–0.5 s early - it is a link, not frame-exact choreography.
+
+Swapping people here is the plain reference swap (pictures + the reference video). It holds well, but in a wild move where the replaced person is low on the floor with the face hidden, the original person can come back for about a second (2026-11-23: same place with another seed). Cut or shorten that move, or use the multi-person swap (Remake) when the swap must hold everywhere. A half-body picture shows no trousers or shoes: say what they are, or the original person's keep showing.
+
+A move has no text box: it plays exactly as in the source. Words only go into a transition (empty = a plain link; filled = goes into the prompt) - that is where a new move goes.
+
 ## Reporting a problem
 
 In the H3MD Director click **Report 诊断报告** (next to Export plan) and attach the .zip from `output/H3MD_reports/`
@@ -286,7 +319,7 @@ videos or audio; untick **prompts** to leave the prompts out. It is only saved o
 3. No extra `pip install`: H3MD only uses torch, numpy, PyAV, Pillow and einops, which ship with ComfyUI.
 4. Recommended: a learned latent upscaler in `models/latent_upscale_models/`, e.g.
    `minimax_h3_latent_upscaler_3d_fp16.safetensors` or a fine-tune such as
-   `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors`. Without one, set `upscaler_model = none` (nearest, softer).
+   `h3_upscaler_lms_v0.1_fp32.safetensors` (= the older `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors`). Without one, set `upscaler_model = none` (nearest, softer).
 
 **Example workflows**
 * `H3MD Director simple.json` — **start here** (v0.3): Control Panel + Director + preview; models / sampler / save in
@@ -550,7 +583,8 @@ entry is not shown.
 | `minimax_h3_video_vae_fp16.safetensors` | `vae` | huggingface.co/Comfy-Org/MiniMax-H3 |
 | `minimax_h3_audio_vae_fp32.safetensors` | `vae` | huggingface.co/Comfy-Org/MiniMax-H3 |
 | `mmh3-4b-ClipProj-v3.1-mlp.safetensors` | `clip_projections` | huggingface.co/NicoLab28/ClipProj-MiniMax-H3 |
-| `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors` | `latent_upscale_models` | huggingface.co/Alissonerdx/Minimax-H3-ComfyUI |
+| `h3_upscaler_lms_v0.1_fp32.safetensors` | `latent_upscale_models` | huggingface.co/Alissonerdx/Minimax-H3-ComfyUI, folder `latent_upscaler/` (the same file as the older name `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors`, now in `experiments/` - same sha256; keep whichever you have) |
+| `H3 Motion_Repair_V2.safetensors` | `loras` | FourBunny's "BUNNY General Motion Continuity Repair" V2: civitai.com/models/2890788, also huggingface.co/JOKER141/MiniMax-H3-General-Motion-Continuity-Repair (`Motion_Repair_V2.safetensors`, same file - rename it) |
 | `H3_Combat_V2.safetensors` | `loras` | huggingface.co/JOKER141/MiniMax-H3-Combat-Base-V2 |
 | `minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors` | `loras` | huggingface.co/lightx2v/Minimax-h3-Turbo |
 | `sam3.1_multiplex_fp16.safetensors` | `checkpoints` | huggingface.co/Comfy-Org/sam3.1 |
@@ -708,7 +742,7 @@ H3MD stands on many shoulders. Their code, models or openly shared findings gave
 - 👍 [Comfy-Org](https://github.com/comfyanonymous/ComfyUI): the core Context Windows for MiniMax H3 that CCW builds on (the context-window idea goes back to Kosinkadink's [AnimateDiff-Evolved](https://github.com/Kosinkadink/ComfyUI-AnimateDiff-Evolved) context options)
 - 👍 [Luna-H3-Sampler](https://github.com/lunaaispace-eng/Luna-H3-Sampler): two-pass sampling engine (bundled, GPL-3.0)
 - 👍 [LBH-123-AI](https://huggingface.co/LBH-123-AI/Minimax_h3_latent_Upscaler): learned latent upscaler (MIT)
-- 👍 [Alissonerdx](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI): sharpness upscaler and lms LoRA
+- 👍 [Alissonerdx](https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI): latent upscaler (lms, formerly named sharpness) and lms LoRA
 - 👍 [nkxx188/ComfyUI-MiniMaxH3-Easy](https://github.com/nkxx188/ComfyUI-MiniMaxH3-Easy): high-res strip tiling idea (MIT)
 - 👍 [Kijai](https://github.com/kijai/ComfyUI-KJNodes): SageAttention / feed-forward VRAM patches, DMAD conversion
 - 👍 [NicoLab28/ClipProj](https://github.com/nicolab28/ComfyUI-ClipProj): 4B encoder projection for small GPUs

@@ -441,6 +441,8 @@ def import_plan(data: bytes, input_dir: str, filename: str = "") -> dict:
                     it["file"] = f"{folder_rel}/{base}"
     problems = check_plan(plan, media_present=lambda f: resolve_in(input_dir, f) is not None)
     for m in info["ignored"]:
+        if m.startswith("ai/"):   # 0.6.2 Ref Splice: notes and stills for an AI, not for the Director - skip quietly
+            continue
         problems.append(f"ignored unexpected file in the zip: {m}")
     if manifest.get("plan_version", PLAN_VERSION) > PLAN_VERSION:
         problems.append(f"this plan was saved by a newer H3MD ({manifest.get('h3md_version')}); "

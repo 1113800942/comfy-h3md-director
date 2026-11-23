@@ -2,6 +2,78 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.6.2] - 2026-11-23
+
+### Added / 新增
+- **H3MD Ref Splice** node (`h3md_ref_splice.py`, `web/js/h3md_ref_splice_ui.js`, example workflow
+  `H3MD_Ref_Splice_0.6.2.json`): a small video editor in front of the Director, asked for on GitHub
+  (`<Video 1, time=a to b>`). Cut several moves out of ONE reference video, use them in any order (repeats allowed)
+  with transitions between them, played by your own characters - or just keep the edit as a video. On the node:
+  a player that plays the edit at once (no run needed), a source track (drag the striped ends of a move to change
+  where it starts / ends; the yellow playhead shows any frame and is where "Split" cuts), an edit track (drag to
+  reorder, duplicate, merge, split, add / delete transitions, Undo, Reset), a highlighted box for what happens in a
+  transition, and the keyframe step's cast panel (drag a line from a picture to the person it replaces). A move has
+  no text: it plays exactly as in the source. Each run writes a preview and a plan package
+  `output/H3MD_plans/<name>_<date>_<NNN>.zip` (never overwritten; its path shows in the **Plan package** box) for the
+  Director, and a `video` output for Save Video (a pure edit without H3). Without pictures the original people stay.
+- **Transitions** (measured 2026-11-22/23): an empty transition is a short dissolve inside the shot and the model
+  links the two poses itself; a transition **with words** becomes its own short shot **without the reference
+  video**, carried by 39 frames on both sides (inside the reference the model copied the placeholder - a double
+  exposure or a frozen pose - and ignored the words; on its own it did the clap, the crouch and the shout, also with
+  swapped characters). Its length is the nearest 5+17n. Stills, not a dissolve, sit before carried frames.
+- **AI step**: every package also carries `ai/edit.json` (the moves, each transition's length and intent, the
+  segment table, who replaces whom) and `ai/stills/` (the frames around each transition, each replaced person), so the
+  user's AI can rewrite the prompts from what is really on screen (H3MD skill part 14b) and save a new package. The
+  Director's import skips `ai/` quietly. A transition may be written in Chinese: the AI step translates it; for a direct run the node
+  suggests one full English sentence.
+- **Director**: the Remake Swap checkbox is no longer shown - the Control Panel style 多人互换 is the one switch.
+- Skill part 14 / 14b (EN + 中文): read only when this node is used.
+  新增 **H3MD Ref Splice** 节点（导演台前的小剪辑器，来自 GitHub 用户的需求）：从一条参考视频里剪出几个动作，任意排序（可重复）、中间加过渡，用自己的角色来演，
+  或者只存成剪辑好的视频。节点上：播放器直接播放剪辑结果（不用运行）；上轨拖色块两头的条纹改起止，黄线是播放头；下轨排序、复制、合并、切开、加/删过渡、撤销、重置；
+  过渡有醒目的文字框；关键帧那一步的连线面板（从图拖线到要换的人）。动作块没有文字，完全照原片。每次运行出预览和计划包（不覆盖，路径显示在 Plan package 框里），
+  `video` 输出接 Save Video 就是纯剪辑成品；不接角色图则保留原片人物。
+  **过渡**：空着 = 镜头里一段短淡化，模型自己衔接；**写了字**的过渡单独成一个**不带参考视频**的小镜头，前后各 39 帧续接（放在参考视频里时模型照抄占位画面、不理文字；
+  单独生成后鼓掌、蹲下、大喊都做出来了，换人后也一样），长度取最近的 5+17n。
+  **AI 补写**：包里另带 `ai/edit.json`（剪了哪几段、每个过渡的秒数和意图、各段时间表、谁换谁）和 `ai/stills/`（过渡前后画面、被换的人），用户的 AI 按 skill 14b 看图重写提示词、
+  另存新包；导演台导入时自动跳过 `ai/`。过渡可以写中文（AI 补写时会翻译）；不经过 AI 直接跑时，节点提示最好写成英文完整句子。
+  **导演台**：不再显示「Remake Swap 换人模块」开关，多人换人只从总控台「多人互换」进入。
+
+### Fixed / 修复
+- **Auto-split now splits the prompt too** (`h3md_autosplit.py`, found with a Ref Splice plan at 1920x1088). A shot
+  over the VRAM budget is cut into parts; the reference video, audio and keyframes were moved to each part, but every
+  part got the WHOLE shot's prompt, so a time mark (`[12s] ...`, `At 00:12.7 ...`) was read from the part's own start
+  (6.4 s late in part 2 of that plan) and actions past the part's end were lost. Now each part gets only the actions
+  of its own new frames, timed from its start (`At about 5.3 s into this part, ...`, the window-mode resolver), "No new
+  action ..." when it has none, and a summary length that matches the part; cut points avoid the first 1.5 s of a
+  timed action when the GPU allows. Untimed prompts are unchanged. Times written in words ("from 3.4 to 4.9
+  seconds") cannot be moved: the Director now warns about them (auto-split and window mode). Local logs: 21 of 48
+  runs in two weeks were auto-split; most were swap / motion-copy runs whose motion comes from the reference video,
+  which is why the wrong text times went unnoticed. The RunningHub pack gets the same fix as **0.5.5-rh3**.
+  **自动拆段现在连提示词一起拆**：以前每段拿整段提示词，后面段的时间错位、超出的动作丢失；现在每段只拿自己新画面里的动作，时间从本段开头算，summary 时长改成本段，
+  切点避开动作开始后的 1.5 秒。没写时间的提示词不变；用文字写的时间会提示改成 `[12s]` 或 `At 00:12.0`。RunningHub 包同步修复为 0.5.5-rh3。
+- **#15 Keyframe Export: "could not read the frame at 0.00 s"** on videos whose first frame starts a little late
+  (phone / screen recordings with an MP4 edit list): the frame reader stopped before keeping the frame it had just
+  passed. Fixed as proposed by Alon-Dan, with a test. 首帧时间戳略晚的视频（手机 / 录屏）关键帧导出报"读不到 0.00 秒的画面"，已修。
+- **#16 latent upscaler**: its author renamed `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors` to
+  `latent_upscaler/h3_upscaler_lms_v0.1_fp32.safetensors` (the same file, same sha256; the old name now sits in
+  `experiments/`), so the example workflows' download link failed. The example workflows now use the new name and
+  link; a copy under the old name works the same (thanks set-soft).
+  潜空间放大模型被作者改名为 `h3_upscaler_lms_v0.1_fp32.safetensors`（和旧的 sharpness 版是同一个文件），示例工作流已改用新名字和新链接，旧名字那份照样能用。
+- **#17**: the README model table now lists `H3 Motion_Repair_V2.safetensors` (FourBunny's BUNNY General Motion
+  Continuity Repair V2; the same file is on JOKER141/MiniMax-H3-General-Motion-Continuity-Repair). README 模型表补上 Motion Repair 的来源。
+
+### Known limits / 已知限制
+- Ref Splice swaps people with the plain reference swap (pictures + reference video): in a wild move with the face
+  hidden (low on the floor) the original person can come back for about a second, the same place with another seed.
+  Cut that move shorter, or use the multi-person swap (Remake). A half-body picture shows no trousers or shoes - say
+  what they are. 普通参考换人在贴地、脸看不见的大动作里，原人可能回来约 1 秒，换种子同一位置；可剪短该动作或改用多人换人。半身照要写明裤子和鞋。
+- A long move with its reference video (e.g. 8-9 s) is slow in the high-res pass: the reference cannot be cut into
+  the VRAM-saving strips, so every strip carries all of it (measured: a 209-frame shot took 30 of the 40 minutes of a
+  13 s edit at 1664x960; a 107-frame one took 4.5). The strips are what keeps smaller cards from running out of
+  memory, so they stay. Keep moves at about 5 s each in Ref Splice (split the long ones) for faster high-res runs.
+  带参考视频的长动作段（8–9 秒）高清阶段很慢：参考视频不能跟着画面切条，每一条都带着整段参考（实测 209 帧那段占了 13 秒成片
+  40 分钟里的 30 分钟）。切条是防止小显存爆显存的保护，不改。剪辑时每个动作切到 5 秒左右，高清会快很多。
+
 ## [0.6.1] - 2026-11-22
 
 ### Changed / 变更
