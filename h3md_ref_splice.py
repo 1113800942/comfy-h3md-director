@@ -372,9 +372,9 @@ def report(script, tl, plan, notes) -> str:
             lines.append(f"    note: {s['frames'] / FPS:.1f} s of reference - the Director splits it by VRAM")
     for e in script["items"]:
         if e["kind"] == "gap" and has_cjk(e["text"]):
-            lines.append(f"  hint: line {e['line']}: the transition is not in English - H3 follows one full English "
-                         f"sentence best (who does what, how they end). Write it so, or let an AI rewrite the "
-                         f"package (ai/edit.json, H3MD skill part 14)")
+            lines.append(f"  note: line {e['line']}: the transition is not in English - fine when an AI rewrites "
+                         f"the package (it translates it, H3MD skill part 14b); run straight in the Director, one full "
+                         f"English sentence works best (who does what, how they end)")
         if e["kind"] == "gap" and e["text"] and e["sec"] < 1.2:
             lines.append(f"  hint: line {e['line']}: {e['sec']:g} s is short for a written move (about 1.5 s per move)")
     lines += [f"  tidied: {n}" for n in script.get("notes") or []]
@@ -534,8 +534,9 @@ def subject_lines(cast: dict, links: list) -> list:
         used.update(nums)
         a = by_num.get(nums[0], {})
         s += 1
-        where = f"the person first seen on the {a.get('side', 'screen')} at {a.get('first', 0):.1f} s" if a else \
-            "a person"
+        side = a.get("side", "screen")
+        where = (f"the person first seen {'in the' if side == 'centre' else 'on the'} {side} at "
+                 f"{a.get('first', 0):.1f} s") if a else "a person"
         lines.append(f"<Subject {s}> is the person in <Picture {tag_of[p]}>: face, hair, body and outfit exactly as in "
                      f"<Picture {tag_of[p]}>. In <Video 1> <Subject {s}> takes the place of {where}.")
     # 11-23 (plan ref_splice_20261123_002): one Subject per tracked bystander gave 10 extra Subjects (referee, crowd,

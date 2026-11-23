@@ -414,9 +414,9 @@ function setupEditor(node) {
     inp.onkeydown = (e) => { e.stopPropagation(); if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); inp.blur(); } };
     box.append(lab, inp);
     if (warnCjk) {   // 11-23: H3 follows one full English sentence best
-      const w = el("div", { color: "#ff6b6b", fontSize: "12px", display: "none" },
-        "⚠ 不是英文：H3 最认英文完整句子（谁做什么、最后停在什么姿势）。可以自己写英文，或交给 AI 按包补写（包里的 ai/edit.json）。" +
-        " Not English: H3 follows one full English sentence best - write one, or let an AI rewrite the package.");
+      const w = el("div", { color: "#ffb347", fontSize: "12px", display: "none" },
+        "ℹ 写中文可以：交给 AI 按包补写时会翻译成英文。如果不经过 AI、直接拿包去导演台跑，建议写成英文完整句子（谁做什么、最后停在什么姿势）。" +
+        " Chinese is fine when an AI rewrites the package (it translates); run straight in the Director, one full English sentence works best.");
       const chk = () => { w.style.display = /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af]/.test(inp.value) ? "block" : "none"; };
       inp.addEventListener("input", chk);
       chk();

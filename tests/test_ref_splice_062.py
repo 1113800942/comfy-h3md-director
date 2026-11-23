@@ -282,7 +282,7 @@ class EndToEnd(unittest.TestCase):
         sc = S.parse_script("clip 0-2\ngap 1.5: 鼓掌\nclip 3-5")
         tl = S.build_timeline(sc, 10.0)
         rep = S.report(sc, tl, S.build_plan(sc, tl, "t", "t.mp4", False, []), [])
-        self.assertIn("not in English", rep)
+        self.assertIn("not in English - fine when an AI rewrites", rep)
 
     def test_out_target(self):
         f, n = S.out_target("H3MD_plans/my splice", "/tmp/out")
