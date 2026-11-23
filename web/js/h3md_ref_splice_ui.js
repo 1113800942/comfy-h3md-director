@@ -140,7 +140,9 @@ function setupEditor(node) {
   bar.append(
     button("+ Clip at playhead", () => addClip(), "a 2 s clip from the current frame, added at the end"),
     button("+ Transition after", () => addGap(), "a 1 s transition after the selected block"),
-    button("Run", () => app.queuePrompt?.(0, 1), "preview + plan package (first run with no clips = a draft)"));
+    button("Run", () => app.queuePrompt?.(0, 1), "preview + plan package (first run with no clips = a draft)"),
+    button("↶ Undo", () => undo(), "take back the last change (up to 50) / 撤销上一步"),
+    button("↺ Reset", () => reset(), "throw this edit away and make a fresh draft (you can still Undo) / 重置为新草稿"));
   const title = (s) => el("div", { color: "#bbb", fontSize: "11px", fontWeight: "bold" }, s);
   const keep = () => { for (const c of root.children) c.style.flexShrink = "0"; };
   root.append(bar, video, title("原片位置 · where each move is in the source — drag a block's EDGES to make it longer / shorter"),
@@ -161,6 +163,8 @@ function setupEditor(node) {
 
   function write() {
     if (!editW) return;
+    const now = editText(S.model);
+    if (now !== editW.value) { (S.undo = S.undo || []).push(editW.value); if (S.undo.length > 50) S.undo.shift(); }
     S.writing = true;
     editW.value = editText(S.model);
     editW.callback?.(editW.value);
@@ -170,6 +174,22 @@ function setupEditor(node) {
   if (editW) {
     const cb = editW.callback;
     editW.callback = function (v) { const r = cb?.apply(this, arguments); if (!S.writing) { S.model = parseEdit(v); render(); } return r; };
+  }
+
+  function undo() {
+    const prev = (S.undo || []).pop();
+    if (prev === undefined) { alertLater("H3MD: nothing to undo"); return; }
+    stopPlay();
+    S.writing = true; editW.value = prev; editW.callback?.(prev); S.writing = false;
+    S.model = parseEdit(prev); S.sel = -1; render(); node.setDirtyCanvas?.(true, true);
+  }
+  function reset() {
+    if (!confirm("Reset: throw this edit away and make a fresh draft from the video?\n重置：放弃现在的剪辑，按视频重新出一份草稿？")) return;
+    stopPlay();
+    (S.undo = S.undo || []).push(editW.value);
+    S.writing = true; editW.value = ""; editW.callback?.(""); S.writing = false;
+    S.model = parseEdit(""); S.sel = -1; render();
+    app.queuePrompt?.(0, 1);          // an empty edit + Run = a fresh draft
   }
 
   function addClip() {
