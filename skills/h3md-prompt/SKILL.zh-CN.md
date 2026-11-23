@@ -392,3 +392,44 @@ Remake 里 `<Picture N>` 是本段第 N 张关键帧,不是角色图,所以**不
 - [ ] 前奏 / 间奏 / 尾奏是单独的段，提示词里没有任何"唱"的意思；没有"no X"这类负面写法；参考图是原图，没有做过局部修图。
 - [ ] 用户要导入时：给了一个合法的计划 JSON，长度、重叠、offset 和提示词与上面各段一致。
 - [ ] 计划 zip：`manifest.json` + `plan.json` + 平铺的 `media/`，计划用到的图和歌都在里面，没有 `workflow.json`。
+
+## 14. 参考视频剪辑（Ref Splice）——只在用户使用 H3MD Ref Splice 节点时才用（0.6.2）
+
+**只有用户要通过 `H3MD Ref Splice` 节点，从一条参考视频里切出几段动作、重新排顺序时，才读这一部分；其他任何情况完全忽略这一部分。** 这里只是补充，不替换前面任何一条；前面第 1–13 节的规则对这个节点生成的镜头照样全部有效。
+
+节点做什么：用户把原视频加载进节点，粘贴你写的**剪辑脚本**。节点负责切片、拼接，写出拼好的参考视频和现成的计划（`input/H3MD_plans/<名字>_<日期>_<序号>/<...>.json`，在导演台点 *Import plan* 导入）。时间、长度、接续、标签全部由节点自己算，所以你只写脚本，不要为这个功能写计划 JSON。
+
+### 14.1 脚本（一行一条，英文，时间 = **原视频**里的秒数）
+```
+subject: <Subject 1> is the fighter in the black sleeveless top and navy wide-leg trousers.
+subject: <Subject 2> is the bearded heavyweight in black armour.
+picture: my_chars/hero.png          （可选，ComfyUI input 文件夹里的图 -> <Picture 1>、<Picture 2> ...）
+style: A realistic live-action tournament fight, real-time speed, sharp impacts, no slow motion.
+scene: A side-on medium-wide shot of a wooden fight floor in a packed indoor arena, warm spotlights.
+clip 4.0-6.0: they trade kicks
+gap 1.5: <Subject 1> drops onto one knee with one hand on the floor, then stands back up
+clip 0.0-2.0: a low kick, a front kick and a spinning back kick
+gap 1
+clip 8.0-9.75: a flying flip kick knocks <Subject 2> onto his back
+sound: A loud arena crowd, thuds of kicks on armour, a heavy crash as he hits the floor.
+music: N/A
+```
+- 片段按用户要的顺序写，同一段可以重复用；脚本以片段开头、以片段结尾；不能两个 gap 连在一起。也可以写 `1:05.5` 这种时间。
+- `subject:` 只写外貌（有图时写「`<Subject 1>` is the man in `<Picture 1>`」），不写时间。
+- 片段后面的文字简短说明这段发生什么，动作本身来自视频。
+
+### 14.2 过渡（2026-11-22 实测，六次低清）
+| 用户在两段之间想要 | 写法 |
+|---|---|
+| 只要接上 | `gap 1`，**不写字**，模型自己把两个姿势连起来 |
+| 一个简单动作（跪下、蹲下、倒地再起、后撤一步） | `gap 1.5: <这个动作>`，只写这一个 |
+| 两个动作 | 约 `gap 2.5`–`gap 3`，写这两个 |
+| 好几秒的文戏（说台词、对视） | `gap <时长>: <发生什么，台词写在 <d>…</d> 里>`，超过 2 秒节点自动拆成单独的纯文字镜头 |
+
+- 时长由用户定；上面的数字是用户没指定时实测好用的值。
+- 不要写「自然过渡」「平滑」「不要停顿」「一直在动」这类话，会和模型自己的补法打架。
+- 过渡留的时间多了会变成站着不动，少了下一招会提前；动作一般会早 0.3–0.5 秒，要告诉用户这是衔接，不是逐帧精确的编排。
+- 1–1.5 秒的过渡里不要写一串动作：24–36 帧里模型最多做一个。
+
+### 14.3 交付
+把脚本放在一个代码块里给用户，并告诉他：把原视频加载进节点（Load Video），粘贴脚本，运行，再在导演台 *Import plan* 导入节点报告里的 `.json`；先跑低清。

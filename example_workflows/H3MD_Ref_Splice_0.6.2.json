@@ -1,0 +1,123 @@
+{
+ "last_node_id": 3,
+ "last_link_id": 1,
+ "nodes": [
+  {
+   "id": 1,
+   "type": "LoadVideo",
+   "pos": [
+    20,
+    60
+   ],
+   "size": [
+    320,
+    360
+   ],
+   "flags": {},
+   "order": 0,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [
+    {
+     "name": "VIDEO",
+     "type": "VIDEO",
+     "links": [
+      1
+     ]
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "LoadVideo"
+   },
+   "widgets_values": [
+    "your_source_video.mp4",
+    "image"
+   ],
+   "title": "Source video (drag the reference video in)"
+  },
+  {
+   "id": 2,
+   "type": "H3MDRefSplice",
+   "pos": [
+    370,
+    60
+   ],
+   "size": [
+    560,
+    620
+   ],
+   "flags": {},
+   "order": 1,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "video",
+     "type": "VIDEO",
+     "link": 1
+    }
+   ],
+   "outputs": [
+    {
+     "name": "plan_path",
+     "type": "STRING",
+     "links": []
+    },
+    {
+     "name": "report",
+     "type": "STRING",
+     "links": []
+    }
+   ],
+   "properties": {
+    "Node name for S&R": "H3MDRefSplice"
+   },
+   "widgets_values": [
+    "# H3MD Ref Splice - one line per item, times in seconds of the source video\nsubject: <Subject 1> is the fighter in the black sleeveless top and navy wide-leg trousers.\nsubject: <Subject 2> is the bearded heavyweight in black armour.\nstyle: A realistic live-action tournament fight, real-time speed, sharp impacts, no slow motion.\nscene: A side-on medium-wide shot of a wooden fight floor in a packed indoor arena, warm spotlights.\nclip 4.0-6.0: they trade kicks\ngap 1.5: <Subject 1> drops onto one knee with one hand on the floor, then stands back up\nclip 0.0-2.0: a low kick, a front kick and a spinning back kick\ngap 1\nclip 8.0-9.75: a flying flip kick knocks <Subject 2> onto his back\nsound: A loud arena crowd, thuds of kicks on armour, a heavy crash as he hits the floor.\nmusic: N/A\n",
+    "ref_splice"
+   ]
+  },
+  {
+   "id": 3,
+   "type": "Note",
+   "pos": [
+    20,
+    450
+   ],
+   "size": [
+    320,
+    230
+   ],
+   "flags": {},
+   "order": 2,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "properties": {},
+   "widgets_values": [
+    "H3MD Ref Splice 0.6.2\n1. Drag the source video into Load Video.\n2. Paste the splice script (ask your AI: H3MD skill, part 14 Ref Splice).\n3. Run. The node writes input/H3MD_plans/<name>_<date>_<NNN>/ (spliced video + plan .json).\n4. In the H3MD Director click Import plan and pick that .json, then run the low-res pass first.\n\n1. 把原视频拖进 Load Video。\n2. 粘贴剪辑脚本（让 AI 按 H3MD 技能第 14 节写）。\n3. 运行，节点写出 input/H3MD_plans/<名字>_<日期>_<序号>/（拼好的视频 + 计划 .json）。\n4. 在导演台点 Import plan 选这个 .json，先跑低清。"
+   ]
+  }
+ ],
+ "links": [
+  [
+   1,
+   1,
+   0,
+   2,
+   0,
+   "VIDEO"
+  ]
+ ],
+ "groups": [],
+ "config": {},
+ "extra": {
+  "ds": {
+   "scale": 0.8,
+   "offset": [
+    40,
+    40
+   ]
+  }
+ },
+ "version": 0.4
+}

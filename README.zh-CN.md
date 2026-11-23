@@ -169,6 +169,24 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
   对不上的那一段接着上一段带过来的 39 帧继续,所以计划和显卡无关。16G 以下不支持。全是特写的一段里本来就做不了
   关键帧,如果某一段必须从那里开始,导演台会在运行说明里写出是第几秒。
 
+## 参考视频剪辑（Ref Splice，0.6.2）：从一条参考视频里取几段动作
+
+一条参考视频里常常有好几个动作，你想换个顺序用，中间加一个短衔接或一段文戏。**H3MD Ref Splice** 节点替你剪：把原视频加载进去，粘贴一段短脚本（让 AI 按 H3MD 技能第 14 节写），运行。它会在 `input/H3MD_plans/<名字>_<日期>_<序号>/` 写出拼好的参考视频和现成的计划；在导演台点 **Import plan** 导入，照常运行。导演台本身不变。
+
+```
+clip 4.0-6.0: they trade kicks
+gap 1.5: he drops onto one knee, then stands back up
+clip 0.0-2.0: a low kick and a spinning back kick
+gap 1
+clip 8.0-9.75: a flying flip kick
+```
+
+- 片段顺序随意，同一段可以重复用；只占一个视频输入。
+- `gap 1` 不写字：模型自己把两个姿势连起来。一个简单动作大约要 1.5 秒。超过 2 秒的过渡（文戏）自动拆成单独的纯文字镜头。
+- 过渡用很短的淡化占位连接（实测：用静止的停帧，模型会跟着站着不动）。
+- 动作可能早 0.3–0.5 秒；这是衔接，不是逐帧精确的编排。
+- 示例工作流：`example_workflows/H3MD_Ref_Splice_0.6.2.json`。
+
 ## 反馈问题
 
 在导演台点 **Report 诊断报告**（在 Export plan 旁边），把 `output/H3MD_reports/` 里的 zip 附到 [GitHub issue](../../issues)。
