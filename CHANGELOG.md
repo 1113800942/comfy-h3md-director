@@ -2,52 +2,61 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
-## [0.6.2] - 2026-11-22
+## [0.6.2] - 2026-11-23
 
 ### Added / 新增
 - **H3MD Ref Splice** node (`h3md_ref_splice.py`, `web/js/h3md_ref_splice_ui.js`, example workflow
-  `H3MD_Ref_Splice_0.6.2.json`): a small video editor in front of the Director. Asked for on GitHub
-  (`<Video 1, time=a to b>`): cut several moves out of ONE reference video, use them in any order (repeats allowed)
-  with short transitions, played by your own characters - or just edit the video. On the node: a player (source /
-  spliced result / "Play edit" in the edit's order without a run), a source track (only a move's edges drag: its
-  start / end), a play-order track (drag to reorder, duplicate, add transitions, click to edit), the cast panel of the keyframe Prepare node (drag a line from a picture to the person it replaces;
-  default picture 1 = first to appear) and a text box with the same edit (an AI can write it). First run with no
-  clips = a draft cut where the motion pauses (exported at once). A `video` output carries the spliced video (connect
-  Save Video to keep a pure edit without H3); without pictures the plan keeps the video's people. Each run writes a
-  preview and a plan package
-  `output/H3MD_plans/<name>_<date>_<NNN>.zip` (spliced video + pictures + plan; never overwritten) for the Director,
-  which is unchanged. Transitions up to 2 s stay in the shot as 4 still frames + a cross-dissolve + 4 still frames
-  (six low-res runs on 2026-11-22: two still halves made the model stand still); a longer one becomes its own
-  text-only shot carried by 39 frames on both sides. Prompts (six fields, times filled in, who is who from the cast
-  links) are built by the node; the plan is checked with the Director's own parser; the source sound is a soft
-  reference; globalPrompt stays empty so the workflow's trigger words are kept.
-  新增 **H3MD Ref Splice** 节点：导演台前面的小剪辑器（来自 GitHub 用户的需求）。从一条参考视频里剪出几个动作，任意顺序（可重复）加短过渡，
-  用自己的角色来演。节点上有播放器（原片 / 拼好的结果）、原视频轨（拖色块边缘定起止）、剪辑轨（拖动排序、复制、加过渡、点击修改）、
-  关键帧那一步的人物拖线面板（从图拖线到人，默认图 1 = 第一个出场的人），以及同步的文字框（AI 也可以写）。第一次空着运行 = 按动作停顿自动出草稿。
-  每次运行出预览和计划包 `output/H3MD_plans/<名字>_<日期>_<序号>.zip`（拼好的视频 + 角色图 + 计划，不覆盖），导演台不改。≤ 2 秒的过渡用
-  「首尾各停 4 帧 + 中间淡化」（11-22 六次低清实测），更长的自动拆成单独的纯文字镜头。提示词由节点按时间和人物对应写好；原声作软参考；
-  globalPrompt 留空，保留工作流原有的触发词。
-- H3MD skill part 14 "Ref Splice" (EN + 中文): read only when this node is used — mostly a pointer to the node's
-  editor, plus the edit text format and the measured transition rules for an AI asked to write the edit. Parts 1–13
-  are unchanged. 技能新增第 14 节，只在用这个节点时读；前 13 节不变。
-- The keyframe UI's cast panel (`buildCast`) is exported so the new node reuses it; its behaviour is unchanged.
-  关键帧界面的人物面板改为导出供新节点复用，行为不变。
+  `H3MD_Ref_Splice_0.6.2.json`): a small video editor in front of the Director, asked for on GitHub
+  (`<Video 1, time=a to b>`). Cut several moves out of ONE reference video, use them in any order (repeats allowed)
+  with transitions between them, played by your own characters - or just keep the edit as a video. On the node:
+  a player that plays the edit at once (no run needed), a source track (drag the striped ends of a move to change
+  where it starts / ends; the yellow playhead shows any frame and is where "Split" cuts), an edit track (drag to
+  reorder, duplicate, merge, split, add / delete transitions, Undo, Reset), a highlighted box for what happens in a
+  transition, and the keyframe step's cast panel (drag a line from a picture to the person it replaces). A move has
+  no text: it plays exactly as in the source. Each run writes a preview and a plan package
+  `output/H3MD_plans/<name>_<date>_<NNN>.zip` (never overwritten; its path shows in the **Plan package** box) for the
+  Director, and a `video` output for Save Video (a pure edit without H3). Without pictures the original people stay.
+- **Transitions** (measured 2026-11-22/23): an empty transition is a short dissolve inside the shot and the model
+  links the two poses itself; a transition **with words** becomes its own short shot **without the reference
+  video**, carried by 39 frames on both sides (inside the reference the model copied the placeholder - a double
+  exposure or a frozen pose - and ignored the words; on its own it did the clap, the crouch and the shout, also with
+  swapped characters). Its length is the nearest 5+17n. Stills, not a dissolve, sit before carried frames.
+- **AI step**: every package also carries `ai/edit.json` (the moves, each transition's length and intent, the
+  segment table, who replaces whom) and `ai/stills/` (the frames around each transition, each replaced person), so the
+  user's AI can rewrite the prompts from what is really on screen (H3MD skill part 14b) and save a new package. The
+  Director's import skips `ai/` quietly. A transition not written in English gets a red hint on the node and in the
+  report.
+- **Director**: the Remake Swap checkbox is no longer shown - the Control Panel style 多人互换 is the one switch.
+- Skill part 14 / 14b (EN + 中文): read only when this node is used.
+  新增 **H3MD Ref Splice** 节点（导演台前的小剪辑器，来自 GitHub 用户的需求）：从一条参考视频里剪出几个动作，任意排序（可重复）、中间加过渡，用自己的角色来演，
+  或者只存成剪辑好的视频。节点上：播放器直接播放剪辑结果（不用运行）；上轨拖色块两头的条纹改起止，黄线是播放头；下轨排序、复制、合并、切开、加/删过渡、撤销、重置；
+  过渡有醒目的文字框；关键帧那一步的连线面板（从图拖线到要换的人）。动作块没有文字，完全照原片。每次运行出预览和计划包（不覆盖，路径显示在 Plan package 框里），
+  `video` 输出接 Save Video 就是纯剪辑成品；不接角色图则保留原片人物。
+  **过渡**：空着 = 镜头里一段短淡化，模型自己衔接；**写了字**的过渡单独成一个**不带参考视频**的小镜头，前后各 39 帧续接（放在参考视频里时模型照抄占位画面、不理文字；
+  单独生成后鼓掌、蹲下、大喊都做出来了，换人后也一样），长度取最近的 5+17n。
+  **AI 补写**：包里另带 `ai/edit.json`（剪了哪几段、每个过渡的秒数和意图、各段时间表、谁换谁）和 `ai/stills/`（过渡前后画面、被换的人），用户的 AI 按 skill 14b 看图重写提示词、
+  另存新包；导演台导入时自动跳过 `ai/`。过渡不是英文时节点和报告会提示。
+  **导演台**：不再显示「Remake Swap 换人模块」开关，多人换人只从总控台「多人互换」进入。
 
 ### Fixed / 修复
-- **Auto-split now splits the prompt too** (`h3md_autosplit.py`, found with plan ref_splice_007 at 1920x1088). A shot
+- **Auto-split now splits the prompt too** (`h3md_autosplit.py`, found with a Ref Splice plan at 1920x1088). A shot
   over the VRAM budget is cut into parts; the reference video, audio and keyframes were moved to each part, but every
   part got the WHOLE shot's prompt, so a time mark (`[12s] ...`, `At 00:12.7 ...`) was read from the part's own start
   (6.4 s late in part 2 of that plan) and actions past the part's end were lost. Now each part gets only the actions
   of its own new frames, timed from its start (`At about 5.3 s into this part, ...`, the window-mode resolver), "No new
   action ..." when it has none, and a summary length that matches the part; cut points avoid the first 1.5 s of a
   timed action when the GPU allows. Untimed prompts are unchanged. Times written in words ("from 3.4 to 4.9
-  seconds") cannot be moved: the Director now warns about them (auto-split and window mode) - write `[12s]` or
-  `At 00:12.0`. Local logs: 21 of 48 Director runs in the last two weeks were auto-split; most were swap / motion-copy
-  runs whose motion comes from the reference video, which is why the wrong text times went unnoticed.
-  **自动拆段现在连提示词一起拆**：以前超显存的镜头切成几段时，参考视频、音频、关键帧都平移了，但每段拿到的是整段提示词，
-  `[12s]`、`At 00:12.7` 这类时间被当成从这一段开头算（那个计划的第 2 段晚了 6.4 秒），超出这一段的动作直接丢了。现在每段只拿自己新画面里的动作，
-  时间从这一段开头算，没有动作时写“没有新动作”，summary 的时长也改成这一段的；显存允许时切点避开动作开始后的 1.5 秒。没有时间标记的提示词不变。
-  用文字写的时间（"from 3.4 to 4.9 seconds"）没法平移，导演台会提示改成 `[12s]` 或 `At 00:12.0`。
+  seconds") cannot be moved: the Director now warns about them (auto-split and window mode). Local logs: 21 of 48
+  runs in two weeks were auto-split; most were swap / motion-copy runs whose motion comes from the reference video,
+  which is why the wrong text times went unnoticed. The RunningHub pack gets the same fix as **0.5.5-rh3**.
+  **自动拆段现在连提示词一起拆**：以前每段拿整段提示词，后面段的时间错位、超出的动作丢失；现在每段只拿自己新画面里的动作，时间从本段开头算，summary 时长改成本段，
+  切点避开动作开始后的 1.5 秒。没写时间的提示词不变；用文字写的时间会提示改成 `[12s]` 或 `At 00:12.0`。RunningHub 包同步修复为 0.5.5-rh3。
+
+### Known limits / 已知限制
+- Ref Splice swaps people with the plain reference swap (pictures + reference video): in a wild move with the face
+  hidden (low on the floor) the original person can come back for about a second, the same place with another seed.
+  Cut that move shorter, or use the multi-person swap (Remake). A half-body picture shows no trousers or shoes - say
+  what they are. 普通参考换人在贴地、脸看不见的大动作里，原人可能回来约 1 秒，换种子同一位置；可剪短该动作或改用多人换人。半身照要写明裤子和鞋。
 
 ## [0.6.1] - 2026-11-22
 

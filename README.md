@@ -248,14 +248,18 @@ One reference clip often holds several moves you want in a different order, play
 2. **Run once**: a draft edit appears (the video cut where the motion pauses) and, with pictures, the cast panel
    (the people of the video; drag a line from a picture to the person it replaces — default: picture 1 = first
    person to appear).
-3. **Edit on the node**: the upper track ("where in the source") only lets you drag a block's edges — where a move
-   starts / ends; the player jumps to that frame. The lower track ("play order") is for the order: drag to reorder,
-   duplicate a move, add transitions; where two moves touch, dragging their shared edge moves the cut between them, and a move can be split at the playhead or merged with the next. The nodes player shows only the edit: **▶ Play the edit** plays it straight away, without a run (watch the original on the Load Video node).
+3. **Edit on the node**: the upper track ("where in the source") only lets you drag the striped ends of a block -
+   where a move starts / ends; the yellow line is the playhead (drag it to see any frame; "Split" cuts there). The lower track ("play order") is for the order: drag to reorder,
+   duplicate a move, add transitions; where two moves touch, dragging their shared edge moves the cut between them, and a move can be split at the playhead or merged with the next; Undo / Reset are at the top. Click a transition
+   to write what happens in it (the orange box). The nodes player shows only the edit: **▶ Play the edit** plays it straight away, without a run (watch the original on the Load Video node).
 4. **Run**: the spliced preview plays on the node, a plan package `output/H3MD_plans/ref_splice_<date>_<NNN>.zip`
    is written (never overwritten; its full path shows in the **Plan package** box next to the node, ready to copy), and the `video` output carries the spliced video — connect **Save Video** to keep
    the edit as a finished file without H3. Not right? Change it and run again.
-5. Drag the package into the **H3MD Director** (or Import plan) and run as usual. Without pictures the plan keeps the
-   people of the video; what a transition does is up to you. The Director itself is unchanged.
+5. **Better prompts (recommended)**: the node cannot see the picture, so its prompts are plain. Hand the package to
+   your AI with the H3MD skill (part 14b): it reads `ai/edit.json` and the stills in the package, asks about anything
+   the pictures do not show (trousers, shoes), rewrites every prompt and returns `<name>_ai_<date>_<NNN>.zip`.
+6. Drag the package into the **H3MD Director** (or Import plan) and run the low-res preview first. Without pictures
+   the plan keeps the people of the video; what a transition does is up to you.
 
 Transitions (measured): no words = the model links the two poses itself (about 1 s). A transition **with words**
 is generated as its own short shot WITHOUT the reference video, carried by 39 frames on both sides - inside the
