@@ -1,12 +1,11 @@
 // H3MD 0.6.2 - "H3MD Ref Splice" (H3MDRefSplice, h3md_ref_splice.py): a small video editor on the node.
-//  * player: the source video (from the connected Load Video node, before any run) or, after a run, the spliced
-//    preview ("Source" / "Result");
+//  * player (v4, user 21:58): shows the EDIT only - its one play button (under the tracks) plays the moves in the
+//    edit's order straight from the source, no run needed; the original video is watched on the Load Video node;
 //  * source track ("where in the source"): every move is a block over the source time - ONLY its left / right edge
 //    can be dragged (longer / shorter), the player jumps to that frame; the block never moves (0.6.2 v3: moving it
 //    there as well as on the edit track mixed the two up);
 //  * edit track: the clips and transitions in their order - drag a block left / right to reorder; click one to edit
 //    it below (times, words, duplicate, delete, add a transition after it);
-//  * "Play edit": plays the source in the edit's order right away (no run), stopping for each transition;
 //  * the 'edit' text box is the same edit as text (kept in step both ways; an AI can write it);
 //  * after a run: the cast panel of the keyframe Prepare node (drag a line from a picture to a person) and the report.
 import { app } from "../../scripts/app.js";
@@ -49,16 +48,16 @@ export function editText(model) {
   return out.join("\n") + (out.length ? "\n" : "");
 }
 
-// the clip number (colour) of each clip item: same source range = same colour
-function clipKeys(items) {
-  const keys = [], seen = [];
+// the move number (and colour) of each clip item = its place in the SOURCE (Move 1 = earliest part of the video);
+// the same source range is the same move wherever it sits in the edit, so reordering never changes it
+export function clipKeys(items) {
+  const uniq = [];
   for (const it of items) {
-    if (it.kind !== "clip") { keys.push(null); continue; }
-    let k = seen.findIndex((s) => Math.abs(s.a - it.a) < 1e-3 && Math.abs(s.b - it.b) < 1e-3);
-    if (k < 0) { seen.push({ a: it.a, b: it.b }); k = seen.length - 1; }
-    keys.push(k);
+    if (it.kind === "clip" && !uniq.some((s) => Math.abs(s.a - it.a) < 1e-3 && Math.abs(s.b - it.b) < 1e-3)) uniq.push({ a: it.a, b: it.b });
   }
-  return keys;
+  uniq.sort((x, y) => x.a - y.a || x.b - y.b);
+  return items.map((it) => (it.kind !== "clip" ? null
+    : uniq.findIndex((s) => Math.abs(s.a - it.a) < 1e-3 && Math.abs(s.b - it.b) < 1e-3)));
 }
 
 function sourceUrl(node) {
@@ -100,7 +99,8 @@ function setupEditor(node) {
     color: "#ddd", background: "#161616", padding: "6px", borderRadius: "6px", height: "100%", boxSizing: "border-box" });
   const bar = el("div", { display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" });
   const video = el("video", { width: "100%", height: "220px", background: "#000", objectFit: "contain", borderRadius: "4px" });
-  video.controls = true; video.preload = "auto"; video.muted = false;
+  video.controls = false; video.preload = "auto"; video.muted = false; video.style.cursor = "pointer";
+  video.title = "click: play / pause the edit";
   const timeLab = el("span", { color: "#aaa", minWidth: "90px" }, "0.00 s");
   const help = el("div", { color: "#999", fontSize: "11px" },
     "Upper track: only the edges move (where a move starts / ends). Lower track: the order - drag, duplicate, add " +
@@ -112,29 +112,28 @@ function setupEditor(node) {
   const trackB = el("div", { position: "relative", height: "44px", background: "#222", borderRadius: "4px", overflowX: "auto",
     display: "flex", gap: "3px", padding: "3px", boxSizing: "border-box" });
   const insp = el("div", { display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap", minHeight: "28px" });
-  const srcBtn = button("Source", () => { stopPlay(); show("source"); }, "the original video");
-  const playBtn = button("▶ Play edit", () => (S.playing ? stopPlay() : playEdit()),
-    "play the source in the edit's order now, without running (transitions: a pause) / 不运行，按剪辑顺序直接预览");
-  const resBtn = button("Result", () => { stopPlay(); show("result"); }, "the spliced preview of the last run");
-  bar.append(srcBtn, resBtn, timeLab,
-    playBtn,
+  const playBtn = button("▶ Play the edit", () => (S.playing ? stopPlay() : playEdit()),
+    "plays the moves in the edit's order now, without running; a transition shows as a pause. To watch the original, "
+    + "use the Load Video node. / 按剪辑顺序直接播放（不用运行），过渡处停顿。看原片请用 Load Video 节点。");
+  playBtn.style.fontSize = "13px"; playBtn.style.padding = "3px 14px";
+  video.onclick = (e) => { e.stopPropagation(); S.playing ? stopPlay() : playEdit(); };
+  const controls = el("div", { display: "flex", gap: "8px", alignItems: "center" });
+  controls.append(playBtn, timeLab);
+  bar.append(
     button("+ Clip at playhead", () => addClip(), "a 2 s clip from the current frame, added at the end"),
     button("+ Transition after", () => addGap(), "a 1 s transition after the selected block"),
     button("Run", () => app.queuePrompt?.(0, 1), "preview + plan package (first run with no clips = a draft)"));
   const title = (s) => el("div", { color: "#bbb", fontSize: "11px", fontWeight: "bold" }, s);
   root.append(bar, video, title("原片位置 · where each move is in the source — drag a block's EDGES to make it longer / shorter"),
-    trackA, title("播放顺序 · the order they play in — drag blocks to reorder, click one to change it"), trackB, insp, help);
+    trackA, title("播放顺序 · the order they play in — drag blocks to reorder, click one to change it"), trackB, controls, insp, help);
   const w = node.addDOMWidget("h3md_splice_editor", "editor", root, { serialize: false, hideOnZoom: false,
     getMinHeight: () => 520, getMaxHeight: () => 520 });
   w.__h3mdSplice = true;
 
-  function show(mode) {
-    S.mode = mode;
-    const url = mode === "result" ? S.resultUrl : (S.srcUrl = sourceUrl(node));
+  function show() {          // the player always reads the source; what it plays is the edit
+    S.mode = "source";
+    const url = (S.srcUrl = sourceUrl(node));
     if (url && video.dataset.url !== url) { video.dataset.url = url; video.src = url; }
-    srcBtn.style.borderColor = mode === "source" ? "#ff8c00" : "#555";
-    resBtn.style.borderColor = mode === "result" ? "#ff8c00" : "#555";
-    resBtn.disabled = !S.resultUrl;
     render();
   }
   video.addEventListener("loadedmetadata", () => { if (S.mode === "source" && isFinite(video.duration)) { S.dur = video.duration; render(); } });
@@ -169,12 +168,12 @@ function setupEditor(node) {
 
   // play the edit straight from the source (no run): clips in order, a pause for each transition
   const sleep = (ms) => new Promise((res) => setTimeout(res, ms));
-  function stopPlay() { S.playing = false; video.pause(); playBtn.textContent = "▶ Play edit"; }
+  function stopPlay() { S.playing = false; video.pause(); playBtn.textContent = "▶ Play the edit"; }
   async function playEdit() {
     const items = S.model.items;
     if (!items.length) return;
-    show("source");
-    S.playing = true; playBtn.textContent = "■ Stop";
+    show();
+    S.playing = true; playBtn.textContent = "⏸ Stop";
     const keys = clipKeys(items);
     for (let i = 0; i < items.length && S.playing; i++) {
       const it = items[i];
@@ -218,7 +217,8 @@ function setupEditor(node) {
         border: S.sel === i ? "2px solid #fff" : "1px solid #000", boxSizing: "border-box", borderRadius: "3px", cursor: "pointer",
         fontSize: "11px", color: "#000", overflow: "hidden", whiteSpace: "nowrap", padding: "0 9px", touchAction: "none" },
         `Move ${keys[i] + 1} · ${fmt(it.a)}-${fmt(it.b)}s`);
-      b.title = `move ${keys[i] + 1}: ${fmt(it.a)}-${fmt(it.b)} s of the source - drag the left / right edge`;
+      b.title = `move ${keys[i] + 1}: ${fmt(it.a)}-${fmt(it.b)} s of the source - drag the left / right edge (an edge shared with the next move moves both)`;
+      b.__item = it;
       b.onpointerdown = (e) => { e.stopPropagation(); S.sel = i; if (S.mode === "source") video.currentTime = it.a; render(); };
       for (const side of ["a", "b"]) {
         const h = el("div", { position: "absolute", top: 0, bottom: 0, width: "8px", [side === "a" ? "left" : "right"]: 0,
@@ -247,7 +247,6 @@ function setupEditor(node) {
       trackB.append(blk);
     });
     inspector();
-    resBtn.disabled = !S.resultUrl;
   }
 
   function dragA(e, i, b, h, mode) {
@@ -256,6 +255,11 @@ function setupEditor(node) {
     const a0 = it.a, b0 = it.b, x0 = e.clientX, dur = S.dur;
     S.sel = i;
     const same = S.model.items.filter((x) => x.kind === "clip" && Math.abs(x.a - a0) < 1e-3 && Math.abs(x.b - b0) < 1e-3);
+    // the neighbour that touches this edge in the source (its other edge stays): one cut point between two moves
+    const touch = 1.5 / FPS, edgeT = mode === "a" ? a0 : b0;
+    const nb = S.model.items.filter((x) => x.kind === "clip" && !same.includes(x)
+      && Math.abs((mode === "a" ? x.b : x.a) - edgeT) < touch);
+    const nbOther = nb.length ? (mode === "a" ? nb[0].a : nb[0].b) : null;
     b = h;   // the handle captures the pointer; the block is its parent
     const blk = h.parentNode;
     try { b.setPointerCapture(e.pointerId); } catch { /* ignore */ }
@@ -263,9 +267,20 @@ function setupEditor(node) {
       ev.stopPropagation();
       const dt = ((ev.clientX - x0) / r.width) * dur;
       const min = 5 / FPS;
-      if (mode === "a") { const v = snap(Math.max(0, Math.min(b0 - min, a0 + dt))); for (const x of same) x.a = v; video.currentTime = v; }
-      else { const v = snap(Math.min(dur, Math.max(a0 + min, b0 + dt))); for (const x of same) x.b = v; video.currentTime = Math.max(0, v - 1 / FPS); }
+      if (mode === "a") {
+        const lo = nbOther !== null ? nbOther + min : 0;
+        const v = snap(Math.max(lo, Math.min(b0 - min, a0 + dt)));
+        for (const x of same) x.a = v; for (const x of nb) x.b = v; video.currentTime = v;
+      } else {
+        const hi = nbOther !== null ? nbOther - min : dur;
+        const v = snap(Math.min(hi, Math.max(a0 + min, b0 + dt)));
+        for (const x of same) x.b = v; for (const x of nb) x.a = v; video.currentTime = Math.max(0, v - 1 / FPS);
+      }
       blk.style.left = `${(it.a / dur) * 100}%`; blk.style.width = `${Math.max(0.5, ((it.b - it.a) / dur) * 100)}%`;
+      if (nb.length) for (const c of trackA.children) {
+        const x = c.__item;
+        if (x && nb.includes(x)) { c.style.left = `${(x.a / dur) * 100}%`; c.style.width = `${Math.max(0.5, ((x.b - x.a) / dur) * 100)}%`; }
+      }
       timeLab.textContent = `${fmt(it.a)}-${fmt(it.b)} s`;
     };
     const up = (ev) => {
@@ -317,15 +332,45 @@ function setupEditor(node) {
     inp.onkeydown = (e) => e.stopPropagation();
     return inp;
   }
+  // split one move into two touching moves at the player's frame (every copy of it in the edit)
+  function splitMove(it) {
+    const t = snap(video.currentTime || 0), min = 5 / FPS;
+    if (!(t > it.a + min && t < it.b - min)) { alertLater("H3MD: put the playhead inside this move first (click the upper track or drag an edge), at least 5 frames from its ends"); return; }
+    const a0 = it.a, b0 = it.b;
+    const out = [];
+    for (const x of S.model.items) {
+      if (x.kind === "clip" && Math.abs(x.a - a0) < 1e-3 && Math.abs(x.b - b0) < 1e-3) {
+        out.push({ kind: "clip", a: a0, b: t, text: x.text }, { kind: "clip", a: t, b: b0, text: "" });
+      } else out.push(x);
+    }
+    S.model.items = out; S.sel = -1; write(); render();
+  }
+  // merge a move with the move that starts where it ends in the source: the merged move takes this one's places in
+  // the edit, the next one's places are removed (and transitions left at an end / doubled are dropped)
+  function mergeMove(it) {
+    const a0 = it.a, b0 = it.b;
+    const nxt = S.model.items.find((x) => x.kind === "clip" && Math.abs(x.a - b0) < 1.5 / FPS && !(Math.abs(x.a - a0) < 1e-3));
+    if (!nxt) { alertLater("H3MD: no move starts where this one ends in the source - drag its right edge instead"); return; }
+    const na = nxt.a, nbb = nxt.b;
+    const isThis = (x) => x.kind === "clip" && Math.abs(x.a - a0) < 1e-3 && Math.abs(x.b - b0) < 1e-3;
+    const isNext = (x) => x.kind === "clip" && Math.abs(x.a - na) < 1e-3 && Math.abs(x.b - nbb) < 1e-3;
+    let its = S.model.items.filter((x) => !isNext(x)).map((x) => (isThis(x) ? { ...x, b: nbb } : x));
+    its = tidy(its);
+    S.model.items = its; S.sel = -1; write(); render();
+  }
+  function tidy(its) {       // no transition at either end, never two in a row
+    for (let j = its.length - 1; j >= 0; j--) if (its[j].kind === "gap" && (j === 0 || j === its.length - 1 || its[j - 1].kind === "gap")) its.splice(j, 1);
+    return its;
+  }
+  function alertLater(msg) { console.warn(msg); try { app.extensionManager?.toast?.add?.({ severity: "warn", summary: msg, life: 5000 }); } catch { /* ignore */ } }
+
   function inspector() {
     insp.innerHTML = "";
     const i = S.sel, it = S.model.items[i];
     if (!it) { insp.append(el("span", { color: "#888" }, "click a block on the edit track to change it")); return; }
     const del = button("Delete", () => {
       S.model.items.splice(i, 1);
-      // never two transitions in a row, never a transition at either end
-      const its = S.model.items;
-      for (let j = its.length - 1; j >= 0; j--) if (its[j].kind === "gap" && (j === 0 || j === its.length - 1 || its[j - 1].kind === "gap")) its.splice(j, 1);
+      tidy(S.model.items);
       S.sel = -1; write(); render();
     });
     if (it.kind === "clip") {
@@ -333,6 +378,8 @@ function setupEditor(node) {
       insp.append(el("b", {}, `Clip`), ...num("from", it.a, 0.05, (v) => { it.a = snap(Math.max(0, Math.min(v, it.b - 5 / FPS))); }),
         ...num("to", it.b, 0.05, (v) => { it.b = snap(Math.min(d, Math.max(v, it.a + 5 / FPS))); }),
         txt(it.text, "what happens (optional, short)", (v) => { it.text = v; }),
+        button("Split at playhead", () => splitMove(it), "cut this move in two at the frame shown in the player (move the playhead with the edges or by clicking the upper track) / 在播放器当前画面处切成两段"),
+        button("Merge with next move", () => mergeMove(it), "join this move with the move that follows it in the source / 和原片里紧接着的下一段合并"),
         button("Duplicate", () => { S.model.items.splice(i + 1, 0, { kind: "gap", sec: 1, text: "" }, { ...it }); S.sel = i + 2; write(); render(); }, "use this move again (after a 1 s transition)"),
         button("+ Transition after", () => addGap()), del);
     } else {
@@ -343,7 +390,7 @@ function setupEditor(node) {
 
   node.__rsShow = show;
   node.__rsRender = () => { S.model = parseEdit(wget(node, "edit")?.value); render(); };
-  setTimeout(() => show("source"), 0);
+  setTimeout(() => show(), 0);
   return S;
 }
 
@@ -378,13 +425,13 @@ app.registerExtension({
     const onConfigure = nodeType.prototype.onConfigure;
     nodeType.prototype.onConfigure = function () {
       const r = onConfigure?.apply(this, arguments);
-      try { setTimeout(() => { this.__rsRender?.(); this.__rsShow?.("source"); }, 50); } catch (e) { console.error("[H3MD] ref splice UI", e); }
+      try { setTimeout(() => { this.__rsRender?.(); this.__rsShow?.(); }, 50); } catch (e) { console.error("[H3MD] ref splice UI", e); }
       return r;
     };
     const onConn = nodeType.prototype.onConnectionsChange;
     nodeType.prototype.onConnectionsChange = function () {
       const r = onConn?.apply(this, arguments);
-      try { setTimeout(() => this.__rsShow?.("source"), 50); } catch { /* ignore */ }
+      try { setTimeout(() => this.__rsShow?.(), 50); } catch { /* ignore */ }
       return r;
     };
     const onExecuted = nodeType.prototype.onExecuted;
@@ -403,11 +450,7 @@ app.registerExtension({
           editW.value = info.draft; editW.callback?.(editW.value);
           S.model = parseEdit(info.draft);
         }
-        if (info?.preview) {
-          const p = info.preview;
-          S.resultUrl = api.apiURL(`/view?filename=${encodeURIComponent(p.filename)}&type=${p.type}&subfolder=${encodeURIComponent(p.subfolder || "")}&t=${Date.now()}`);
-          this.__rsShow?.("result");
-        } else this.__rsShow?.(S.mode);
+        this.__rsShow?.();
         const c = first(message?.h3md_cast);
         if (c) { this.__h3mdCast = typeof c === "string" ? JSON.parse(c) : c; buildCast(this); }
       } catch (e) { console.error("[H3MD] ref splice UI", e); }

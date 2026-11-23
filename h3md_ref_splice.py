@@ -575,35 +575,54 @@ KEEP_PEOPLE = ("<Subject 1> is the people seen in <Video 1>: the same faces, hai
 
 
 # ------------------------------------------------------------------------------------------------ draft
-def draft_script(path: str, duration: float, min_len=1.5, max_clips=8) -> str:
-    """first run with an empty edit: cut the video where the motion is lowest (between moves), keep the original
-    order, a 1 s transition between clips - a template to change on the timeline"""
+def draft_script(path: str, duration: float, min_len=1.5, max_clips=8, cuts=None) -> str:
+    """first run with an empty edit: a template to change on the tracks.  Split points, best first: the video's own
+    camera cuts, then the longest quiet stretches (0.54 s average of the frame difference - a pause between moves;
+    a brief quiet frame, e.g. the top of a jump, does not win), never in the first second after a camera cut (a
+    jump filmed from a new angle).  Original order, a 1 s transition between clips."""
     try:
         from . import h3md_autosplit as AS
     except ImportError:
         import h3md_autosplit as AS
+    if cuts is None:
+        try:
+            try:
+                from . import h3md_keyframe_nodes as KN
+            except ImportError:
+                import h3md_keyframe_nodes as KN
+            cuts = KN.detect_cuts(path)
+        except Exception:
+            cuts = []
+    end = math.floor(duration * FPS) / FPS
+    splits = []
+    for c in sorted(float(x) for x in cuts or ()):
+        if min_len <= c <= end - min_len and all(abs(c - s) >= min_len for s in splits):
+            splits.append(snap_t(c))
     prof = AS.motion_profile(path, 0.0, duration) or []
     n = len(prof)
-    cuts = []
-    if n > 10:
-        m = np.convolve(np.asarray([v or 0.0 for v in prof], np.float32), np.ones(7) / 7.0, mode="same")
-        cand = sorted(range(3, n - 3), key=lambda i: m[i])
-        for i in cand:
-            t = i / FPS
-            if t < min_len or duration - t < min_len or any(abs(t - c) < min_len for c in cuts):
+    if n > 20 and len(splits) < max_clips - 1:
+        m = np.convolve(np.asarray([v or 0.0 for v in prof], np.float32), np.ones(13) / 13.0, mode="same")
+        med = float(np.median(m))
+        for i in sorted(range(7, n - 7), key=lambda i: m[i]):
+            if m[i] > med or len(splits) >= max_clips - 1:
+                break
+            tt = i / FPS
+            if tt < min_len or end - tt < min_len or any(abs(tt - s) < min_len for s in splits):
                 continue
-            if m[i] > float(np.median(m)):
-                break
-            cuts.append(t)
-            if len(cuts) >= max_clips - 1:
-                break
-    edges = [0.0] + sorted(cuts) + [math.floor(duration * FPS) / FPS]
-    lines = ["# draft: the video cut where the motion pauses; change it on the timeline, then Run"]
+            if any(0 <= tt - c < 1.0 for c in cuts or ()):
+                continue
+            splits.append(snap_t(tt))
+    edges = [0.0] + sorted(splits) + [end]
+    lines = ["# draft: cut at camera cuts / pauses; fix it on the tracks (drag the edge between two moves, split, merge)"]
     for k, (a, b) in enumerate(zip(edges, edges[1:])):
         if k:
             lines.append("gap 1")
         lines.append(f"clip {a:.2f}-{b:.2f}")
     return "\n".join(lines) + "\n"
+
+
+def snap_t(t: float) -> float:
+    return round(round(float(t) * FPS) / FPS, 4)
 
 
 def edit_to_text(script: dict) -> str:
