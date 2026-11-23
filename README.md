@@ -248,11 +248,14 @@ One reference clip often holds several moves you want in a different order, play
 2. **Run once**: a draft edit appears (the video cut where the motion pauses) and, with pictures, the cast panel
    (the people of the video; drag a line from a picture to the person it replaces — default: picture 1 = first
    person to appear).
-3. **Edit on the node**: on the source track drag a block's edges to set where a move starts / ends (the player jumps
-   to that frame); on the edit track drag blocks to reorder, duplicate a move, add transitions.
-4. **Run**: the spliced preview plays on the node and a plan package `output/H3MD_plans/ref_splice_<date>_<NNN>.zip`
-   is written (never overwritten). Not right? Change it and run again.
-5. Drag the package into the **H3MD Director** (or Import plan) and run as usual. The Director itself is unchanged.
+3. **Edit on the node**: the upper track ("where in the source") only lets you drag a block's edges — where a move
+   starts / ends; the player jumps to that frame. The lower track ("play order") is for the order: drag to reorder,
+   duplicate a move, add transitions. **▶ Play edit** plays the edit straight away, without a run.
+4. **Run**: the spliced preview plays on the node, a plan package `output/H3MD_plans/ref_splice_<date>_<NNN>.zip`
+   is written (never overwritten), and the `video` output carries the spliced video — connect **Save Video** to keep
+   the edit as a finished file without H3. Not right? Change it and run again.
+5. Drag the package into the **H3MD Director** (or Import plan) and run as usual. Without pictures the plan keeps the
+   people of the video; what a transition does is up to you. The Director itself is unchanged.
 
 Transitions (measured): no words = the model links the two poses itself (about 1 s); one simple move (kneel,
 crouch, fall and get up) needs about 1.5 s; over 2 s becomes its own text-only shot. Moves can land 0.3–0.5 s early —

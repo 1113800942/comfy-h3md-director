@@ -1,6 +1,6 @@
 {
- "last_node_id": 3,
- "last_link_id": 1,
+ "last_node_id": 4,
+ "last_link_id": 2,
  "nodes": [
   {
    "id": 1,
@@ -91,6 +91,13 @@
      "name": "report",
      "type": "STRING",
      "links": []
+    },
+    {
+     "name": "video",
+     "type": "VIDEO",
+     "links": [
+      2
+     ]
     }
    ],
    "properties": {
@@ -120,8 +127,40 @@
    "outputs": [],
    "properties": {},
    "widgets_values": [
-    "H3MD Ref Splice 0.6.2\n1. Drag the reference video into Load Video. Optional: connect your character pictures (Load Image) to picture_1..5.\n2. Run once: a draft edit (the video cut where the motion pauses) and, with pictures, the cast panel.\n3. Edit on the node: drag the blocks on the source track (start / end), reorder on the edit track, add transitions (no words = natural link; one move ~1.5 s). Drag lines from pictures to people on the cast panel.\n4. Run: preview on the node + a plan package in output/H3MD_plans/. Not right? change it and run again.\n5. Drag the package into the H3MD Director (or Import plan), run the low-res pass first.\n\n1. 把参考视频拖进 Load Video；可选：把角色图接到 picture_1..5。\n2. 运行一次：自动出草稿（按动作停顿切开）；接了角色图会出现人物面板。\n3. 在节点上剪：上轨拖色块定起止，下轨拖动排顺序，加过渡（不写字 = 自然衔接；一个动作约 1.5 秒）；在人物面板上从图拖线到人。\n4. 运行：节点上出预览 + output/H3MD_plans/ 里的计划包。不对就改了再跑。\n5. 把计划包拖进导演台（或 Import plan），先跑低清。"
+    "H3MD Ref Splice 0.6.2\n1. Drag the reference video into Load Video. Optional: connect your character pictures (Load Image) to picture_1..5.\n2. Run once: a draft edit (the video cut where the motion pauses) and, with pictures, the cast panel.\n3. Edit on the node: drag the blocks on the source track (start / end), reorder on the edit track, add transitions (no words = natural link; one move ~1.5 s). Drag lines from pictures to people on the cast panel.\n4. Run: preview on the node + a plan package in output/H3MD_plans/. Not right? change it and run again.\n5. Only editing the video (no new characters)? Save Video on the right keeps the spliced video as a file.\n6. Drag the package into the H3MD Director (or Import plan), run the low-res pass first.\n\n1. 把参考视频拖进 Load Video；可选：把角色图接到 picture_1..5。\n2. 运行一次：自动出草稿（按动作停顿切开）；接了角色图会出现人物面板。\n3. 在节点上剪：上轨拖色块定起止，下轨拖动排顺序，加过渡（不写字 = 自然衔接；一个动作约 1.5 秒）；在人物面板上从图拖线到人。\n4. 运行：节点上出预览 + output/H3MD_plans/ 里的计划包。不对就改了再跑。\n5. 只想剪辑原视频、不换人？右边的 Save Video 会把拼好的视频直接存成文件。\n6. 把计划包拖进导演台（或 Import plan），先跑低清。"
    ]
+  },
+  {
+   "id": 4,
+   "type": "SaveVideo",
+   "pos": [
+    1180,
+    60
+   ],
+   "size": [
+    360,
+    420
+   ],
+   "flags": {},
+   "order": 3,
+   "mode": 0,
+   "inputs": [
+    {
+     "name": "video",
+     "type": "VIDEO",
+     "link": 2
+    }
+   ],
+   "outputs": [],
+   "properties": {
+    "Node name for S&R": "SaveVideo"
+   },
+   "widgets_values": [
+    "H3MD_plans/ref_splice_edit",
+    "auto",
+    "auto"
+   ],
+   "title": "Save the edited video (optional, no H3)"
   }
  ],
  "links": [
@@ -130,6 +169,14 @@
    1,
    0,
    2,
+   0,
+   "VIDEO"
+  ],
+  [
+   2,
+   2,
+   2,
+   4,
    0,
    "VIDEO"
   ]

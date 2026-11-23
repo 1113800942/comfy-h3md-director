@@ -570,6 +570,10 @@ def cast_ui(frames, people, small, links, pics: dict) -> dict:
     return ui
 
 
+KEEP_PEOPLE = ("<Subject 1> is the people seen in <Video 1>: the same faces, hair, bodies and outfits as in "
+               "<Video 1>, nobody is replaced.",)
+
+
 # ------------------------------------------------------------------------------------------------ draft
 def draft_script(path: str, duration: float, min_len=1.5, max_clips=8) -> str:
     """first run with an empty edit: cut the video where the motion is lowest (between moves), keep the original
@@ -628,8 +632,8 @@ def export(src_path: str, edit_text: str, folder: str, name: str, pictures: dict
     pictures: {picture number: IMAGE tensor or file path} (only the linked ones); subjects: prompt lines or None."""
     import zipfile
     script = parse_script(edit_text)
-    if subjects and not script["subject"]:
-        script["subject"] = list(subjects)
+    if not script["subject"]:
+        script["subject"] = list(subjects) if subjects else list(KEEP_PEOPLE)
     info = probe(src_path)
     tl = build_timeline(script, info["duration"])
     os.makedirs(folder, exist_ok=True)
@@ -697,8 +701,11 @@ class H3MDRefSplice:
                                 "计划包存放位置：默认在 output 里。"}),
         }, "optional": pics}
 
-    RETURN_TYPES = ("STRING", "STRING")
-    RETURN_NAMES = ("package", "report")
+    RETURN_TYPES = ("STRING", "STRING", "VIDEO")
+    RETURN_NAMES = ("package", "report", "video")
+    OUTPUT_TOOLTIPS = ("Path of the plan package (.zip) for the H3MD Director.", "What was made.",
+                       "The spliced video itself (transitions = dissolves): connect ComfyUI's Save Video to keep the "
+                       "edit as a finished file without H3. 拼好的视频：接 Save Video 直接存成成品。")
     FUNCTION = "run"
     OUTPUT_NODE = True
     CATEGORY = CATEGORY
@@ -731,17 +738,15 @@ class H3MDRefSplice:
             ui["h3md_cast"] = [json.dumps(cast_ui(frames, people, small, links_used, pics))]
         splice = {"duration": info["duration"]}
         if not (edit or "").strip() or not parse_script_items_present(edit):
-            splice["draft"] = draft_script(src, info["duration"])
-            rep = (f"H3MD Ref Splice {VERSION}: draft made ({info['duration']:.2f} s video) - change it on the "
-                   "timeline (drag the clips, add transitions), then Run again for the preview and the package."
-                   + (f"\n  people: {len(subjects)} (drag lines on the cast panel to change who is who)"
-                      if subjects else ""))
-            ui["h3md_splice"] = [json.dumps(splice)]
-            ui["text"] = [rep]
-            return {"ui": ui, "result": ("", rep)}
+            # first run: a draft (cut where the motion pauses), exported at once like every later run
+            edit = draft_script(src, info["duration"])
+            splice["draft"] = edit
         folder, name = out_target(filename_prefix, folder_paths.get_output_directory())
         used_pics = {p: pics[p] for p in sorted({p for p, _ in links_used})}
         res = export(src, edit, folder, name, used_pics, subjects)
+        if splice.get("draft"):
+            res["report"] = ("Draft (the video cut where the motion pauses) - change it on the tracks and Run again.\n"
+                             + res["report"])
         out_dir = os.path.abspath(folder_paths.get_output_directory())
         if os.path.abspath(res["preview"]).startswith(out_dir):
             rel = os.path.relpath(os.path.dirname(res["preview"]), out_dir).replace("\\", "/")
@@ -750,7 +755,8 @@ class H3MDRefSplice:
         splice["package"] = res["zip"]
         ui["h3md_splice"] = [json.dumps(splice)]
         ui["text"] = [res["report"]]
-        return {"ui": ui, "result": (res["zip"], res["report"])}
+        from comfy_api.latest import InputImpl
+        return {"ui": ui, "result": (res["zip"], res["report"], InputImpl.VideoFromFile(res["preview"]))}
 
 
 def parse_script_items_present(text: str) -> bool:

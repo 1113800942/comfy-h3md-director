@@ -8,11 +8,13 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
 - **H3MD Ref Splice** node (`h3md_ref_splice.py`, `web/js/h3md_ref_splice_ui.js`, example workflow
   `H3MD_Ref_Splice_0.6.2.json`): a small video editor in front of the Director. Asked for on GitHub
   (`<Video 1, time=a to b>`): cut several moves out of ONE reference video, use them in any order (repeats allowed)
-  with short transitions, played by your own characters. On the node: a player (source / spliced result), a source
-  track (drag a clip's edges to set its start / end), an edit track (drag to reorder, duplicate, add transitions,
-  click to edit), the cast panel of the keyframe Prepare node (drag a line from a picture to the person it replaces;
+  with short transitions, played by your own characters - or just edit the video. On the node: a player (source /
+  spliced result / "Play edit" in the edit's order without a run), a source track (only a move's edges drag: its
+  start / end), a play-order track (drag to reorder, duplicate, add transitions, click to edit), the cast panel of the keyframe Prepare node (drag a line from a picture to the person it replaces;
   default picture 1 = first to appear) and a text box with the same edit (an AI can write it). First run with no
-  clips = a draft cut where the motion pauses. Each run writes a preview and a plan package
+  clips = a draft cut where the motion pauses (exported at once). A `video` output carries the spliced video (connect
+  Save Video to keep a pure edit without H3); without pictures the plan keeps the video's people. Each run writes a
+  preview and a plan package
   `output/H3MD_plans/<name>_<date>_<NNN>.zip` (spliced video + pictures + plan; never overwritten) for the Director,
   which is unchanged. Transitions up to 2 s stay in the shot as 4 still frames + a cross-dissolve + 4 still frames
   (six low-res runs on 2026-11-22: two still halves made the model stand still); a longer one becomes its own
