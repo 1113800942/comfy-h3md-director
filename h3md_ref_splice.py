@@ -124,12 +124,19 @@ def parse_script(text: str) -> dict:
                           f"{', '.join(k + ':' for k in _KEYS)}")
     if not any(i["kind"] == "clip" for i in items):
         raise SpliceError(f"{TAG} the script has no clip line (clip 4.0-6.0: ...)")
-    if items[0]["kind"] != "clip" or items[-1]["kind"] != "clip":
-        raise SpliceError(f"{TAG} the script must start and end with a clip (a gap joins two clips)")
-    for x, y in zip(items, items[1:]):
-        if x["kind"] == "gap" and y["kind"] == "gap":
-            raise SpliceError(f"{TAG} line {y['line']}: two gaps in a row - write them as one gap")
-    out["items"] = items
+    # a transition joins two clips: ones at either end are dropped, several in a row keep the first (said in the
+    # report) - an edit left like that by a reorder still runs
+    notes, tidy = [], []
+    for it in items:
+        if it["kind"] == "gap" and (not tidy or tidy[-1]["kind"] == "gap"):
+            notes.append(f"line {it['line']}: transition dropped ({'two in a row' if tidy else 'at the start'})")
+            continue
+        tidy.append(it)
+    while tidy and tidy[-1]["kind"] == "gap":
+        notes.append(f"line {tidy[-1]['line']}: transition at the end dropped")
+        tidy.pop()
+    out["items"] = tidy
+    out["notes"] = notes
     return out
 
 
@@ -338,6 +345,7 @@ def report(script, tl, plan, notes) -> str:
     for e in script["items"]:
         if e["kind"] == "gap" and e["sec"] <= SHORT_GAP_MAX and e["text"] and e["sec"] < 1.2:
             lines.append(f"  hint: line {e['line']}: {e['sec']:g} s is short for a written move (about 1.5 s per move)")
+    lines += [f"  tidied: {n}" for n in script.get("notes") or []]
     lines += [f"  director: {n}" for n in notes]
     return "\n".join(lines)
 

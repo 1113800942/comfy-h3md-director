@@ -36,7 +36,24 @@ export function parseEdit(text) {
     if (/^#\s*draft/i.test(l)) continue;
     meta.push(l);
   }
-  return { meta, items };
+  return { meta, items: fromSlots(toSlots(items)) };
+}
+
+// the edit as slots: clips in play order + the transition (or null = hard join) after each clip but the last.
+// 0.6.2 v5 (user 22:09): a reorder used to move a clip past the transitions and left them all at the end
+export function toSlots(items) {
+  const clips = [], gaps = [];
+  for (const it of items) {
+    if (it.kind === "clip") { if (clips.length) gaps.push(gaps.length < clips.length ? null : gaps.pop()); clips.push(it); }
+    else if (clips.length && gaps.length < clips.length) gaps.push(it);      // the first transition after a clip
+  }
+  if (gaps.length >= clips.length) gaps.length = Math.max(0, clips.length - 1);
+  return { clips, gaps };
+}
+export function fromSlots({ clips, gaps }) {
+  const out = [];
+  clips.forEach((c, k) => { out.push(c); if (k < clips.length - 1 && gaps[k]) out.push(gaps[k]); });
+  return out;
 }
 
 export function editText(model) {
@@ -155,15 +172,19 @@ function setupEditor(node) {
   function addClip() {
     const t = snap(video.currentTime || 0), d = S.dur || video.duration || 0;
     const b = d ? Math.min(d, t + 2) : t + 2;
-    if (S.model.items.length) S.model.items.push({ kind: "gap", sec: 1, text: "" });
-    S.model.items.push({ kind: "clip", a: t, b: snap(b), text: "" });
-    S.sel = S.model.items.length - 1; write(); render();
+    const sl = toSlots(S.model.items), c = { kind: "clip", a: t, b: snap(b), text: "" };
+    if (sl.clips.length) sl.gaps.push({ kind: "gap", sec: 1, text: "" });
+    sl.clips.push(c);
+    S.model.items = fromSlots(sl); S.sel = S.model.items.indexOf(c); write(); render();
   }
-  function addGap() {
-    const i = S.sel >= 0 ? S.sel : S.model.items.length - 1;
-    if (i < 0) return;
-    S.model.items.splice(i + 1, 0, { kind: "gap", sec: 1, text: "" });
-    S.sel = i + 1; write(); render();
+  function addGap() {          // a transition in the slot after the selected move (not after the last one)
+    const sl = toSlots(S.model.items);
+    const sel = S.model.items[S.sel];
+    let k = sel ? (sel.kind === "clip" ? sl.clips.indexOf(sel) : sl.gaps.indexOf(sel)) : sl.clips.length - 2;
+    if (k < 0 || k >= sl.clips.length - 1) { alertLater("H3MD: select a move that has another move after it"); return; }
+    if (!sl.gaps[k]) sl.gaps[k] = { kind: "gap", sec: 1, text: "" };
+    S.model.items = fromSlots(sl);
+    S.sel = S.model.items.indexOf(sl.gaps[k]); write(); render();
   }
 
   // play the edit straight from the source (no run): clips in order, a pause for each transition
@@ -243,6 +264,7 @@ function setupEditor(node) {
         fontSize: "11px", padding: "2px 4px", overflow: "hidden", whiteSpace: "nowrap", cursor: "grab", touchAction: "none" },
         it.kind === "clip" ? `#${order[i]} · Move ${keys[i] + 1} · ${fmt(secs)}s` : `↔ ${fmt(secs)}s${it.text ? " ✎" : ""}`);
       blk.title = it.kind === "clip" ? `clip ${fmt(it.a)}-${fmt(it.b)} s${it.text ? ": " + it.text : ""}` : `transition ${fmt(it.sec)} s${it.text ? ": " + it.text : " (no words = natural link)"}`;
+      blk.__clip = it.kind === "clip";
       blk.onpointerdown = (e) => dragB(e, i, blk);
       trackB.append(blk);
     });
@@ -307,12 +329,17 @@ function setupEditor(node) {
         if (it.kind === "clip" && S.mode === "source") video.currentTime = it.a;
         render(); return;
       }
-      const kids = [...trackB.children].filter((c) => c !== blk);
-      let to = kids.findIndex((c) => { const r = c.getBoundingClientRect(); return ev.clientX < r.left + r.width / 2; });
-      if (to < 0) to = kids.length;
-      const [it] = S.model.items.splice(i, 1);
-      S.model.items.splice(to, 0, it);
-      S.sel = to; write(); render();
+      const it = S.model.items[i];
+      if (it.kind !== "clip") { render(); return; }       // a transition stays in its slot between two moves
+      const sl = toSlots(S.model.items);
+      const from = sl.clips.indexOf(it);
+      const others = [...trackB.children].filter((c) => c !== blk && c.__clip);
+      let to = others.findIndex((c) => { const r = c.getBoundingClientRect(); return ev.clientX < r.left + r.width / 2; });
+      if (to < 0) to = others.length;
+      sl.clips.splice(from, 1);
+      sl.clips.splice(to, 0, it);
+      S.model.items = fromSlots(sl);
+      S.sel = S.model.items.indexOf(it); write(); render();
     };
     blk.addEventListener("pointermove", move); blk.addEventListener("pointerup", up); blk.addEventListener("pointercancel", up);
   }
@@ -354,9 +381,12 @@ function setupEditor(node) {
     const na = nxt.a, nbb = nxt.b;
     const isThis = (x) => x.kind === "clip" && Math.abs(x.a - a0) < 1e-3 && Math.abs(x.b - b0) < 1e-3;
     const isNext = (x) => x.kind === "clip" && Math.abs(x.a - na) < 1e-3 && Math.abs(x.b - nbb) < 1e-3;
-    let its = S.model.items.filter((x) => !isNext(x)).map((x) => (isThis(x) ? { ...x, b: nbb } : x));
-    its = tidy(its);
-    S.model.items = its; S.sel = -1; write(); render();
+    const sl = toSlots(S.model.items);
+    for (let k = sl.clips.length - 1; k >= 0; k--) {
+      if (isNext(sl.clips[k])) { sl.clips.splice(k, 1); sl.gaps.splice(Math.min(k, sl.gaps.length - 1), 1); }
+    }
+    sl.clips = sl.clips.map((x) => (isThis(x) ? { ...x, b: nbb } : x));
+    S.model.items = fromSlots(sl); S.sel = -1; write(); render();
   }
   function tidy(its) {       // no transition at either end, never two in a row
     for (let j = its.length - 1; j >= 0; j--) if (its[j].kind === "gap" && (j === 0 || j === its.length - 1 || its[j - 1].kind === "gap")) its.splice(j, 1);
@@ -369,8 +399,12 @@ function setupEditor(node) {
     const i = S.sel, it = S.model.items[i];
     if (!it) { insp.append(el("span", { color: "#888" }, "click a block on the edit track to change it")); return; }
     const del = button("Delete", () => {
-      S.model.items.splice(i, 1);
-      tidy(S.model.items);
+      if (it.kind === "gap") S.model.items.splice(i, 1);          // the two moves then join directly
+      else {
+        const sl = toSlots(S.model.items), k = sl.clips.indexOf(it);
+        sl.clips.splice(k, 1); sl.gaps.splice(Math.min(k, sl.gaps.length - 1), 1);
+        S.model.items = fromSlots(sl);
+      }
       S.sel = -1; write(); render();
     });
     if (it.kind === "clip") {
@@ -380,7 +414,11 @@ function setupEditor(node) {
         txt(it.text, "what happens (optional, short)", (v) => { it.text = v; }),
         button("Split at playhead", () => splitMove(it), "cut this move in two at the frame shown in the player (move the playhead with the edges or by clicking the upper track) / 在播放器当前画面处切成两段"),
         button("Merge with next move", () => mergeMove(it), "join this move with the move that follows it in the source / 和原片里紧接着的下一段合并"),
-        button("Duplicate", () => { S.model.items.splice(i + 1, 0, { kind: "gap", sec: 1, text: "" }, { ...it }); S.sel = i + 2; write(); render(); }, "use this move again (after a 1 s transition)"),
+        button("Duplicate", () => {
+          const sl = toSlots(S.model.items), k = sl.clips.indexOf(it), copy = { ...it };
+          sl.clips.splice(k + 1, 0, copy); sl.gaps.splice(k, 0, { kind: "gap", sec: 1, text: "" });
+          S.model.items = fromSlots(sl); S.sel = S.model.items.indexOf(copy); write(); render();
+        }, "use this move again, right after it (with a 1 s transition)"),
         button("+ Transition after", () => addGap()), del);
     } else {
       insp.append(el("b", {}, "Transition"), ...num("seconds", it.sec, 0.5, (v) => { it.sec = Math.max(1 / FPS, v); }),

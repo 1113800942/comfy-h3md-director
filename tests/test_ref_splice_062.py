@@ -38,10 +38,17 @@ class Parse(unittest.TestCase):
         self.assertEqual(S.parse_time("1:05.5"), 65.5)
 
     def test_errors(self):
-        for bad in ("gap 1\nclip 0-2", "clip 0-2\ngap 1", "clip 0-2\ngap 1\ngap 1\nclip 3-4", "hello", "subject: x",
-                    "clip 2-2.1"):
+        for bad in ("hello", "subject: x", "clip 2-2.1", "gap 1"):
             with self.assertRaises(S.SpliceError, msg=bad):
                 S.parse_script(bad)
+
+    def test_tidy(self):
+        # 22:09: a reorder left every transition at the end - tidied, not refused
+        s = S.parse_script("clip 8-10\nclip 6-8\nclip 0-2\ngap 1\ngap 1\n")
+        self.assertEqual([i["kind"] for i in s["items"]], ["clip", "clip", "clip"])
+        self.assertEqual(len(s["notes"]), 2)
+        s = S.parse_script("gap 1\nclip 0-2\ngap 1\ngap 2\nclip 3-4")
+        self.assertEqual([(i["kind"], i.get("sec")) for i in s["items"]], [("clip", None), ("gap", 1.0), ("clip", None)])
 
 
 class Timeline(unittest.TestCase):
