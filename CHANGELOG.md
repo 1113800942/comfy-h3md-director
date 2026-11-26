@@ -2,6 +2,41 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.6.3] - 2026-11-25
+
+### Changed / 变更
+- **RIFE frame interpolation is built in** (`h3md_rife/`): the IFNet network and the weights (RIFE v4.26, 24.6 MB;
+  the official `flownet.pkl` stored as safetensors, same tensors) from hzwer's official model archive (MIT,
+  `h3md_rife/LICENSE_RIFE.txt`) ship with H3MD; the loader,
+  batch inference and warp are H3MD's own code. **ComfyUI-VFI is no longer needed.** Until 0.6.2 its model was
+  called at run time, and a missing pack only showed when the video was being saved - after all the sampling.
+  Same weights; checked on GPU fp16 against ComfyUI-VFI's model: the interpolated frames are
+  bit-identical. `model_name` keeps its place in the node (saved workflows load); it lists the built-in model.
+  / **RIFE 补帧内置**：网络和权重（RIFE v4.26，24.6 MB，hzwer 官方模型包，MIT）随 H3MD 一起，加载、推理、warp 是
+  自己的代码。**不再需要 ComfyUI-VFI。** 0.6.2 及以前是运行时借用它的模型，没装的话要到全部采样跑完、存片时才报错。
+  权重相同（官方 flownet.pkl 转成 safetensors，数值不变），GPU fp16 下和 ComfyUI-VFI 逐帧对比完全一致。
+
+### Fixed / 修复
+- **The example workflows ship with the optional switches off.** `H3MD Director simple.json` and
+  `H3MD Director Remake.json` were saved with `interpolate` on / 48 fps in 0.6.2 (the node's own default is off), so
+  a first run on a machine without the interpolation pack failed at the very end. Both are back to interpolate off /
+  24 fps; face refine was and stays off. Turn them on when you want them. (Reported in a Civitai review.)
+  A newly added `H3MD Save Video FaceRefine Interp` node now also starts with `face_refine` off (saved workflows keep
+  their own value).
+  / **示例工作流里的可选开关发布时都是关的。** 0.6.2 的清爽版和多人换人工作流保存时带出了"补帧开 / 48 帧"，没装补帧插件的
+  机器第一次跑会在最后一步报错。现在改回补帧关 / 24 帧；修脸原来就是关的。需要时自己打开。
+- **Problems with the save-time options show before the run, not after it.** The Control Panel (which runs first)
+  and the two save nodes check frame interpolation before any sampling starts; with face refine on and the
+  FaceRefine pack missing the Control Panel warns at the start (the video is then saved without face refine, as
+  since 0.5.9). / 存片阶段的选项有问题会在开跑前就提示，而不是全部跑完才发现。
+- Comfy Registry display name: the Chinese part was garbled (wrong encoding in `pyproject.toml` since 0.6.0).
+  / Comfy Registry 上的显示名中文部分是乱码，已修正。
+
+### Tests / 测试
+- `test_rife_builtin_063` (weights file and sha256, no pickle file, real-model inference on CPU, the save node's chunk path, the
+  checks before a run, no runtime use of ComfyUI-VFI) and `test_example_workflows_063` - a release guard that fails
+  when an example workflow has `interpolate` or `face_refine` on.
+
 ## [0.6.2] - 2026-11-23
 
 ### Added / 新增

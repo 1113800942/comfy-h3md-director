@@ -89,12 +89,24 @@ comply with that license yourself. Key points of that license (read the full tex
 
 ---
 
+## 2b. RIFE frame interpolation (included since 0.6.3) / RIFE 补帧（0.6.3 起随包）
+
+`h3md_rife/IFNet_HDv3.py` (network definition, one import line adapted) and `h3md_rife/rife_v4.26.safetensors`
+(weights, RIFE v4.26: the official `flownet.pkl` stored as safetensors, tensors unchanged) come from the official model archive `RIFEv4.26_0921.zip` published by hzwer
+(<https://huggingface.co/hzwer/RIFE>, <https://github.com/hzwer/Practical-RIFE>). **MIT License, Copyright (c) 2021
+hzwer** - full text in `h3md_rife/LICENSE_RIFE.txt`. The loader, batch inference and warp around it are H3MD's own
+code. No code of the ComfyUI-VFI pack is used (until 0.6.2 its model was called at run time; that pack has no
+license file).
+
+`h3md_rife/IFNet_HDv3.py`（网络）和 `h3md_rife/rife_v4.26.safetensors`（权重，RIFE v4.26，官方 flownet.pkl 转存为 safetensors，数值不变）取自 hzwer 官方发布的模型包，
+MIT 许可，全文见 `h3md_rife/LICENSE_RIFE.txt`。外面的加载、批量推理和 warp 是 H3MD 自己写的。
+
+---
+
 ## 3. Runtime dependencies (not included) / 运行时依赖（不包含在本包里）
 
 | Project | Status (checked 2026-10-19) | How H3MD uses it |
 |---|---|---|
-| ComfyUI-VFI (RIFE) — <https://github.com/GACLove/ComfyUI-VFI> | No license file (GitHub `license: null`). | Called at runtime through its own node class; no code copied. See `LICENSES/ComfyUI-VFI_runtime_NOTICE.txt`. |
-| RIFE — <https://github.com/hzwer/ECCV2022-RIFE>, <https://github.com/hzwer/Practical-RIFE> | MIT | Network/weights loaded by ComfyUI-VFI; not redistributed. |
 | ComfyUI — <https://github.com/Comfy-Org/ComfyUI> | GPL-3.0 | Host application; core MiniMax H3 nodes are called. |
 
 这些依赖项目的许可证由其作者决定，H3MD 的许可证不改变它们。H3MD 不再使用 selflift-Avatar（2026-10-29 起换成自带的 Luna 引擎）。
