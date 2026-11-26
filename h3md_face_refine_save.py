@@ -17,7 +17,7 @@ face_refine off: exactly H3MD Save Video Interp (h3md_stream_save.stream_save).
 
 Runtime dependencies (looked up in ComfyUI's node registry when the node runs, nothing is bundled):
   ComfyUI-H3-FaceRefine >= 1.1.2 (H3FaceTrackCrop's module helpers + H3FaceStitch),
-  TE-Speed-VOSR2 (TESpeedVOSR2Image), ComfyUI-VFI (RIFE, only with interpolate on).
+  TE-Speed-VOSR2 (TESpeedVOSR2Image).  RIFE interpolation is built in (h3md_rife/, 0.6.3).
 
 -----------------------------------------------------------------------------------------------------------------
 Third-party notice.  solve_track() and faces_from_pick() below are ported (adapted to lazy, chunked frame access)
@@ -1468,7 +1468,7 @@ class H3MDSaveVideoFaceRefineInterp:
             "segments": (S.SEGMENTS_TYPE, {"tooltip": "long video: H3MD Loop Sampler output 'long video'."}),
         }
         req.update(_save_inputs())
-        req["face_refine"] = ("BOOLEAN", {"default": True, "tooltip":
+        req["face_refine"] = ("BOOLEAN", {"default": False, "tooltip":   # 0.6.3: optional switches start off
                               "On: track the face over the whole video, redraw the head with H3 inside a SAM3 mask "
                               "(needs redraw_model / clip / vae / audio_vae), restore it with VOSR2 and paste it back, "
                               "before interpolation. Off: exactly H3MD Save Video Interp."})
@@ -1551,6 +1551,10 @@ class H3MDSaveVideoFaceRefineInterp:
             return []
         want = ("seedvr2_model", "seedvr2_vae") if refine_model == "SeedVR2" else ("vosr2_model", "vosr2_settings")
         return [k for k in want if k in kw]   # only connected inputs (ComfyUI raises for an unconnected one)
+
+    @classmethod
+    def VALIDATE_INPUTS(cls, interpolate=None):
+        return S.validate_interpolate(interpolate)
 
     def save(self, segments=None, vosr2_model=None, face_refine=True, vosr2_seed=42, vosr2_settings=None,
              identity_reference=None, identity_clip_vision=None, face_pick=None, prompt=None, extra_pnginfo=None,

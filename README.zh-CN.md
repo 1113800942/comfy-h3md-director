@@ -229,7 +229,7 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
   Crystools、easy-use、LayerStyle、TE-Speed 这些节点（rgthree 只用来画顶上的标题横幅，没装也只是横幅不显示）。小显存：把 32B 编码器换成 4B + ClipProj（完整版里 ClipProj 节点默认旁路，见下面“文本编码器怎么选”）。
 * `example_plans/h3md_silver_warrior_1min_v3.zip`——可直接导入的 **1 分钟打斗**示范计划（9 个镜头，1280×704，不带素材）：
   导演台点 **Import plan…**，选这个 zip，选"只导入计划"。配合总控台"高动态"风格（每条线只开一个 weapon LoRA）。
-* `H3MD Director.json`（完整版）——样片用的完整设置，多了修脸、RIFE 补帧到 48 fps、多 1 步精修和几个方便的小工具。
+* `H3MD Director.json`（完整版）——样片用的完整设置，画布上有修脸和补帧开关（发布时都是关的）、多 1 步精修和几个方便的小工具。
 * `H3MD Director Remake.json` + `H3MD_Keyframe_MultiSwap_0.6.0.json`:多人换人。后一个做关键帧(配 AI,见「多人换人」)和计划包,前一个跑视频。
 * `example_plans/H3MD_multiswap_3dancers_0.6.0_plan.zip`:做好的**多人换人**计划包(三人舞蹈,28.5 秒,两次换位、一次熄灯,
   原片和 14 张换好的关键帧都在里面):打开 `H3MD Director Remake.json`,导演台点 **Import plan…** 选这个 zip,直接跑。
@@ -240,7 +240,7 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
 | H3MD Director（本包） | 导演台、循环采样、保存、深度 / SAM3 动作复刻 | **必需** | — |
 | [ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) | SageAttention 和 FeedForward 分块补丁（省显存） | 推荐（清爽版和完整版都用） | 能跑，但显存占用更高；SageAttention 补丁还需要装 SageAttention 包，没装就把那个节点绕过 |
 | [ComfyUI-ClipProj](https://github.com/nicolab28/ComfyUI-ClipProj) | 4B 文本编码器投影，省 10 GB 以上显存 | 只有用 4B 编码器时需要 | 改用 32B 编码器 |
-| [ComfyUI-VFI](https://github.com/GACLove/ComfyUI-VFI) | `H3MD Save Video Interp` 里的 RIFE 补帧 | 可选 | `interpolate` 保持关，输出 24 fps |
+| RIFE 补帧 | 总控台 / `H3MD Save Video Interp` 的 `interpolate`（24 → 30 / 48 / 60 fps） | **0.6.3 起内置**（网络和权重随 H3MD 一起，MIT） | 不用另装；发布时默认关 |
 | [ComfyUI-VOSR2](https://github.com/ylchen333/ComfyUI-VOSR2)（清爽版）/ TE-Speed-VOSR2（完整版） | `H3MD Save Video Interp` 里的修脸 | 可选 | `face_refine` 保持关（默认就是关） |
 | SAM3.1（`sam3.1_multiplex_fp16.safetensors`，放 `checkpoints/`，ComfyUI 核心自带节点） | 修脸（0.5.3）：在脸部裁图上找出头部，H3 只在里面重画。保存节点的 `redraw_model` / `redraw_clip` / `redraw_vae` / `redraw_audio_vae` 接采样用的 H3 模型（带 768 加速 LoRA）、文字编码器和两个 VAE（示例工作流已接好） | 修脸必需 | `face_refine` 保持关 |
 | [ComfyUI-H3-FaceRefine](https://github.com/Carasibana/ComfyUI-H3-FaceRefine) + 人脸检测模型（如 `face_yolov8m.pt` / `face_yolov8n.pt`），放 `models/ultralytics/bbox/` | 修脸：找脸、跟脸（`detector`），镜头切换检测（`cut_detection = auto`，要它的 `scenedetect` 依赖）。0.5.9 起 H3MD 自己登记 `models/ultralytics/bbox`，不用再装 ComfyUI-Impact-Subpack 也能在下拉框里看到模型。它需要较新的 ComfyUI 和它的依赖（`ultralytics scipy insightface scenedetect`）：ComfyUI 太旧或依赖没装会加载失败（启动日志里搜 `IMPORT FAILED`），这时 `detector` / `cut_detection` 只剩 H3MD 能给的选项 | 修脸必需 | 0.5.9 起保存节点不再卡住：会不修脸照常保存，并写明原因（没装插件、`detector = none`、找不到模型文件）；或把 `face_refine` 关掉 |
@@ -251,7 +251,7 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
 | [rgthree-comfy](https://github.com/rgthree/rgthree-comfy) | Power Lora Loader（一个节点挂多个 LoRA） | 仅完整版，可选 | 清爽版的总控台自己加载 LoRA |
 | ComfyUI-Dehypnotic、Crystools、Easy-Use、LayerStyle、CRT-Nodes | 比例选择、开关、数值、清显存、计时 | 仅完整版，可选 | 出片用不到 |
 
-修脸和补帧的节点包只有在打开这两个功能时才会用到，没装也不影响保存节点。
+所有示例工作流里**补帧和修脸默认都是关的**，需要时自己打开。补帧不用另装任何东西（0.6.3 起内置）。修脸的节点包只有打开 `face_refine` 时才会用到，没装就不修脸照常保存。
 缺哪个节点包，ComfyUI 打开工作流时会列出来（ComfyUI-Manager → **Install Missing Custom Nodes**）。
 
 </details>
@@ -456,13 +456,6 @@ latent 重叠接续，704×1280，`lowres_anchor = 1`。每段都和第 1 段比
 | `minimax_h3_lms_v1.0_r64_r.safetensors` | `loras` | huggingface.co/RunningHubAI/rh-minimax-h3-lms-v1.0-r64-lora |
 
 每个模型有自己的许可证，使用前请看它的模型页。`ClipProjApply` 那条只有装了 ComfyUI-ClipProj 才显示。
-
-</details>
-
-<details>
-<summary><b>RIFE 模型（手动下载）</b></summary>
-
-“缺少模型”弹窗只能下载到 `models/` 下已注册的文件夹，而且不允许 `.pkl`，所以 RIFE 的 `flownet.pkl` 不在 `models` 清单里，需要手动下载：节点包 ComfyUI-VFI（<https://github.com/GACLove/ComfyUI-VFI>）；模型 <https://huggingface.co/hzwer/RIFE/resolve/main/RIFEv4.26_0921.zip>，解压后把 `flownet.pkl` 放到 `custom_nodes/ComfyUI-VFI/rife/train_log/flownet.pkl`（相对 ComfyUI 根目录）。ComfyUI-VFI 第一次运行时通常也会自己下载。
 
 </details>
 

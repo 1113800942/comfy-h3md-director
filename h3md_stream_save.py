@@ -10,11 +10,10 @@ chunk by chunk, so RAM never holds the whole clip (the in-RAM path needs ~19 MB/
                (same trim / merge_overlap_source spans, same fp16/uint8 -> float32 conversion); the Loop itself
                no longer builds that IMAGE ('images' is a placeholder since 2026-10-18)
   audio     -> joined exactly like the merge (h3md_director.join_audio, incl. audio_crossfade_ms)
-  optional frame interpolation through ComfyUI-VFI's RIFE model, loaded at runtime with ComfyUI-VFI's OWN loader
-               (RIFEInterpolation._get_or_load_model: same model files, same auto download, same model cache).
-               No ComfyUI-VFI code is copied (that repository ships no license file).  The target-frame timing
-               uses the wrapper's own _calculate_target_frame_positions when available, so a chunked run maps every
-               output frame to the same (source frame, source frame, timestep) as a one-pass RIFE run.
+  optional frame interpolation with H3MD's built-in RIFE (h3md_rife/, 0.6.3: RIFE v4.26 network + weights from
+               hzwer's official model archive, MIT; no other node pack needed - until 0.6.2 the model of the
+               ComfyUI-VFI pack was borrowed at run time).  The target-frame timing maps every output frame of a
+               chunked run to the same (source frame, source frame, timestep) as a one-pass RIFE run.
   encoding  -> PyAV (ComfyUI's own dependency): mp4 / H.264 yuv420p, BT.709 tags, AAC audio - the settings
                ComfyUI's SaveVideo uses (crf default 19 here, like Jack's Video Combine) - written to <name>.mp4.part and renamed on success.
   cache     -> deleted only when delete_cache_after_save is on AND the file was fully written, closed and renamed.
@@ -39,9 +38,11 @@ import torch
 try:
     from . import h3md_director as D
     from . import h3md_drift_correct as DRIFT   # v0.2.0 drift_correct (save-time correction)
+    from . import h3md_rife as RIFE             # 0.6.3 built-in frame interpolation
 except ImportError:  # flat import (tests)
     import h3md_director as D
     import h3md_drift_correct as DRIFT
+    import h3md_rife as RIFE
 
 LOG = logging.getLogger("H3MD")
 _TAG = "[H3MD StreamSave]"
@@ -226,7 +227,7 @@ def merged_audio(info: dict):
 
 def target_positions(source_fps: float, target_fps: float, total_source_frames: int):
     """[(src1, src2, factor)] per output frame, for the WHOLE clip: output frame t sits at time t/target_fps.
-    Fallback only - at run time the RIFE wrapper's own _calculate_target_frame_positions is used when present."""
+    Same timing as a one-pass RIFE run (int(duration * target_fps) frames, frame t at time t / target_fps)."""
     n = int(total_source_frames)
     total = int(n / source_fps * target_fps)
     out = []
@@ -291,42 +292,45 @@ def chunk_plan(positions, n_source: int, chunk_frames: int):
 
 
 # ---------------------------------------------------------------------------
-# RIFE via ComfyUI-VFI (runtime import; hooks are monkeypatched in tests)
+# RIFE: H3MD's built-in copy (h3md_rife/, 0.6.3; hooks are monkeypatched in tests)
 # ---------------------------------------------------------------------------
 
-def _vfi_class():
-    try:
-        import nodes as comfy_nodes  # ComfyUI's global node registry
-        return comfy_nodes.NODE_CLASS_MAPPINGS.get("RIFEInterpolation")
-    except Exception:
-        return None
+def rife_model_names():
+    return list(RIFE.model_names())
 
 
-def vfi_model_names():
-    cls = _vfi_class()
+def interpolation_problem():
+    """None when frame interpolation can run; otherwise the reason (checked BEFORE a run starts, 0.6.3)."""
     try:
-        spec = cls.INPUT_TYPES()["optional"]["model_name"]
-        if isinstance(spec[0], (list, tuple)) and spec[0]:
-            return list(spec[0])
-    except Exception:
-        pass
-    return ["flownet.pkl"]
+        return RIFE.problem()
+    except Exception as exc:
+        return f"built-in RIFE not usable ({exc})"
 
 
 def load_interpolator(model_name: str, use_fp16: bool):
-    """ComfyUI-VFI's RIFEWrapper, through its own loader + model cache."""
-    cls = _vfi_class()
-    if cls is None:
-        raise RuntimeError(f"{_TAG} interpolate=on needs ComfyUI-VFI (node 'RIFE Frame Interpolation') installed")
-    return cls()._get_or_load_model(model_name, use_fp16=use_fp16)
+    """The built-in RIFE interpolator (.device, .use_fp16, .model.inference_batch, .model.flownet)."""
+    if model_name and model_name not in RIFE.model_names():
+        LOG.info("%s model_name '%s' is from an older workflow; using the built-in %s (%s)", _TAG, model_name,
+                 RIFE.MODEL_NAME, RIFE.MODEL_VERSION)
+    return RIFE.load(use_fp16=bool(use_fp16))
 
 
 def interpolator_positions(wrapper, source_fps, target_fps, n):
-    fn = getattr(wrapper, "_calculate_target_frame_positions", None)
+    fn = getattr(wrapper, "_calculate_target_frame_positions", None)   # a custom interpolator may bring its own
     if callable(fn):
         return list(fn(source_fps, target_fps, n))
-    LOG.warning("%s RIFE wrapper has no _calculate_target_frame_positions; using H3MD's equivalent", _TAG)
     return target_positions(source_fps, target_fps, n)
+
+
+def validate_interpolate(interpolate):
+    """VALIDATE_INPUTS helper (0.6.3): ComfyUI calls it before anything runs.  interpolate is the widget value, or
+    None / a list of None when it is linked (then the H3MD Control Panel checks it at the start of the run)."""
+    v = interpolate[0] if isinstance(interpolate, (list, tuple)) and interpolate else interpolate
+    if v is True:
+        why = interpolation_problem()
+        if why:
+            return f"{_TAG} interpolate is on but {why}"
+    return True
 
 
 def autocast_ctx(use_fp16: bool):
@@ -443,7 +447,8 @@ def free_everything():
 
 @contextlib.contextmanager
 def rife_on_cpu(wrapper):
-    """Temporarily run the RIFE wrapper on the CPU in float32 (VFI's warp() reads a module-level `device`)."""
+    """Temporarily run the RIFE wrapper on the CPU in float32 (the built-in warp follows the tensor's device; a
+    module-level `device` of a custom interpolator is switched too and restored)."""
     import sys
     net = getattr(getattr(wrapper, "model", None), "flownet", None)
     saved = []
@@ -494,7 +499,7 @@ def interpolate_chunk(wrapper, frames: torch.Tensor, jobs, scale: float, batch_s
         return out
     need = sorted({x[1] for x in work} | {x[2] for x in work})
     with torch.inference_mode():
-        gpu = {i: frames[i].to(device=device, dtype=dtype) for i in need}   # same conversion as VFI, once per chunk
+        gpu = {i: frames[i].to(device=device, dtype=dtype) for i in need}   # once per chunk
         try:
             for b0 in range(0, len(work), batch_size):
                 batch = work[b0:b0 + batch_size]
@@ -985,7 +990,7 @@ def stream_save(info, path, interpolate=False, target_fps=SOURCE_FPS, scale=1.0,
     out_fps = float(target_fps)
     if out_fps <= 0:
         raise ValueError(f"{_TAG} target_fps must be > 0")
-    do_interp = bool(interpolate) and abs(source_fps - out_fps) >= 0.01  # VFI: equal fps = passthrough
+    do_interp = bool(interpolate) and abs(source_fps - out_fps) >= 0.01  # equal fps = passthrough
     if not bool(interpolate) and abs(source_fps - out_fps) >= 0.01:
         LOG.warning("%s interpolate is OFF but target_fps = %.3f: the %d frames (%.3f fps) are saved at %.3f fps, so "
                     "the video plays %.2fx %s than real time and the audio will NOT match. Set target_fps = %g, or "
@@ -1165,7 +1170,7 @@ class H3MDSaveVideoInterp:
                 "output_folder": ("STRING", {"default": "", "tooltip":
                                   "Empty = ComfyUI's output folder. A relative name = a subfolder of it. An absolute folder only if it is inside the output folder or listed under \"folders\" in <ComfyUI user folder>/h3md/config.json (v0.3.7)."}),
                 "interpolate": ("BOOLEAN", {"default": False, "tooltip":
-                                "On: RIFE frame interpolation (ComfyUI-VFI's model) 24 fps -> target_fps. Off: the "
+                                "On: RIFE frame interpolation (built in, nothing to install) 24 fps -> target_fps. Off: the "
                                 "H3MD frames are written unchanged (the RIFE options below are greyed out)."}),
                 # source_fps: read-only display "24" in the UI (H3 renders a fixed 24 fps), not an input
                 "target_fps": ("FLOAT", {"default": SOURCE_FPS, "min": 1.0, "max": 240.0, "step": 0.1,
@@ -1173,12 +1178,12 @@ class H3MDSaveVideoInterp:
                                "Frame rate of the saved file. interpolate on: RIFE target (e.g. 30, 48, 60). "
                                "interpolate off: the file is still written at this rate - anything but 24 plays "
                                "faster/slower than real time and the audio no longer matches (warned in the log)."}),
-                # --- ComfyUI-VFI 'RIFE Frame Interpolation' options (same names / ranges / steps) ---
+                # --- RIFE options (names / ranges kept from the first version, so saved workflows load) ---
                 "scale": ("FLOAT", {"default": 1.0, "min": 0.25, "max": 4.0, "step": 0.25, "display": "number",
                           "tooltip": "RIFE flow processing scale. Lower values process faster but may reduce quality "
                                      "(output size is unchanged)."}),
-                "model_name": (vfi_model_names(), {"default": "flownet.pkl",
-                               "tooltip": "RIFE model (ComfyUI-VFI's list / locations / auto download)."}),
+                "model_name": (rife_model_names(), {"default": "flownet.pkl",
+                               "tooltip": "RIFE model: the built-in RIFE v4.26 (ships with H3MD; the name is kept for saved workflows)."}),
                 "batch_size": ("INT", {"default": 8, "min": 1, "max": 32, "step": 1, "display": "number",
                                "tooltip": "Frames interpolated in parallel (VRAM)."}),
                 "use_fp16": ("BOOLEAN", {"default": True, "tooltip": "Half precision RIFE (CUDA only)."}),
@@ -1222,8 +1227,12 @@ class H3MDSaveVideoInterp:
     CATEGORY = CATEGORY
     DESCRIPTION = ("Saves the H3MD Loop result straight from its segment cache (mp4 H.264/H.265 + AAC, gif, webp or "
                    "a PNG sequence), chunk by chunk (automatic size from free VRAM / RAM) - RAM never holds the whole "
-                   "clip. Optional RIFE interpolation (ComfyUI-VFI's model and options). Replaces RIFE Frame "
+                   "clip. Optional RIFE interpolation (built in, no other node pack). Replaces RIFE Frame "
                    "Interpolation + Video Combine / Create Video + Save Video after H3MD Loop.")
+
+    @classmethod
+    def VALIDATE_INPUTS(cls, interpolate=None):
+        return validate_interpolate(interpolate)
 
     def save(self, interpolate, target_fps, scale, model_name, batch_size, use_fp16, filename_prefix, output_folder,
              crf, delete_cache_after_save, format="video/h264-mp4", pix_fmt="yuv420p", loop_count=0,

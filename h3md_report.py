@@ -39,7 +39,6 @@ PACKS = [
     ("MiniMax H3 RefMods", ("MiniMaxH3RefModsLoader",)),
     ("ComfyUI-H3-FaceRefine", ("H3FaceTrackCrop",)),
     ("ComfyUI-H3-FaceRefine-Plus", ("H3FaceStitchPlus",)),
-    ("RIFE frame interpolation", ("RIFEInterpolation",)),
     ("Depth Anything V2 (controlnet_aux)", ("DepthAnythingV2Preprocessor",)),
     ("VideoHelperSuite", ("VHS_VideoCombine",)),
     ("KJNodes", ("PathchSageAttentionKJ",)),

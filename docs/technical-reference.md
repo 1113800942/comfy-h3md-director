@@ -186,18 +186,13 @@ the resume folder (`run.json`) is reused. Interrupt is checked between segments 
   chunk from the disk cache).
 * The same text is in the Loop nodes' DESCRIPTION and output tooltips (`OUTPUT_TOOLTIPS`, hover an output dot).
 
-**RIFE 模型（手动下载） / RIFE model (manual download)**
-* 中文：ComfyUI 的“缺少模型”下载弹窗只能下载到 `models/` 下已注册的文件夹，而且不允许 `.pkl` 文件，所以 RIFE 的
-  `flownet.pkl` 不放进工作流的 `models` 清单，需要手动下载：节点包 ComfyUI-VFI
-  (<https://github.com/GACLove/ComfyUI-VFI>)；模型 <https://huggingface.co/hzwer/RIFE/resolve/main/RIFEv4.26_0921.zip>，
-  解压后把 `flownet.pkl` 放到 `custom_nodes/ComfyUI-VFI/rife/train_log/flownet.pkl`（相对 ComfyUI 根目录）。
-  ComfyUI-VFI 第一次运行时通常也会自己下载这个 zip。
-* English: the frontend's missing-models popup only downloads into registered `models/` folder keys and only
-  `.safetensors/.sft/.ckpt/.pth/.pt` files, so RIFE `flownet.pkl` is not in the workflow `models` manifest. Download
-  it manually: node pack ComfyUI-VFI (<https://github.com/GACLove/ComfyUI-VFI>); model
-  <https://huggingface.co/hzwer/RIFE/resolve/main/RIFEv4.26_0921.zip> - extract `flownet.pkl` to
-  `custom_nodes/ComfyUI-VFI/rife/train_log/flownet.pkl` (relative to the ComfyUI root). ComfyUI-VFI normally
-  downloads this zip itself on first use.
+**RIFE（0.6.3 起内置） / RIFE (built in since 0.6.3)**
+* 中文：RIFE 的网络（`h3md_rife/IFNet_HDv3.py`）和权重（`h3md_rife/rife_v4.26.safetensors`，RIFE v4.26，24.6 MB，官方 flownet.pkl 转存）随 H3MD 一起，
+  取自 hzwer 官方模型包（MIT）。不需要 ComfyUI-VFI，也不需要手动下载。0.6.2 及以前是运行时调用 ComfyUI-VFI 的模型
+  （同样的权重，输出逐帧一致）。
+* English: the RIFE network (`h3md_rife/IFNet_HDv3.py`) and weights (`h3md_rife/rife_v4.26.safetensors`, RIFE v4.26, 24.6 MB: the official flownet.pkl as safetensors)
+  ship with H3MD, from hzwer's official model archive (MIT). No ComfyUI-VFI and no manual download. Up to 0.6.2 the
+  model of ComfyUI-VFI was called at run time (the same weights; the frames are bit-identical).
 
 #### Per-segment disk cache (`h3md_cache.py`, default `cache_mode = disk`)
 
@@ -437,7 +432,7 @@ nkxx188/ComfyUI-MiniMaxH3-Easy (MIT), notice in the module header.
 
 ### H3MD Save Video Interp (`h3md_stream_save.py`, class `H3MDSaveVideoInterp`, 2026-10-18)
 
-**中文（简要）** 长片子不再整片放进内存：从 H3MD 的分段缓存一段一段读帧，（可选）用 ComfyUI-VFI 的 RIFE 模型插帧，
+**中文（简要）** 长片子不再整片放进内存：从 H3MD 的分段缓存一段一段读帧，（可选）用内置的 RIFE 模型插帧，
 插完立刻写进 mp4（H.264 + AAC），再释放这一小段。
 接法：`H3MD Loop Sampler` 的输出 `long video`（原名 `segments`，同一个位置）接到 `H3MD Save Video Interp`；
 这一个节点代替原来的 RIFE Frame Interpolation + Create Video + Save Video。
@@ -477,7 +472,7 @@ Save Video 的话出来的不是视频，运行时日志会警告一次，请改
 
 **English.** Saves the H3MD Loop result straight from the per-segment disk cache, chunk by chunk:
 read merged source frames (memory-mapped, exactly the frames/spans `SegmentCache.merge` would put into the IMAGE
-output, incl. `merge_overlap_source` and trims), optionally interpolate them with ComfyUI-VFI's RIFE model, encode
+output, incl. `merge_overlap_source` and trims), optionally interpolate them with the built-in RIFE model, encode
 them into the open mp4 and free them. Peak RAM ~ one chunk (+ x264 look-ahead), not the whole clip.
 
 Wiring (replaces `RIFE Frame Interpolation` + `Create Video` + `Save Video`):
@@ -512,12 +507,11 @@ H3MD Loop Sampler --long video--> H3MD Save Video Interp
   `target_fps`; with anything but 24 the clip plays faster/slower and **the audio no longer matches** - a warning
   says so (`interpolate is OFF but target_fps ... audio will NOT match ... x faster/slower`). (Could be labelled
   `frame_rate` like VHS; kept as `target_fps` so saved values/links stay valid.)
-* Interpolation: `scale` 0.25-4 (flow scale, output size unchanged), `model_name` (ComfyUI-VFI's list),
+* Interpolation: `scale` 0.25-4 (flow scale, output size unchanged), `model_name` (one entry, the built-in model; the name `flownet.pkl` is kept for saved workflows),
   `batch_size` 1-32, `use_fp16`; greyed out while `interpolate` is off (`widget.disabled`; values kept and saved).
-  The model is loaded through ComfyUI-VFI's own
-  `RIFEInterpolation._get_or_load_model` (same files, auto download, model cache). Output frame count and the
-  (frame, frame, timestep) of every output frame equal a one-pass RIFE run (`int(duration * target_fps)`, the
-  wrapper's own `_calculate_target_frame_positions`); each chunk carries its last source frame into the next.
+  The model is H3MD's built-in RIFE (`h3md_rife/`, loaded once and kept in memory). Output frame count and the
+  (frame, frame, timestep) of every output frame equal a one-pass RIFE run (`int(duration * target_fps)`,
+  `target_positions`); each chunk carries its last source frame into the next.
   `target_fps` 24 = no interpolation (like RIFE).
 * **No interpolation across a hard cut** (0.4.0, `skip_cuts`): an output frame that falls between frames c-1 and c
   of two different shots is a plain copy of the nearer source frame (the earlier one at exactly half way) instead of a
@@ -567,7 +561,7 @@ H3MD Loop Sampler --long video--> H3MD Save Video Interp
   the RAM cap applies. Chunk size and reason are logged; the report lists `chunk_sizes` and `oom_events`.
 * **CUDA OOM ladder**, per chunk: empty cache, halve the chunk (>= 8), retry -> still OOM at 8: ComfyUI memory
   management (`unload_all_models` + `soft_empty_cache`), `batch_size` 1, retry -> still OOM: this chunk on the CPU
-  (float32; ComfyUI-VFI's module-level `device` is switched in memory for the call and restored, no file changed;
+  (float32; the built-in warp follows the tensor's device, the model is moved back afterwards;
   slow, may differ slightly from GPU fp16), logged as a warning. After an OOM the chunk never grows back above the
   size that fitted. Non-OOM errors are raised unchanged.
 * mp4 encoding like ComfyUI's SaveVideo / VHS: `crf` default **19** for new nodes (saved workflows keep their

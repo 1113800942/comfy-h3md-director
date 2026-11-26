@@ -241,6 +241,32 @@ def bridge_for(style: str):
         return None
 
 
+def preflight(interpolate, face_refine):
+    """0.6.3: the Control Panel runs first, so problems with the save-time options show before the sampling starts.
+    interpolate on + RIFE not usable -> error now.  face_refine on + FaceRefine pack missing -> warning now (the
+    save node then writes the video without face refine, as since 0.5.9)."""
+    if interpolate:
+        try:
+            try:
+                from . import h3md_rife as RIFE
+            except ImportError:
+                import h3md_rife as RIFE
+            why = RIFE.problem()
+        except Exception as exc:
+            why = f"built-in RIFE not usable ({exc})"
+        if why:
+            raise RuntimeError(f"{_TAG} interpolate is on but {why}")
+    if face_refine:
+        try:
+            import nodes as comfy_nodes
+            if "H3FaceTrackCrop" not in comfy_nodes.NODE_CLASS_MAPPINGS:
+                LOG.warning("%s face_refine is on but the ComfyUI-H3-FaceRefine pack is not loaded: the video will be "
+                            "saved WITHOUT face refine. Install it (see the README) or turn face_refine off. "
+                            "修脸开着但没装 ComfyUI-H3-FaceRefine：会不修脸照常保存。", _TAG)
+        except Exception:
+            pass
+
+
 class H3MDControlPanel:
     def __init__(self):
         self.cache = _LoraCache()
@@ -258,12 +284,16 @@ class H3MDControlPanel:
                 "height": ("INT", {"default": 1920, "min": 64, "max": 4096, "step": 16,
                                    "tooltip": "Video height. 高"}),
                 "interpolate": ("BOOLEAN", {"default": False, "tooltip":
-                                "Off: the video is saved at H3's 24 fps. On: RIFE interpolation to fps.\n"
-                                "关：按 H3 的 24 帧保存；开：插帧到下面的帧数。"}),
+                                "Off (default): the video is saved at H3's 24 fps. On: RIFE interpolation to fps "
+                                "(built in, nothing to install).\n"
+                                "关（默认）：按 H3 的 24 帧保存；开：插帧到下面的帧数（已内置，不用另装插件）。"}),
                 "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 240.0, "step": 1.0, "tooltip":
                         "Saved frame rate; only with interpolate on (e.g. 30, 48, 60). 插帧开时的目标帧数。"}),
                 "face_refine": ("BOOLEAN", {"default": False, "tooltip":
-                                "Sharpen small faces in wide shots while saving. 保存时修脸。"}),
+                                "Off (default). On: sharpen small faces in wide shots while saving - needs the "
+                                "ComfyUI-H3-FaceRefine pack and a face detector model; if they are missing the video is "
+                                "saved without face refine.\n关（默认）；开：保存时修脸，需要另装 ComfyUI-H3-FaceRefine "
+                                "和人脸检测模型，缺了就不修脸照常保存。"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xFFFFFFFFFFFFFFFF, "control_after_generate": True,
                                  "tooltip": "Fixed or random (control after generate). 种子：固定或随机。"}),
                 "segments_to_run": ("STRING", {"default": "", "tooltip":
@@ -292,6 +322,7 @@ class H3MDControlPanel:
     def run(self, low_res_model, high_res_model, width, height, interpolate, fps, face_refine, seed,
             segments_to_run, style, lora_low, lora_high):
         style = style if style in STYLES else "balanced"
+        preflight(interpolate, face_refine)      # 0.6.3: before any sampling, not when the video is saved
         lo, hi = parse_rows(lora_low), parse_rows(lora_high)
         low, used_lo = apply_rows(low_res_model, lo, self.cache, "low")
         high, used_hi = apply_rows(high_res_model, hi, self.cache, "high")

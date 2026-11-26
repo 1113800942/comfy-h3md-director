@@ -328,8 +328,8 @@ videos or audio; untick **prompts** to leave the prompts out. It is only saved o
 * `example_plans/h3md_silver_warrior_1min_v3.zip` — a ready-to-import **1-minute fight** plan (9 shots, 1280×704, no media
   needed): in the Director click **Import plan…**, pick the zip, choose "Plan only". Made for the Control Panel's "high
   motion" style (one weapon LoRA per pass).
-* `H3MD Director.json` — the full setup used for the samples; adds face refine, RIFE interpolation to 48 fps, one extra
-  refine step and a few convenience nodes.
+* `H3MD Director.json` — the full setup used for the samples; has the face refine and frame interpolation switches
+  on the canvas (both off as shipped), one extra refine step and a few convenience nodes.
 * `H3MD Director Remake.json` + `H3MD_Keyframe_MultiSwap_0.6.0.json` - the multi-person swap: the second
   makes the keyframes (with an AI, see "Multi-person swap") and the plan .zip, the first runs it.
 * `example_plans/H3MD_multiswap_3dancers_0.6.0_plan.zip` - a finished **multi-person swap** plan (three dancers,
@@ -342,7 +342,7 @@ videos or audio; untick **prompts** to leave the prompts out. It is only saved o
 | H3MD Director (this pack) | Director, Loop Sampler, Save Video Interp, depth / SAM3 motion copy | **required** | — |
 | [ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) | SageAttention and chunked feed-forward patches (less VRAM) | recommended (simple + full) | runs, but needs more VRAM; the SageAttention patch also needs the SageAttention package, otherwise bypass that node |
 | [ComfyUI-ClipProj](https://github.com/nicolab28/ComfyUI-ClipProj) | 4B text encoder projection, saves 10+ GB VRAM | only with the 4B encoder | use the 32B encoder |
-| [ComfyUI-VFI](https://github.com/GACLove/ComfyUI-VFI) | RIFE interpolation in `H3MD Save Video Interp` | optional | keep `interpolate` off: 24 fps output |
+| RIFE frame interpolation | `interpolate` in the Control Panel / `H3MD Save Video Interp` (24 → 30 / 48 / 60 fps) | **built in since 0.6.3** (network + weights ship with H3MD, MIT) | nothing to install; off as shipped |
 | [ComfyUI-VOSR2](https://github.com/ylchen333/ComfyUI-VOSR2) (simple) / TE-Speed-VOSR2 (full) | face refine in `H3MD Save Video Interp` | optional | keep `face_refine` off (default) |
 | SAM3.1 (`sam3.1_multiplex_fp16.safetensors` in `checkpoints/`, ComfyUI core) | face refine (0.5.3): finds the head on the face crop; H3 then redraws inside it. The save node's `redraw_model` / `redraw_clip` / `redraw_vae` / `redraw_audio_vae` take the sampler's H3 model (with the 768 turbo LoRA), text encoder and VAEs (wired in the examples) | needed for face refine | keep `face_refine` off |
 | [ComfyUI-H3-FaceRefine](https://github.com/Carasibana/ComfyUI-H3-FaceRefine) + a face detector (e.g. `face_yolov8m.pt` / `face_yolov8n.pt`) in `models/ultralytics/bbox/` | face refine: finds and follows the face (`detector`), shot cuts (`cut_detection = auto`, needs its `scenedetect` requirement). Since 0.5.9 H3MD registers `models/ultralytics/bbox` itself, so ComfyUI-Impact-Subpack is not needed for the detector list. It needs a recent ComfyUI and its requirements (`ultralytics scipy insightface scenedetect`): an old ComfyUI or missing requirements make it fail to load (look for `IMPORT FAILED` in the startup log), and then `detector` / `cut_detection` only show what H3MD can offer | needed for face refine | since 0.5.9 the save node no longer stops: it saves the video WITHOUT face refine and says why (missing pack, `detector = none`, detector file not found); or keep `face_refine` off |
@@ -353,7 +353,7 @@ videos or audio; untick **prompts** to leave the prompts out. It is only saved o
 | [rgthree-comfy](https://github.com/rgthree/rgthree-comfy) | Power Lora Loader (many LoRAs in one node) | full only, optional | the simple workflow's Control Panel loads LoRAs itself |
 | ComfyUI-Dehypnotic, Crystools, Easy-Use, LayerStyle, CRT-Nodes | aspect-ratio picker, switch, number, VRAM purge, timer | full only, optional | not needed to render |
 
-H3MD looks up the face-refine and RIFE packs only when you turn those features on, so the save node works without them.
+Frame interpolation and face refine are **off in every example workflow**; turn them on when you want them. Interpolation needs nothing else (built in since 0.6.3). The face-refine packs are looked up only when `face_refine` is on; if they are missing the video is saved without face refine.
 ComfyUI lists any missing pack when a workflow opens (ComfyUI-Manager → **Install Missing Custom Nodes**).
 
 </details>
@@ -591,13 +591,6 @@ entry is not shown.
 | `minimax_h3_lms_v1.0_r64_r.safetensors` | `loras` | huggingface.co/RunningHubAI/rh-minimax-h3-lms-v1.0-r64-lora |
 
 Each model has its own license; check its model page before use. The `ClipProjApply` entry only shows when ComfyUI-ClipProj is installed.
-
-</details>
-
-<details>
-<summary><b>RIFE model (manual download)</b></summary>
-
-the missing-models popup only downloads into registered `models/` folders and does not allow `.pkl`, so RIFE `flownet.pkl` is not in the manifest. Download it manually: node pack ComfyUI-VFI (<https://github.com/GACLove/ComfyUI-VFI>); model <https://huggingface.co/hzwer/RIFE/resolve/main/RIFEv4.26_0921.zip> — extract `flownet.pkl` to `custom_nodes/ComfyUI-VFI/rife/train_log/flownet.pkl` (relative to the ComfyUI root). ComfyUI-VFI normally downloads it itself on first use.
 
 </details>
 

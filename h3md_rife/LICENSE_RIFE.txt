@@ -1,0 +1,28 @@
+RIFE (network definition IFNet_HDv3.py and weights rife_v4.26.safetensors, RIFE v4.26)
+Source: https://github.com/hzwer/Practical-RIFE  /  https://huggingface.co/hzwer/RIFE (RIFEv4.26_0921.zip)
+The Practical-RIFE README states that the released models are under the same MIT license as the project.
+Changes by H3MD: one import line in IFNet_HDv3.py; the weights file flownet.pkl
+(sha256 45c7f74156704769dc9f85cfcaf8552e1e926f9399dcfa3a553dee88fac6f53f) is stored as safetensors with the
+'module.' key prefix removed - the tensors are unchanged.
+
+MIT License
+
+Copyright (c) 2021 hzwer
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

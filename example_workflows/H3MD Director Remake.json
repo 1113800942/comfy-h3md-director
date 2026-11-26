@@ -500,8 +500,8 @@
       "widgets_values": [
         1664,
         960,
-        true,
-        48,
+        false,
+        24,
         false,
         0,
         "randomize",
