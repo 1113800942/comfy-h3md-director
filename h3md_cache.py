@@ -156,6 +156,70 @@ def _sha(obj) -> str:
     return hashlib.sha256(json.dumps(obj, sort_keys=True, default=str, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
+PATCH_SAMPLES = 64   # values read per patch tensor for patch_signature (evenly spaced; never the whole tensor)
+
+
+def _feed_patch(h, v, depth: int = 0) -> None:
+    """Feed one value of a ModelPatcher weight patch into hash `h`: plain values by repr, tensors by shape, dtype and
+    PATCH_SAMPLES evenly spaced values, containers and adapter objects (comfy.weight_adapter: .name / .weights)
+    recursively.  Anything unreadable falls back to its type name - a signature must never stop a run."""
+    if depth > 8:
+        h.update(b"<deep>")
+        return
+    if v is None or isinstance(v, (bool, int, float, str, bytes)):
+        h.update(repr(v).encode("utf-8", "replace"))
+        return
+    if isinstance(v, torch.Tensor):
+        h.update(f"T{tuple(v.shape)}{v.dtype}".encode("utf-8"))
+        try:
+            flat = v.detach().reshape(-1)
+            n = int(flat.numel())
+            if n:
+                idx = torch.linspace(0, n - 1, steps=min(n, PATCH_SAMPLES)).round().long().to(flat.device)
+                h.update(flat[idx].to("cpu", torch.float64).numpy().tobytes())
+        except Exception:
+            h.update(b"<unread>")
+        return
+    if isinstance(v, dict):
+        h.update(f"D{len(v)}".encode("utf-8"))
+        for k in sorted(v, key=str):
+            h.update(str(k).encode("utf-8", "replace"))
+            _feed_patch(h, v[k], depth + 1)
+        return
+    if isinstance(v, (list, tuple)):
+        h.update(f"L{len(v)}".encode("utf-8"))
+        for x in v:
+            _feed_patch(h, x, depth + 1)
+        return
+    h.update(type(v).__name__.encode("utf-8", "replace"))
+    name = getattr(v, "__name__", None)
+    if isinstance(name, str):          # a function in the patch tuple (e.g. a key-conversion function)
+        h.update(name.encode("utf-8", "replace"))
+    for attr in ("name", "weights"):   # comfy.weight_adapter adapters
+        if attr != "__name__" and hasattr(v, attr) and not callable(getattr(v, attr)):
+            _feed_patch(h, getattr(v, attr), depth + 1)
+
+
+def patch_signature(model):
+    """0.6.4: signature of the WEIGHT PATCHES on a ModelPatcher (core LoRA loaders, adapters loaded by other packs
+    such as Load LakonLab Adapter): keys, strengths, shapes and sampled values.  None when the model has no weight
+    patches, so the cache keys of such runs stay exactly as before.  Before 0.6.4 these patches were not in the cache
+    key: after swapping an adapter with another pack's loader, resume_from_cache returned the old segment."""
+    patches = getattr(model, "patches", None)
+    if not patches:
+        return None
+    try:
+        h = hashlib.sha256()
+        for key in sorted(patches, key=str):
+            h.update(str(key).encode("utf-8", "replace"))
+            _feed_patch(h, patches[key])
+        return h.hexdigest()[:32]
+    except Exception as exc:   # never stop a run for a signature
+        LOG.warning("%s could not read the model's weight patches for the cache key (%s); they are not part of the "
+                    "key in this run", _TAG, exc)
+        return None
+
+
 def _file_sig(file: str):
     try:
         p = D.resolve_media_path(file)

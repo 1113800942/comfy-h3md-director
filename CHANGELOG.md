@@ -2,6 +2,35 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.6.4] - 2026-11-26
+
+### Changed / 变更
+- **Window mode on a large card: no extra strip in the high-res pass.** In window mode the high-res pass used one
+  strip more than its estimate needs (headroom for smaller cards, 0.4.x). That stays for every card under 30 GiB.
+  On a 30 GiB+ card with DynamicVRAM on the extra strip is now dropped while the plan uses at most 90% of the
+  measured-safe limit; the limit itself is unchanged, and the out-of-memory retry (more strips, low-res result
+  kept) is as before. Measured on an RTX 5090, 498 frames 960x1664: 3 strips took 260 s per high-res step, the full
+  frame 189 s; the same plan now runs in 2 strips. The log says which rule applied.
+  / **窗口模式下，大显存卡的高清阶段不再多切一条。** 窗口模式原来会比估算多切一条（给小显存留余量）。30 GiB 以下的卡
+  照旧。30 GiB 及以上、DynamicVRAM 开着的卡，当估算占用不超过安全线的 90% 时不再多切；安全线本身没有放宽，
+  爆显存后自动加条重试也照旧。RTX 5090、498 帧 960x1664 实测：3 条每步 260 秒，整帧 189 秒；同一计划现在是 2 条。
+  日志里会写明用的是哪条规则。
+
+### Fixed / 修复
+- **`resume_from_cache` after swapping a LoRA / adapter with another pack's loader.** The segment cache key only
+  knew the LoRAs loaded by H3MD's own loaders (LowVRAM LoRA Loader, Control Panel). Weight patches from core LoRA
+  nodes or other packs (e.g. Load LakonLab Adapter) were not in the key, so a resumed run returned the old segment.
+  They are in the key now (patch keys, strengths, shapes and sampled values); a model without weight patches keeps
+  its old keys. After updating, a run that uses core LoRA nodes re-renders once instead of resuming.
+  / **用别的插件的加载器换了 LoRA / 适配器后续跑，拿到的还是旧片段。** 缓存键原来只认 H3MD 自己的加载器。核心 LoRA
+  节点或其它插件（如 Load LakonLab Adapter）打在模型上的权重补丁现在也进缓存键；模型上没有权重补丁的，键不变。
+  升级后，用核心 LoRA 节点的工作流第一次续跑会重算一次。
+
+### Known limits / 已知限制
+- Swapping the base model file itself (another checkpoint in the UNet loader) is still not part of the cache key:
+  turn `resume_from_cache` off, or use another `cache_dir`, for the first run with another base model.
+  / 直接换底模文件仍不在缓存键里：换底模后的第一次运行请关掉 `resume_from_cache` 或换一个 `cache_dir`。
+
 ## [0.6.3] - 2026-11-25
 
 ### Changed / 变更

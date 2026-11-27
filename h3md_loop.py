@@ -283,7 +283,9 @@ def segment_range(plan: dict, stop_after: int = 0):
 def model_lora_sig(low, high, remake=None) -> dict:
     """0.3.4: LoRAs recorded on the models by H3MD LowVRAM LoRA Loader / H3MD Control Panel (model_options
     'h3md_lora_sig').  Changing one of them now changes the segment cache keys (before, a resume reused the old
-    segments).  Core loaders are not recorded.  Empty -> {} (keys exactly as before)."""
+    segments).  Empty -> {} (keys exactly as before).
+    0.6.4: weight patches put on the models by core loaders or other packs (LoRA nodes, Load LakonLab Adapter ...) are
+    recorded too, as '<name>_patches' (h3md_cache.patch_signature); a model without weight patches adds nothing."""
     out = {}
     items = [("low", low), ("high", high)]
     if remake is not None:
@@ -292,6 +294,9 @@ def model_lora_sig(low, high, remake=None) -> dict:
         sig = ((getattr(m, "model_options", None) or {}).get("h3md_lora_sig")) if m is not None else None
         if sig:
             out[name] = sig
+        psig = C.patch_signature(m) if m is not None else None
+        if psig:
+            out[name + "_patches"] = psig
     return out
 
 
@@ -684,8 +689,9 @@ def low_pass_key(settings_hash, plan, k, key_seed, seg_seed, continued, prev_key
     low = C.segment_key(settings_hash, plan_low, k, key_seed, continued, prev_key)
     if dkey is not None:
         low = C._sha({"key": low, "depth_control": dkey})
-    if (lora_sig or {}).get("low"):
-        low = C._sha({"key": low, "loras": {"low": lora_sig["low"]}})
+    lows = {x: v for x, v in (lora_sig or {}).items() if x in ("low", "low_patches") and v}   # 0.6.4: + weight patches
+    if lows:
+        low = C._sha({"key": low, "loras": lows})
     if seg_seed != key_seed:
         low = C._sha({"key": low, "seed": seg_seed})
     return low
