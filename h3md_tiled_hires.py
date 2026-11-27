@@ -79,6 +79,13 @@ TABLE_TOLERANCE = 0.005  # never looser than the largest verified ratio (0.5% = 
 FAIL_GUARD = 0.65        # ... and must stay below 65% of the smallest ratio that failed
 EXTRAPOLATION_FACTOR = 0.90  # strips with more rows than any verified run: limit x0.9 (one tier safer)
 
+# 0.6.4 window-mode headroom strip (the "one strip more than the estimate needs" of 11-07).  It is for cards smaller
+# than the one MEASURED_RUNS comes from (32 GB): there the estimate is an extrapolation.  On a card of that class the
+# extra strip only cost time (measured 11-26, RTX 5090, 498 frames: 3 strips 260 s / step, full frame 189 s), so it is
+# dropped there - but only while the plan keeps a comfortable distance from the measured-safe limit.
+HEADROOM_CARD_GIB = 30.0   # total VRAM from which the extra strip may be dropped
+HEADROOM_COMFORT = 0.90    # ... and only when the plan uses at most 90% of the measured-safe limit
+
 TILING_AXES = ("auto", "width", "height")
 TILING_INPUTS = {   # H3MD Sampler / Loop inputs (highres_tiling itself is defined by the sampler)
     "tiling_axis": (list(TILING_AXES), {"default": "auto",
@@ -165,6 +172,31 @@ def available_workspace(model_patcher) -> float:
     LOG.info("%s capacity: free=%.0f MiB reclaimable_weights=%.0f MiB weight_allowance=%.0f MiB workspace=%.0f MiB",
              _TAG, free / 2**20, reclaim / 2**20, weights / 2**20, work / 2**20)
     return work
+
+
+def total_vram_bytes(model_patcher) -> float:
+    """Total memory of the model's load device (0.0 when it cannot be read: treated as a small card)."""
+    try:
+        import comfy.model_management as mm
+        return float(mm.get_total_memory(model_patcher.load_device))
+    except Exception:
+        return 0.0
+
+
+def headroom_strip_reason(plan: dict, total_bytes: float):
+    """0.6.4: why a window-mode plan with 2+ strips gets one more strip, or None when it does not need one.
+    None only when ALL of these hold: the card has HEADROOM_CARD_GIB or more, DynamicVRAM is on (the measured case),
+    the plan fits, and its calibrated estimate is at most HEADROOM_COMFORT x the measured-safe limit."""
+    gib = float(total_bytes or 0.0) / 2**30
+    if gib < HEADROOM_CARD_GIB:
+        return f"card {gib:.0f} GiB < {HEADROOM_CARD_GIB:.0f} GiB"
+    if not plan.get("dynamic_vram"):
+        return "DynamicVRAM off (not measured)"
+    lim = float(plan.get("calib_limit") or 0.0)
+    ratio = float(plan.get("fit_ratio") if plan.get("fit_ratio") is not None else float("inf"))
+    if not plan.get("fits") or lim <= 0 or ratio > HEADROOM_COMFORT * lim:
+        return f"the plan uses {ratio:.2f} of the workspace, comfort line {HEADROOM_COMFORT * lim:.2f}"
+    return None
 
 
 def packed_rows(video_shape, audio_t: int, text_len: int, keyframe_tokens: int, ref_rows: int) -> int:
@@ -715,10 +747,19 @@ def _run(executor, state, req, stats, noise, latent_image, sampler, sigmas, deno
             plan = plan_tiles(patcher, vshape, audio_t, guider.conds, req, min_tiles=min_tiles, device=device,
                               full_t=full_t)
             if vshape[2] != latent_shapes[0][2] and 1 < plan["tiles"] < plan["max_tiles"] and attempt == 1:
-                # window mode (YJ 11-07): one strip more than the estimate needs - headroom for smaller cards
-                plan = plan_tiles(patcher, vshape, audio_t, guider.conds, req, min_tiles=plan["tiles"] + 1,
-                                  device=device, full_t=full_t)
-                LOG.info("%s window mode: one extra strip for headroom -> %d strips", _TAG, plan["tiles"])
+                # window mode (YJ 11-07): one strip more than the estimate needs - headroom for smaller cards.
+                # 0.6.4: not on a 30 GiB+ card whose plan is comfortably inside the measured-safe limit.
+                why = headroom_strip_reason(plan, total_vram_bytes(patcher))
+                if why:
+                    plan = plan_tiles(patcher, vshape, audio_t, guider.conds, req, min_tiles=plan["tiles"] + 1,
+                                      device=device, full_t=full_t)
+                    LOG.info("%s window mode: one extra strip for headroom (%s) -> %d strips", _TAG, why,
+                             plan["tiles"])
+                else:
+                    LOG.info("%s window mode: no extra headroom strip (card %.0f GiB, the plan uses %.2f of the "
+                             "workspace, comfort line %.2f) -> %d strips", _TAG,
+                             total_vram_bytes(patcher) / 2**30, plan["fit_ratio"],
+                             HEADROOM_COMFORT * plan["calib_limit"], plan["tiles"])
             stats["plan"] = plan
             with FF.chunked_mlp(ff_rows):
                 out = _run_plan(executor, state, plan, stats, noise, latent_image, sampler, sigmas, denoise_mask,

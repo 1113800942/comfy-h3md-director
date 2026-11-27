@@ -283,13 +283,35 @@ def segment_range(plan: dict, stop_after: int = 0):
 def model_lora_sig(low, high, remake=None) -> dict:
     """0.3.4: LoRAs recorded on the models by H3MD LowVRAM LoRA Loader / H3MD Control Panel (model_options
     'h3md_lora_sig').  Changing one of them now changes the segment cache keys (before, a resume reused the old
-    segments).  Core loaders are not recorded.  Empty -> {} (keys exactly as before)."""
+    segments).  Empty -> {} (keys exactly as before).
+    0.6.4: weight patches put on the models by core loaders or other packs (LoRA nodes, Load LakonLab Adapter ...) are
+    recorded too, as '<name>_patches' (h3md_cache.patch_signature); a model without weight patches adds nothing."""
     out = {}
     items = [("low", low), ("high", high)]
     if remake is not None:
         items.append(("remake", remake))
     for name, m in items:
         sig = ((getattr(m, "model_options", None) or {}).get("h3md_lora_sig")) if m is not None else None
+        if sig:
+            out[name] = sig
+        psig = C.patch_signature(m) if m is not None else None
+        if psig:
+            out[name + "_patches"] = psig
+    return out
+
+
+def model_base_sig(low, high, remake=None) -> dict:
+    """0.6.4: {'low': .., 'high': .., ['remake': ..]} - which base model file each pass runs on
+    (h3md_cache.base_model_signature).  It is stored with every cached segment; a segment made with another base
+    model is rendered again (before, resume_from_cache returned the old take after the base model was swapped).
+    Not part of the cache KEY, so segments cached before 0.6.4 stay usable.  A pass without its own model uses the
+    low-res model; a model whose file is not known is left out (not checked)."""
+    out = {}
+    items = [("low", low), ("high", high if high is not None else low)]
+    if remake is not None:
+        items.append(("remake", remake))
+    for name, m in items:
+        sig = C.base_model_signature(m) if m is not None else None
         if sig:
             out[name] = sig
     return out
@@ -343,7 +365,7 @@ def made_with_sig(settings_hash: dict, lora_sig) -> str:
     return C._sha({"settings": settings_hash["full"], "loras": lora_sig or {}})
 
 
-def cache_usable(cache, k: int, segs: list, beta: bool, content=None, made_with=None) -> bool:
+def cache_usable(cache, k: int, segs: list, beta: bool, content=None, made_with=None, base=None) -> bool:
     """Segment k (0-based) can be taken from the cache as it is (same check as the rerun pre-check).  With `content`
     (segment_contents): only when it was made from this plan's segment k - a cache folder is shared by every plan
     with the same settings (0.5.91: a trial spliced in segment 2 of another plan).  Old manifests without 'content'
@@ -355,10 +377,12 @@ def cache_usable(cache, k: int, segs: list, beta: bool, content=None, made_with=
         return False
     if made_with is not None and man.get("made_with") != made_with:   # other settings / LoRAs (or before this check)
         return False
+    if base is not None and not C.same_base(man.get("base_model"), base):   # 0.6.4: made with another base model
+        return False
     return not (beta and not man.get("lowres"))
 
 
-def plan_segments_to_run(text: str, segs: list, cache, beta: bool, content=None, made_with=None):
+def plan_segments_to_run(text: str, segs: list, cache, beta: bool, content=None, made_with=None, base=None):
     """v0.3 'segments_to_run' (H3MD Control Panel): one box instead of rerun_segments + stop_after.
     Empty -> None (normal run).  '2' / '1-2' / '3, 6-7, 9' -> (stop_after, rerun list, log line):
     run up to the highest one; the listed segments are generated again even if cached; earlier segments missing
@@ -368,8 +392,9 @@ def plan_segments_to_run(text: str, segs: list, cache, beta: bool, content=None,
         return None
     stop = max(sel) + 1
     forced = [k for k in sel if cache_usable(cache, k, segs, beta)]          # made again: any take will do
-    missing = [k for k in range(stop) if k not in sel and not cache_usable(cache, k, segs, beta, content, made_with)]
-    later_cached = all(cache_usable(cache, k, segs, beta, content, made_with) for k in range(stop, len(segs)))
+    missing = [k for k in range(stop) if k not in sel
+               and not cache_usable(cache, k, segs, beta, content, made_with, base)]
+    later_cached = all(cache_usable(cache, k, segs, beta, content, made_with, base) for k in range(stop, len(segs)))
     if forced and later_cached:
         stop = len(segs)   # a repair inside a finished video: keep the whole video (later segments from the cache)
     rerun = sorted(set(sel) | set(missing)) if forced else []
@@ -379,7 +404,7 @@ def plan_segments_to_run(text: str, segs: list, cache, beta: bool, content=None,
     return stop, rerun, line
 
 
-def plan_trial(text: str, segs: list, cache, beta: bool, content=None, made_with=None):
+def plan_trial(text: str, segs: list, cache, beta: bool, content=None, made_with=None, base=None):
     """0.4.5 试镜 (trial) in window mode: '2' / '1, 3' -> (indices, rerun list, log line).
     Only the listed parts run; a part that starts with a continuation (overlapIn > 0: a long take with no hard cut
     inside the group limit) also needs the part before it (taken from the cache, or generated when missing).
@@ -396,8 +421,9 @@ def plan_trial(text: str, segs: list, cache, beta: bool, content=None, made_with
             j -= 1
             need.add(j)
     forced = [k for k in sel if cache_usable(cache, k, segs, beta)]          # made again: any take will do
-    missing = sorted(k for k in need if k not in sel and not cache_usable(cache, k, segs, beta, content, made_with))
-    others_cached = all(cache_usable(cache, k, segs, beta, content, made_with) for k in range(len(segs))
+    missing = sorted(k for k in need if k not in sel
+                     and not cache_usable(cache, k, segs, beta, content, made_with, base))
+    others_cached = all(cache_usable(cache, k, segs, beta, content, made_with, base) for k in range(len(segs))
                         if k not in sel)
     indices = list(range(len(segs))) if (forced and others_cached) else sorted(need)
     rerun = sorted(set(sel) | set(missing)) if forced else []
@@ -684,20 +710,22 @@ def low_pass_key(settings_hash, plan, k, key_seed, seg_seed, continued, prev_key
     low = C.segment_key(settings_hash, plan_low, k, key_seed, continued, prev_key)
     if dkey is not None:
         low = C._sha({"key": low, "depth_control": dkey})
-    if (lora_sig or {}).get("low"):
-        low = C._sha({"key": low, "loras": {"low": lora_sig["low"]}})
+    lows = {x: v for x, v in (lora_sig or {}).items() if x in ("low", "low_patches") and v}   # 0.6.4: + weight patches
+    if lows:
+        low = C._sha({"key": low, "loras": lows})
     if seg_seed != key_seed:
         low = C._sha({"key": low, "seed": seg_seed})
     return low
 
 
-def progress_store(cache, k, key, plan, where="", low_key=None):
+def progress_store(cache, k, key, plan, where="", low_key=None, base=None):
     """window-exp: the segment's progress cache (low-res result + per-step state) in the segment cache folder, or None
     (no disk cache, no key, or not a window-mode plan)."""
     if cache is None or not key or not isinstance(plan, dict) or not plan.get("windowMode"):
         return None
     try:
-        return PROG.ProgressStore(os.path.join(cache.dir, f"seg_{int(k):03d}_progress"), key, low_key=low_key)
+        return PROG.ProgressStore(os.path.join(cache.dir, f"seg_{int(k):03d}_progress"), key, low_key=low_key,
+                                  base=base)
     except Exception as exc:
         LOG.warning("%s %s: progress cache unavailable (%s)", _TAG, where, exc)
         return None
@@ -937,9 +965,12 @@ class H3MDLoopSampler:
                 LOG.warning("%s %s (node(s) %s use 'images').", _TAG, IMAGES_PLACEHOLDER_WARNING, ", ".join(users))
         made_with = made_with_sig(settings_hash, model_lora_sig(
             low_res_model, high_res_model, sampler_kwargs.get("remake_model") if SWAP.engine(plan) else None))
+        base_sig = model_base_sig(   # 0.6.4: a segment cached with another base model is not reused
+            low_res_model, high_res_model, sampler_kwargs.get("remake_model") if SWAP.engine(plan) else None)
         if run_text and isinstance(plan, dict) and plan.get("windowMode"):   # 0.4.5 试镜: only the chosen parts
             t_indices, selected, line = plan_trial(run_text, segs, cache if resume_from_cache else None,
-                                                   continue_lowres_prefix == BETA, segment_contents(plan), made_with)
+                                                   continue_lowres_prefix == BETA, segment_contents(plan), made_with,
+                                                   base_sig)
             LOG.info("%s %s", _TAG, line)
             if t_indices != indices:
                 indices = t_indices
@@ -948,7 +979,8 @@ class H3MDLoopSampler:
                 selected = []
         elif run_text:   # v0.3 segments_to_run: decide rerun vs. normal resume from what is really in the cache
             planned = plan_segments_to_run(run_text, segs, cache if resume_from_cache else None,
-                                           continue_lowres_prefix == BETA, segment_contents(plan), made_with)
+                                           continue_lowres_prefix == BETA, segment_contents(plan), made_with,
+                                           base_sig)
             _stop, selected, line = planned
             LOG.info("%s %s", _TAG, line)
             if _stop != len(indices):   # whole video kept (repair) or shorter test run
@@ -997,6 +1029,8 @@ class H3MDLoopSampler:
         ctx_clips = int(getattr(self, "_ctx_clips", 0) or 0)  # H3MD-Exp seam_decode_context
         lora_sig = model_lora_sig(low_res_model, high_res_model,
                                   remake_model if SWAP.engine(plan) else None)   # 0.3.4: {} = old keys unchanged
+        base_sig = model_base_sig(low_res_model, high_res_model,
+                                  remake_model if SWAP.engine(plan) else None)   # 0.6.4: stored per cached segment
         ctx_prevs = []    # H3MD-Exp: previous final latent per entry of `finals` (None = no decode context)
         depth = getattr(self, "_depth", None) or DC.LoopDepth(None, {"segments": []})  # H3MD depth (inactive = no-op)
         beta = lowres_prefix_mode == BETA
@@ -1027,6 +1061,8 @@ class H3MDLoopSampler:
                     missing.append(f"{k + 1} (cached from another plan, or before 0.5.91)")
                 elif man.get("made_with") != made_with:       # 0.5.91: other settings / LoRAs
                     missing.append(f"{k + 1} (made with other settings or LoRAs)")
+                elif not C.same_base(man.get("base_model"), base_sig):   # 0.6.4
+                    missing.append(f"{k + 1} (made with another base model)")
             if missing:
                 raise ValueError(f"{_TAG} rerun_segments: these segments are not usable from the cache "
                                  f"{cache.dir if cache is not None else ''}: {', '.join(missing)}. The plan's split or "
@@ -1084,6 +1120,10 @@ class H3MDLoopSampler:
             if redraw and cache is not None and key is not None:
                 man = cache.manifest(k) or {}
                 check_redraw_base(cache, k, man, seg, where)
+                if not C.same_base(man.get("base_model"), base_sig):   # 0.6.4
+                    LOG.warning("%s %s: local redraw with another base model than the segment was rendered with - the "
+                                "redrawn seconds may not match the rest. 局部重绘用的底模和这一段原来的不一样，重画的"
+                                "部分可能和其余部分对不上。", _TAG, where)
                 if base_key not in (man.get("key"), man.get("base_key")):
                     LOG.info("%s %s: local redraw: the prompt / pictures / reference media of this segment changed since "
                              "it was rendered - the redrawn seconds %s use the new ones, the rest keeps the cached take. "
@@ -1108,6 +1148,11 @@ class H3MDLoopSampler:
             else:
                 hit = cache is not None and (resume or bool((plan.get("windowMode") or {}).get("redraw"))) \
                     and not redraw and cache.has(k, key)
+                if hit and not C.same_base((cache.manifest(k) or {}).get("base_model"), base_sig):
+                    # 0.6.4: same plan, settings and LoRAs, but the base model was swapped since
+                    LOG.info("%s %s: the cached segment was made with another base model - rendering it again. "
+                             "这一段的缓存是用另一个底模跑的，重新生成。", _TAG, where)
+                    hit = False
             if hit and not rerun and beta and step + 1 < len(indices) and segs[indices[step + 1]]["overlapIn"] > 0 \
                     and not (cache.manifest(k) or {}).get("lowres"):
                 LOG.info("%s %s: cached segment has no BETA low-res carry (written in another mode); re-rendering",
@@ -1217,7 +1262,7 @@ class H3MDLoopSampler:
                     LOG.warning("%s %s: lowres_anchor has no reference (the shot's first segment has no low-res "
                                 "result in the cache); not applied", _TAG, where)
             low_model, high_model, dctl = model, high_res_model, None
-            progress = None if redraw else progress_store(cache, k, pkey, plan, where, low_key)
+            progress = None if redraw else progress_store(cache, k, pkey, plan, where, low_key, base_sig)
             if progress is not None:
                 extra["h3md_progress"] = progress
             if redraw:   # local redraw: the cached segment is the starting point, only the ranges are re-rendered
@@ -1365,6 +1410,7 @@ class H3MDLoopSampler:
                     cache.write(k, key, final, imgs, aud,
                                 dict({"trim": trims[-1], "report": report[-1], "content": contents.get(k),
                                       "made_with": made_with,
+                                      "base_model": base_sig,   # 0.6.4: which base model file(s) made it
                                       "cuts": [int(c) for c in seg.get("windowCuts") or []]},   # redraw check
                                      **({"base_key": base_key, "redraw": redraw} if redraw else {})),
                                 lowres=prev_low if beta else None)

@@ -2,6 +2,44 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.6.4] - 2026-11-26
+
+### Changed / 变更
+- **Window mode on a large card: no extra strip in the high-res pass.** In window mode the high-res pass used one
+  strip more than its estimate needs (headroom for smaller cards, 0.4.x). That stays for every card under 30 GiB.
+  On a 30 GiB+ card with DynamicVRAM on the extra strip is now dropped while the plan uses at most 90% of the
+  measured-safe limit; the limit itself is unchanged, and the out-of-memory retry (more strips, low-res result
+  kept) is as before. Measured on an RTX 5090, 498 frames 960x1664: 3 strips took 260 s per high-res step, the full
+  frame 189 s; the same plan now runs in 2 strips. The log says which rule applied.
+  / **窗口模式下，大显存卡的高清阶段不再多切一条。** 窗口模式原来会比估算多切一条（给小显存留余量）。30 GiB 以下的卡
+  照旧。30 GiB 及以上、DynamicVRAM 开着的卡，当估算占用不超过安全线的 90% 时不再多切；安全线本身没有放宽，
+  爆显存后自动加条重试也照旧。RTX 5090、498 帧 960x1664 实测：3 条每步 260 秒，整帧 189 秒；同一计划现在是 2 条。
+  日志里会写明用的是哪条规则。
+
+### Fixed / 修复
+- **`resume_from_cache` after swapping a LoRA / adapter with another pack's loader.** The segment cache key only
+  knew the LoRAs loaded by H3MD's own loaders (LowVRAM LoRA Loader, Control Panel). Weight patches from core LoRA
+  nodes or other packs (e.g. Load LakonLab Adapter) were not in the key, so a resumed run returned the old segment.
+  They are in the key now (patch keys, strengths, shapes and sampled values); a model without weight patches keeps
+  its old keys. After updating, a run that uses core LoRA nodes re-renders once instead of resuming.
+  / **用别的插件的加载器换了 LoRA / 适配器后续跑，拿到的还是旧片段。** 缓存键原来只认 H3MD 自己的加载器。核心 LoRA
+  节点或其它插件（如 Load LakonLab Adapter）打在模型上的权重补丁现在也进缓存键；模型上没有权重补丁的，键不变。
+  升级后，用核心 LoRA 节点的工作流第一次续跑会重算一次。
+
+- **`resume_from_cache` after swapping the base model.** The cache did not know which base model made a segment,
+  so after loading another checkpoint in the UNet loader a resumed run returned the old segment. Every cached
+  segment now records the base model file(s) it was made with - whichever file was loaded, identified by its
+  content (a renamed or moved copy is the same model) and the loader's weight dtype - and a segment made with
+  another base model is rendered again; the log says so. When only the high-res model changes, the low-res pass of
+  a window-mode segment is kept. Segments cached before 0.6.4 carry no record and stay usable; the check starts
+  with the first segment written by 0.6.4. A model from a loader that does not tell ComfyUI its file (no
+  `cached_patcher_init`) is not checked. A local redraw with another base model than the segment was rendered with
+  logs a warning.
+  / **换了底模后续跑，拿到的还是旧片段。** 缓存原来不记录一段是用哪个底模跑的。现在每段缓存都会记下当时加载的底模文件
+  （按文件内容识别，改名或挪位置算同一个模型；加载精度不同算不同），底模和当时不一样就重新生成，日志里会写明。
+  只换高清模型时，窗口模式的低清结果保留。0.6.4 之前的缓存没有这条记录，照常可用，从 0.6.4 写入的片段开始检查。
+  不向 ComfyUI 登记文件的第三方加载器加载的模型不检查。用另一个底模做局部重绘时日志会提醒。
+
 ## [0.6.3] - 2026-11-25
 
 ### Changed / 变更
