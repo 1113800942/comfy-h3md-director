@@ -155,11 +155,51 @@ def strip_image(frames, label: str = ""):
     return sheet
 
 
+EVENT = "h3md.live_preview"   # websocket event for the H3MD Live Preview window node (web/js/h3md_live_preview.js)
+
+
 def _send(step, total, img):
+    """1) the running node's own sampler preview (the Loop, also inside a subgraph);
+    2) every H3MD Live Preview window node, wherever it sits (outer graph, subgraph)."""
     import comfy.utils
     hook = comfy.utils.PROGRESS_BAR_HOOK
     if hook is not None:
         hook(step, total, ("JPEG", img, MAX_SIDE), node_id=None)
+    try:
+        import base64
+        import io
+        from server import PromptServer
+        buf = io.BytesIO()
+        img.save(buf, "JPEG", quality=85)
+        PromptServer.instance.send_sync(EVENT, {
+            "image": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii"),
+            "step": int(step), "total": int(total)})
+    except Exception as exc:   # no server (tests) / no client: the node preview above is enough
+        LOG.debug("%s window event not sent: %s", _TAG, exc)
+
+
+class H3MDLivePreviewWindow:
+    """A window that shows the Loop's live preview.  Place it anywhere (outer graph or a subgraph); no wires.
+    It is not part of the run (no inputs, no outputs): the picture arrives over the websocket."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {}}
+
+    RETURN_TYPES = ()
+    FUNCTION = "noop"
+    CATEGORY = "MiniMax H3/H3MD"
+    DESCRIPTION = ("Shows the H3MD Loop's live preview while a run samples: drop it anywhere (also outside the subgraph "
+                   "that holds the Loop), no wires needed. Settings: live_preview / live_preview_from_step in H3MD Loop "
+                   "Options.\n跑的时候显示 H3MD Loop 的实时预览：放在画布任何地方都行（Loop 在子图里也行），不用连线。"
+                   "设置在 H3MD Loop Options 的 live_preview / live_preview_from_step。")
+
+    def noop(self):
+        return ()
+
+
+NODE_CLASS_MAPPINGS = {"H3MDLivePreviewWindow": H3MDLivePreviewWindow}
+NODE_DISPLAY_NAME_MAPPINGS = {"H3MDLivePreviewWindow": "H3MD Live Preview 实时预览"}
 
 
 def show(stage: str, step: int, total: int, denoised, shapes=None):

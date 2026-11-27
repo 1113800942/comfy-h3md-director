@@ -100,3 +100,18 @@ def test_no_video_is_reported_not_silent(caplog):
     with caplog.at_level("WARNING", logger="H3MD"):
         LP.show("low_res", 1, 6, torch.zeros(1, 1, 50))
     assert LP._state["failed"] and "no H3 video latent" in caplog.text
+
+
+def test_window_node_needs_no_wires_and_is_not_run():
+    n = LP.H3MDLivePreviewWindow
+    assert n.INPUT_TYPES() == {"required": {}} and n.RETURN_TYPES == ()
+    assert not getattr(n, "OUTPUT_NODE", False)                 # never executed, never blocks a queue
+    assert "H3MDLivePreviewWindow" in LP.NODE_CLASS_MAPPINGS
+    js = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web", "js", "h3md_live_preview.js")
+    src = open(js, encoding="utf-8").read()
+    assert LP.EVENT in src and "H3MDLivePreviewWindow" in src
+
+
+def test_send_without_server_does_not_raise():
+    from PIL import Image
+    LP._send(1, 6, Image.new("RGB", (8, 8)))
