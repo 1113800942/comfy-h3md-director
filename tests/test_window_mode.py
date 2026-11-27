@@ -173,8 +173,8 @@ class TimedPrompts(unittest.TestCase):
 
 class Preview(unittest.TestCase):
     def test_flag_and_cache_key(self):
-        self.assertFalse(WIN.normalize_window_mode(True)["preview"])
-        self.assertTrue(WIN.normalize_window_mode({"preview": 1})["preview"])
+        self.assertNotIn("preview", WIN.normalize_window_mode(True))          # 0.6.5: removed
+        self.assertNotIn("preview", WIN.normalize_window_mode({"preview": 1}))   # old plans: dropped
         a = D.parse_plan(timed_plan({"length": 243}))
         b = D.parse_plan(timed_plan({"length": 243, "preview": True}))
         self.assertEqual(C.segment_signature(a, 0), C.segment_signature(b, 0))

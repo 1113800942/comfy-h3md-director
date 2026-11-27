@@ -38,7 +38,7 @@ _TAG = "[H3MD Window]"
 _KEY = "h3md_window"
 SPAN_KEY = "h3md_window_span"          # conditioning dict key: (start_frame, end_frame) in shot pixel frames
 DEFAULTS = {"videoPerWindow": "auto", "length": 243, "overlap": None, "highLength": None, "highOverlap": None, "freenoise": True,
-            "cropGuide": True, "preview": False,
+            "cropGuide": True,
             "refs": True, "groups": True, "groupLength": 1445,
             "redraw": None,
             # 11-08 接续窗口 (sequential windows, low-res pass only): each step runs the windows in time order and a
@@ -103,13 +103,13 @@ def normalize_window_mode(value):
             LOG.warning("%s window %s %d frames is longer than H3's trained range (<= %d)", _TAG, k, out[k], MAX_TRAINED)
     out["freenoise"] = bool(out["freenoise"])
     out["cropGuide"] = bool(out["cropGuide"])
-    out["preview"] = bool(out["preview"])
+    out.pop("preview", None)   # 0.6.5: low-res-only preview removed (old plans)
     out["refs"] = bool(out["refs"])
     out["groups"] = bool(out["groups"])            # 3e: multi-shot plans -> one timeline per group
     out["chainPin"] = min(1.0, max(0.0, float(out["chainPin"] or 0.0)))
     out["groupLength"] = _round_17(out["groupLength"], 22)
     v = out["videoPerWindow"]   # 3d: "auto" = when a reference video is longer than H3's ~15 s limit
-    out["videoPerWindow"] = "auto" if v in ("auto", None) else bool(v)          # 3c: each auto window prompt gets only the pictures it names   # low-res preview: stop after the low-res pass
+    out["videoPerWindow"] = "auto" if v in ("auto", None) else bool(v)          # 3c: each auto window prompt gets only the pictures it names
     return out
 
 
@@ -1044,58 +1044,93 @@ def plan_seconds(plan) -> float | None:
         return None
 
 
-class H3MDRedrawPreview:
-    """0.4.0: low-res preview and local redraw as their own node (YJ 11-08: not on the Director's editor, so the
-    old interface stays as it is).  Put it between the Director's 'plan' and the Loop's 'plan'.  Bypassed or both
-    switches off = the plan goes through unchanged."""
+REDRAW_TIP = ("Seconds of a FINISHED run to render again with a new seed, e.g. 4-8 or 4-8, 1:12-1:15 "
+              "(time on the whole video). Everything else stays exactly as it was; the previous version is "
+              "kept in the cache folder. Each run with this filled in tries a new seed; empty it (or bypass "
+              "the node) to keep the version you like.\n"
+              "已经跑完的片子里要重画的秒数（整条片子的时间），如 4-8 或 4-8, 1:12-1:15。其他部分一帧不变，"
+              "旧版本留在缓存文件夹里。填着就每跑一次换一个种子重画；满意了清空（或旁路这个节点）就保留当前版本。")
+
+
+def redraw_plan(plan, redraw=""):
+    """Plan with windowMode.redraw set (copy); unchanged plan when redraw is empty."""
+    import copy
+    ranges = parse_redraw(redraw, plan_seconds(plan))
+    if not ranges:
+        return plan
+    if not isinstance(plan, dict) or not plan.get("windowMode"):
+        raise ValueError(f"{_TAG} local redraw works with seamless long video only: tick '无接缝长视频' in the "
+                         f"Director (or bypass this node). 局部重绘只能用在无接缝长视频：在导演台勾上「无接缝长视频」"
+                         f"（或旁路这个节点）。")
+    out = copy.deepcopy(plan)
+    wm = dict(out["windowMode"]) if isinstance(out["windowMode"], dict) else \
+        dict(normalize_window_mode(out["windowMode"]) or {})
+    wm.pop("preview", None)        # 0.6.5: the low-res-only switch is gone
+    wm["redraw"] = ranges
+    out["windowMode"] = wm
+    LOG.info("%s Redraw node: local redraw of seconds %s", _TAG, ranges)
+    return out
+
+
+class H3MDRedraw:
+    """0.6.5: local redraw only (the low-res-only 'preview' switch of H3MD Redraw / Preview was removed - watching a
+    run is the Loop's live preview now).  Between the Director's 'plan' and the Loop's 'plan'.  Bypassed or empty =
+    the plan goes through unchanged."""
 
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
             "plan": ("H3MD_PLAN",),
-            "preview": ("BOOLEAN", {"default": False, "tooltip":
-                        "Low-res pass only (about half the time). Happy with it? Switch this off and run again: the "
-                        "full version reuses the low-res pass from the cache.\n"
-                        "只跑低清（约省一半时间）。满意后关掉再跑一次，完整版直接用缓存里的低清结果。"}),
-            "redraw": ("STRING", {"default": "", "multiline": False, "tooltip":
-                       "Seconds of a FINISHED run to render again with a new seed, e.g. 4-8 or 4-8, 1:12-1:15 "
-                       "(time on the whole video). Everything else stays exactly as it was; the previous version is "
-                       "kept in the cache folder. Each run with this filled in tries a new seed; empty it (or bypass "
-                       "the node) to keep the version you like.\n"
-                       "已经跑完的片子里要重画的秒数（整条片子的时间），如 4-8 或 4-8, 1:12-1:15。其他部分一帧不变，"
-                       "旧版本留在缓存文件夹里。填着就每跑一次换一个种子重画；满意了清空（或旁路这个节点）就保留当前版本。"}),
+            "redraw": ("STRING", {"default": "", "multiline": False, "tooltip": REDRAW_TIP}),
         }}
 
     RETURN_TYPES = ("H3MD_PLAN",)
     RETURN_NAMES = ("plan",)
     FUNCTION = "run"
     CATEGORY = "MiniMax H3/H3MD"
-    DESCRIPTION = ("Low-res preview and local redraw for seamless long video (window mode). Between the Director and "
-                   "the Loop. 无接缝长视频的低清预览和局部重绘，接在导演台和 Loop 之间。")
+    DESCRIPTION = ("Local redraw for seamless long video (window mode): render chosen seconds of a finished run again. "
+                   "Between the Director and the Loop. 无接缝长视频的局部重绘：把跑完的片子里指定的几秒重画，接在导演台和 "
+                   "Loop 之间。")
+
+    def run(self, plan, redraw=""):
+        return (redraw_plan(plan, redraw),)
+
+
+class H3MDRedrawPreview:
+    """Old node (0.4.0-0.6.4), kept only so saved workflows still load and run; not in the node menu.  Its 'preview'
+    switch (low-res pass only, then stop) was removed in 0.6.5 and is ignored: the run goes on into high-res and the
+    Loop's live preview shows it while it samples.  Use H3MD Redraw."""
+
+    DEPRECATED = True
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "plan": ("H3MD_PLAN",),
+            "preview": ("BOOLEAN", {"default": False, "tooltip":
+                        "Removed in 0.6.5 (ignored). Watch the run with the Loop's live preview instead; replace this "
+                        "node with H3MD Redraw.\n0.6.5 起已取消（不起作用）。跑的时候看 Loop 节点上的实时预览；请把这个节点"
+                        "换成 H3MD Redraw。"}),
+            "redraw": ("STRING", {"default": "", "multiline": False, "tooltip": REDRAW_TIP}),
+        }}
+
+    RETURN_TYPES = ("H3MD_PLAN",)
+    RETURN_NAMES = ("plan",)
+    FUNCTION = "run"
+    CATEGORY = "MiniMax H3/H3MD"
+    DESCRIPTION = "Old node - use H3MD Redraw. 旧节点，请换成 H3MD Redraw。"
 
     def run(self, plan, preview=False, redraw=""):
-        import copy
-        ranges = parse_redraw(redraw, plan_seconds(plan))
-        if not preview and not ranges:
-            return (plan,)
-        if not isinstance(plan, dict) or not plan.get("windowMode"):
-            raise ValueError(f"{_TAG} low-res preview and local redraw work with seamless long video only: tick "
-                             f"'无接缝长视频' in the Director (or bypass this node). 低清预览和局部重绘只能用在无接缝长视频："
-                             f"在导演台勾上「无接缝长视频」（或旁路这个节点）。")
-        if preview and ranges:
-            raise ValueError(f"{_TAG} preview and redraw together: redraw works on a finished full run - switch preview "
-                             f"off first. 低清预览和局部重绘不能同时开：局部重绘要在跑完的完整版上做，先关掉低清预览。")
-        out = copy.deepcopy(plan)
-        wm = dict(out["windowMode"]) if isinstance(out["windowMode"], dict) else \
-            dict(normalize_window_mode(out["windowMode"]) or {})
-        wm["preview"] = bool(preview)
-        wm["redraw"] = ranges or None   # None = the normalized 'no redraw'
-        out["windowMode"] = wm
-        LOG.info("%s Redraw / Preview node: %s", _TAG,
-                 f"local redraw of seconds {ranges}" if ranges else "low-res preview only")
-        return (out,)
+        if preview:
+            LOG.warning("%s the low-res-only 'preview' switch was removed in 0.6.5 and is ignored: the run goes on into "
+                        "high-res, watch it on the Loop's live preview (replace this node with H3MD Redraw). 0.6.5 已"
+                        "取消「只跑低清」开关，这次照常跑完高清，跑的时候看 Loop 上的实时预览（请换成 H3MD Redraw 节点）。",
+                        _TAG)
+        return (redraw_plan(plan, redraw),)
 
 
-NODE_CLASS_MAPPINGS = {"H3MDContextWindows": H3MDContextWindows, "H3MDRedrawPreview": H3MDRedrawPreview}
+NODE_CLASS_MAPPINGS = {"H3MDContextWindows": H3MDContextWindows, "H3MDRedraw": H3MDRedraw,
+                       "H3MDRedrawPreview": H3MDRedrawPreview}
 NODE_DISPLAY_NAME_MAPPINGS = {"H3MDContextWindows": "H3MD Context Windows (window mode)",
-                              "H3MDRedrawPreview": "H3MD Redraw / Preview 局部重绘 / 低清预览"}
+                              "H3MDRedraw": "H3MD Redraw 局部重绘",
+                              "H3MDRedrawPreview": "H3MD Redraw / Preview (old - use H3MD Redraw)"}

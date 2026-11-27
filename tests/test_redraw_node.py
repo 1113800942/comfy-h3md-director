@@ -44,58 +44,59 @@ class ParseTests(unittest.TestCase):
 
 
 class NodeTests(unittest.TestCase):
+    """0.6.5: H3MD Redraw = local redraw only (the low-res-only preview switch was removed)."""
+
     def setUp(self):
-        self.node = WIN.H3MDRedrawPreview()
+        self.node = WIN.H3MDRedraw()
 
     def test_off_passes_the_plan_through(self):
         p = plan(window=False)
-        self.assertIs(self.node.run(p, False, "")[0], p)
+        self.assertIs(self.node.run(p, "")[0], p)
 
     def test_redraw_sets_window_mode_and_copies(self):
         p = plan()
-        out = self.node.run(p, False, "20-24")[0]
+        out = self.node.run(p, "20-24")[0]
         self.assertEqual(out["windowMode"]["redraw"], [[20.0, 24.0]])
-        self.assertFalse(out["windowMode"]["preview"])
+        self.assertNotIn("preview", out["windowMode"])
         self.assertIsNone(p["windowMode"]["redraw"])                     # the Director's plan is not changed
         self.assertEqual(out["windowMode"]["length"], p["windowMode"]["length"])
         self.assertEqual(WIN.redraw_ranges(out["windowMode"], 0, 1280), [(480, 576)])
         self.assertEqual(WIN.redraw_ranges(out["windowMode"], 1280, 2084), [])
 
-    def test_preview(self):
-        p = plan()
-        p["windowMode"]["redraw"] = [[1, 2]]                               # a hand-written redraw is dropped
-        out = self.node.run(p, True, "")[0]
-        self.assertTrue(out["windowMode"]["preview"])
-        self.assertIsNone(out["windowMode"]["redraw"])
-
     def test_needs_window_mode(self):
         with self.assertRaises(ValueError):
-            self.node.run(plan(window=False), False, "4-8")
-        with self.assertRaises(ValueError):
-            self.node.run(plan(window=False), True, "")
-
-    def test_not_both(self):
-        with self.assertRaises(ValueError):
-            self.node.run(plan(), True, "4-8")
+            self.node.run(plan(window=False), "4-8")
 
     def test_registered(self):
-        self.assertIn("H3MDRedrawPreview", WIN.NODE_CLASS_MAPPINGS)
-        spec = WIN.H3MDRedrawPreview.INPUT_TYPES()["required"]
-        self.assertEqual(list(spec), ["plan", "preview", "redraw"])
-        self.assertEqual(WIN.H3MDRedrawPreview.RETURN_TYPES, ("H3MD_PLAN",))
+        self.assertIn("H3MDRedraw", WIN.NODE_CLASS_MAPPINGS)
+        self.assertEqual(list(WIN.H3MDRedraw.INPUT_TYPES()["required"]), ["plan", "redraw"])
+        self.assertEqual(WIN.H3MDRedraw.RETURN_TYPES, ("H3MD_PLAN",))
+
+    def test_old_node_still_loads_and_ignores_preview(self):
+        old = WIN.H3MDRedrawPreview
+        self.assertTrue(old.DEPRECATED)                                    # hidden from the node menu
+        self.assertEqual(list(old.INPUT_TYPES()["required"]), ["plan", "preview", "redraw"])   # saved widgets map
+        p = plan()
+        self.assertIs(old().run(p, True, "")[0], p)                        # preview on: ignored, full run
+        out = old().run(p, False, "20-24")[0]
+        self.assertEqual(out["windowMode"]["redraw"], [[20.0, 24.0]])
+
+    def test_old_plans_with_preview_flag(self):
+        self.assertNotIn("preview", WIN.normalize_window_mode({"preview": True}))
 
 
 class WorkflowTests(unittest.TestCase):
-    """Both example workflows: the node sits between the Director and the Loop, bypassed (mode 4)."""
+    """Example workflows: H3MD Redraw sits between the Director and the Loop, bypassed (mode 4)."""
 
     def check(self, name, loop_id, loop_slot):
         w = json.loads((ROOT / "example_workflows" / name).read_text(encoding="utf-8"))
         nodes = {n["id"]: n for n in w["nodes"]}
-        rp = [n for n in w["nodes"] if n["type"] == "H3MDRedrawPreview"]
+        self.assertFalse([n for n in w["nodes"] if n["type"] == "H3MDRedrawPreview"])
+        rp = [n for n in w["nodes"] if n["type"] == "H3MDRedraw"]
         self.assertEqual(len(rp), 1)
         rp = rp[0]
         self.assertEqual(rp["mode"], 4)
-        self.assertEqual(rp["widgets_values"], [False, ""])
+        self.assertEqual(rp["widgets_values"], [""])
         links = {l[0]: l for l in w["links"]}
         lin = links[rp["inputs"][0]["link"]]
         self.assertEqual(nodes[lin[1]]["type"], "H3MDDirectorRefMod")

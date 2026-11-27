@@ -27,7 +27,9 @@ part is kept on disk, and you repair only what went wrong — down to a few seco
 - **Seamless long video (0.4.0, CCW)**: tick one switch on the Director and continued shots are rendered together on one
   timeline with Chained Context Windows — no continuation seams, no drift, no double images; hard cuts stay clean.
 - **Long video in one run**: 2–3 minutes at 1080p (measured: a 2 min 20 s music video at 1920×1088 in 2 h 18 min on an RTX 5090).
-- **Repair instead of re-render**: the **Redraw / Preview** node redraws just a few seconds of a finished video (you may
+- **Watch it while it renders (0.6.5)**: the **H3MD Live Preview** window plays the model's current guess of the
+  segment from the 3rd low-res step on - put it anywhere on the canvas, no wires; press Cancel if it goes wrong.
+- **Repair instead of re-render**: the **H3MD Redraw** node redraws just a few seconds of a finished video (you may
   change that shot's prompt or pictures first); `rerun_segments` re-renders whole segments, locked to their neighbours.
 - **Motion copy**: a reference video drives the motion (depth + SAM3 + Fun ControlNet); the look comes from your photos.
 - **No long-video drift**: `lowres_anchor` keeps colors and faces stable over a whole single-scene take.
@@ -118,8 +120,8 @@ changes:
   spin, back-to-front turn, a 22 s take with two hand-overs, a 12 s run along the sea). With `"chain": false` they can.
 * Switched off automatically: depth / pose control (the video stays a normal reference video; also off in motion copy)
   and RefMods (identity comes from the reference pictures).
-* Low-res preview and local redraw: see the steps below (node **H3MD Redraw / Preview**; the plan keys `"preview"` /
-  `"redraw"` do the same when written by hand).
+* Local redraw: see the steps below (node **H3MD Redraw**; the plan key `"redraw"` does the same when written by
+  hand). Watching a run: the **H3MD Live Preview** window (0.6.5; it replaces the old low-res-only `preview`).
 * Frame interpolation (48 / 60 fps) never blends two shots at a hard cut: the frame between them repeats the nearest
   original frame (0.4.0; before, every hard cut got one frame of the two shots melted together).
 * Memory: the result is decoded and written in ~10 s chunks, and the high-res pass plans its strips per window, so
@@ -134,12 +136,15 @@ changes:
 
 ### Step by step
 1. Tick **Seamless long video** on the Director. Keep `resume_from_cache` **on** on the Loop node (it is on in the
-   example workflows; preview, redraw and resume all work from the cache).
-2. *Optional, low-res preview:* in the example workflow, the **H3MD Redraw / Preview** node sits between the Director
-   and the Loop, bypassed. Select it, press Ctrl+B, tick `preview` and run: only the low-res pass (about half the
-   time). Happy with motion and framing? Untick `preview` and run again: the full version starts from the cached
-   low-res pass.
-3. *Fix a few seconds:* write them into `redraw` on the same node, on the whole video's timeline: `20-24`,
+   example workflows; redraw and resume work from the cache).
+2. *Watch it while it runs (0.6.5):* the **H3MD Live Preview** window node (in the example workflows, right of the
+   other nodes; anywhere else works too, no wires) plays the segment as the model currently sees it, from the 3rd
+   low-res step on, and the Loop node shows 8 frames of it. Nothing waits: if motion or framing is wrong, press
+   Cancel - the finished steps stay in the cache. Settings: `live_preview` (low-res / low-res + high-res / off) and
+   `live_preview_from_step` at the end of H3MD Loop Options. About 2 s per previewed step; tiny decoder taeh3
+   (MIT, bundled), so the clip is softer than the result.
+3. *Fix a few seconds:* in the example workflow, the **H3MD Redraw** node sits between the Director and the Loop,
+   bypassed. Select it, press Ctrl+B and write the seconds into `redraw`, on the whole video's timeline: `20-24`,
    `1:12-1:15`, several ranges separated by commas. Run: only the windows that touch those seconds are rendered again,
    with a new seed; every other frame stays identical and the groups not touched come from the cache. Not happy? Run
    again (a new seed each time). Happy? Clear `redraw` (or bypass the node): the redrawn take is kept.

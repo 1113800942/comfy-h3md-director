@@ -46,6 +46,7 @@ try:
     from . import h3md_stream_save as SS          # H3MD stream save ('long video' output)
     from . import h3md_depth_control as DC        # H3MD depth ControlNet (optional input depth_control)
     from . import h3md_lowres_anchor as LA        # H3MD low-res anchor (2026-10-30)
+    from . import h3md_live_preview as LP         # 0.6.5 live preview (display only)
     from . import h3md_window as WIN              # window-exp branch (2026-11-07)
     from . import h3md_progress as PROG           # window-exp: per-step progress cache
     from . import h3md_remake_engine as SWAP      # 2026-11-14 multi-person swap engine
@@ -60,6 +61,7 @@ except ImportError:  # flat import (tests)
     import h3md_stream_save as SS
     import h3md_depth_control as DC
     import h3md_lowres_anchor as LA
+    import h3md_live_preview as LP
     import h3md_window as WIN
     import h3md_progress as PROG
     import h3md_remake_engine as SWAP
@@ -859,6 +861,20 @@ class H3MDLoopSampler:
             "generate only these this time (cached ones again too); missing earlier segments are generated as well. "
             "Overrides rerun_segments / stop_after when not empty.\n直接填或接总控台。空 = 全部跑完（有缓存的直接用）；"
             "填 2 / 1-2 / 3, 6-7, 9 = 这次只生成这几段（有缓存的也重新生成），前面缺的段一起生成。"})
+        # 0.6.5 live preview, appended LAST (old workflows load); display only: never part of a cache key
+        opt["live_preview"] = (list(LP.MODES), {"default": LP.DEFAULT_MODE, "tooltip":
+            "Watch each segment while it samples: from the step set below, the model's current guess of the finished "
+            "segment plays as a short clip in the H3MD Live Preview window node (put one anywhere, no wires) and shows "
+            "as a strip of frames on this node (fast tiny decoder, not final quality, ~2 s per step). The run does "
+            "not wait - press Cancel if it goes wrong. low-res: the low-res pass only (recommended). "
+            "low-res + high-res: also the high-res steps (slower previews). off: no preview.\n"
+            "边跑边看：从下面设的那一步开始，每一步都把模型当前预测的成片解码，在 H3MD Live Preview 实时预览窗口节点里"
+            "循环播放（放在画布任何地方，不用连线），这个节点上也显示一排画面（小解码器，不是最终画质，每步约 2 秒）。"
+            "不会停下来等你，看到不对就点取消。low-res：只看低清（推荐）；low-res + high-res：高清每一步也看（预览更慢）；"
+            "off：关。"})
+        opt["live_preview_from_step"] = ("INT", {"default": LP.DEFAULT_FROM_STEP, "min": 1, "max": 100, "tooltip":
+            "First low-res step that is shown (the first steps are mostly noise). 1 = from the start.\n"
+            "低清从第几步开始显示（前几步基本是噪点）。1 = 从头显示。"})
         # hidden 'prompt' (no widget / no slot): only to warn when 'images' (now a placeholder) is used downstream
         return {"required": req, "optional": opt, "hidden": {"unique_id": "UNIQUE_ID", "prompt": "PROMPT"}}
 
@@ -912,6 +928,8 @@ class H3MDLoopSampler:
         self._depth = DC.LoopDepth(_dc, plan)  # H3MD depth (never reaches the sampler)
         self._vram_release = str(sampler_kwargs.pop("vram_release", "deep") or "deep")      # H3MD memguard (not in keys)
         guard = str(sampler_kwargs.pop("slow_step_guard", "stop") or "stop")                 # H3MD memguard (not in keys)
+        LP.configure(sampler_kwargs.pop("live_preview", LP.DEFAULT_MODE),                     # 0.6.5 (display only,
+                     sampler_kwargs.pop("live_preview_from_step", LP.DEFAULT_FROM_STEP))      # not in keys)
         self._anchor = max(0.0, min(1.0, float(sampler_kwargs.pop("lowres_anchor", 0.0) or 0.0)))  # H3MD low-res anchor
         self._hires_anchor = max(0.0, min(1.0, float(sampler_kwargs.pop("hires_anchor", 0.0) or 0.0)))  # H3MD hi-res anchor
         for gone in ("drift_handoff_match", "drift_seam_anchor", "drift_detail"):  # removed 2026-10-30 (ineffective)
@@ -1083,6 +1101,7 @@ class H3MDLoopSampler:
         for step, k in enumerate(indices):
             check_interrupt()
             seg = segs[k]
+            LP.set_segment(k + 1, len(segs))   # 0.6.5 live preview label
             where = f"segment {k + 1}/{len(segs)}" + (f" (shot {seg['shot'] + 1}.{seg['sub'] + 1}/{seg['subCount']})" if "shot" in seg else "")
             if "autoPart" in seg:  # H3MD autosplit (2026-10-27)
                 where += f" (shot {seg['shotIndex'] + 1} part {seg['autoPart'] + 1}/{seg['autoParts']})"
@@ -1092,7 +1111,6 @@ class H3MDLoopSampler:
                 import random
                 seg_seed = random.SystemRandom().randrange(1, 2 ** 50)
             will_continue = seg["overlapIn"] > 0 and prev is not None
-            preview = bool(isinstance(plan, dict) and (plan.get("windowMode") or {}).get("preview"))
             uses_cont = C.segment_uses_cont_settings(seg, will_continue, highres_tiling)
             key = C.segment_key(settings_hash["full" if uses_cont else "base"], plan, k, key_seed, will_continue,
                                 prev_key) if cache is not None else None
@@ -1101,16 +1119,12 @@ class H3MDLoopSampler:
                 key = C._sha({"key": key, "depth_control": dkey})
             if key is not None and lora_sig:   # 0.3.4: LoRAs recorded by H3MD loaders / the Control Panel
                 key = C._sha({"key": key, "loras": lora_sig})
-            # window-exp low-res preview: its own segment-cache key (never mistaken for a finished segment); the
-            # progress cache keeps the full run's key, so the full run reuses the preview's low-res pass (pass1.pt)
-            pkey = key
+            pkey = key   # progress cache key (low-res pass1.pt, per-step resume)
             if key is not None and seg_seed != key_seed:
                 # 11-08 review: a rerun with a new seed must not reuse the old take's low-res pass (pass1.pt)
                 pkey = C._sha({"key": key, "seed": seg_seed})
             low_key = low_pass_key(settings_hash["full" if uses_cont else "base"], plan, k, key_seed, seg_seed,
                                    will_continue, prev_key, dkey, lora_sig) if key is not None else None
-            if key is not None and preview:
-                key = C._sha({"key": key, "preview": True})
             # window-exp local redraw: windowMode.redraw [[start_s, end_s], ...] re-renders only those seconds of the
             # cached segment.  0.4.0: the prompt, the pictures and the reference media may have changed since the
             # segment was rendered (only the redrawn seconds use the new ones); length, size and hard cuts may not.
@@ -1141,9 +1155,8 @@ class H3MDLoopSampler:
                     key = man["key"]
             if rerun:  # H3MD rerun: not selected = cached (validated above), selected = re-rendered
                 hit = k not in rerun
-                if hit and not cache.has(k, key) and not preview:
-                    # new chain key, so a later normal resume reuses it too (not with the preview key: that would
-                    # relabel a finished full-quality segment as a preview and the next full run would redo it)
+                if hit and not cache.has(k, key):
+                    # new chain key, so a later normal resume reuses it too
                     cache.adopt(k, key)
             else:
                 hit = cache is not None and (resume or bool((plan.get("windowMode") or {}).get("redraw"))) \
@@ -1275,8 +1288,6 @@ class H3MDLoopSampler:
                     LOG.warning("%s %s: local redraw: no low-res result of this segment in the cache (written without "
                                 "the Beta low-res carry); the low-res pass uses the downscaled final picture around "
                                 "the redrawn seconds", _TAG, where)
-            if preview:
-                extra["h3md_low_only"] = True
             nxt_ov = segs[indices[step + 1]]["overlapIn"] if step + 1 < len(indices) else 0
             try:
                 remake_src = SWAP.require_remake_model(remake_model, model, high_res_model) if SWAP.engine(plan) else None

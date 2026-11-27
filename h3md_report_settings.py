@@ -309,12 +309,13 @@ def key_switches(rows: list, plan: dict | None = None) -> list:
                        ("ref_image_size", "Reference size 参考图尺寸"), ("cache_dtype", "Cache type 缓存类型"),
                        ("vram_release", "VRAM release 显存释放"),
                        ("release_vram_between_segments", "Release VRAM between segments 段间释放显存"),
-                       ("ff_chunk_rows", "FF chunk rows 前馈分块"), ("lowres_anchor", "Low-res anchor 低清锚定")):
+                       ("ff_chunk_rows", "FF chunk rows 前馈分块"), ("lowres_anchor", "Low-res anchor 低清锚定"),
+                       ("live_preview", "Live preview 实时预览")):
         param(label, opts, key)
     node_state("Remake model 换人模型", lambda r: r.get("role") == "remake_model")
     node_state("Motion control 动作控制", by_type("H3MDMotionControl", "H3MDDepthControl"))
     node_state("Semantic bridge 语义桥", lambda r: "SemanticBridge" in str(r.get("type")))
-    node_state("Redraw / Preview 局部重绘", by_type("H3MDRedrawPreview"))
+    node_state("Redraw 局部重绘", by_type("H3MDRedraw", "H3MDRedrawPreview"))
     node_state("Save / face refine node 保存节点", by_type("H3MDSaveVideoFaceRefineInterp"))
     return out
 
