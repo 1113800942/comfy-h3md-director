@@ -1,7 +1,7 @@
 {
  "id": "ae199950-ee64-4d60-918b-94513d88482f",
  "revision": 0,
- "last_node_id": 356,
+ "last_node_id": 357,
  "last_link_id": 239,
  "nodes": [
   {
@@ -1101,6 +1101,28 @@
    },
    "color": "#fff0",
    "bgcolor": "#fff0"
+  },
+  {
+   "id": 357,
+   "type": "H3MDLivePreviewWindow",
+   "pos": [
+    1413.8101194841042,
+    560
+   ],
+   "size": [
+    420,
+    600
+   ],
+   "flags": {},
+   "order": 18,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "H3MD Live Preview 实时预览",
+   "properties": {
+    "Node name for S&R": "H3MDLivePreviewWindow"
+   },
+   "widgets_values": []
   }
  ],
  "links": [

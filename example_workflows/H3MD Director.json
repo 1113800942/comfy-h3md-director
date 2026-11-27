@@ -1,7 +1,7 @@
 {
  "id": "ae199950-ee64-4d60-918b-94513d88482f",
  "revision": 0,
- "last_node_id": 346,
+ "last_node_id": 347,
  "last_link_id": 204,
  "nodes": [
   {
@@ -3787,6 +3787,28 @@
     "viggle_remake_swap_pruned_int8_convrot.safetensors",
     "default"
    ]
+  },
+  {
+   "id": 347,
+   "type": "H3MDLivePreviewWindow",
+   "pos": [
+    2420,
+    780
+   ],
+   "size": [
+    420,
+    600
+   ],
+   "flags": {},
+   "order": 61,
+   "mode": 0,
+   "inputs": [],
+   "outputs": [],
+   "title": "H3MD Live Preview 实时预览",
+   "properties": {
+    "Node name for S&R": "H3MDLivePreviewWindow"
+   },
+   "widgets_values": []
   }
  ],
  "links": [

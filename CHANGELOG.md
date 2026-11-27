@@ -2,6 +2,31 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.6.5] - 2026-11-27
+
+### Added / 新增
+- **Live preview: watch a segment while it renders.** From the 3rd low-res step on (`live_preview_from_step`), after
+  every step the model's current guess of the whole segment (x0, not the noisy state) is decoded with the bundled tiny
+  decoder **taeh3** and played as a looping clip at real-time speed in the new **H3MD Live Preview** window node - put
+  it anywhere on the canvas (also when the Loop sits in a subgraph), no wires, not part of the run. The Loop node shows
+  8 frames of it. Nothing waits: press Cancel if motion or framing is wrong; the finished steps stay in the cache.
+  `live_preview` (end of H3MD Loop Options): low-res (default) / low-res + high-res / off. Display only: never part of
+  a cache key, never stops a render (an error turns it off for that run with one log line). Measured on an RTX 5090,
+  481 frames at 960x1664: about 2 s per previewed step (low-res step 78 s), +0.1 GB VRAM peak.
+  边跑边看：从低清第 3 步起，每一步把模型当前预测的整段成片用内置小解码器 taeh3 解出来，在新的 **H3MD Live Preview 实时预览**
+  窗口节点里按实际时长循环播放（放在画布任何地方，Loop 在子图里也行，不用连线，不参与运行）；Loop 节点上显示其中 8 张。不停下来
+  等：不对就点取消，跑完的步数留在缓存里。设置在 H3MD Loop Options 最后两项。只用于显示，不进缓存键，出错只关掉本次预览。
+- taeh3 (`h3md_preview/taeh3.safetensors`, Ollin Boer Bohan, MIT) is bundled - nothing to download (NOTICE 2c).
+
+### Changed / 变更
+- **H3MD Redraw** replaces **H3MD Redraw / Preview**: the node now only redraws seconds of a finished run. Its
+  low-res-only `preview` switch (low-res pass, then stop) is removed together with the plan key `windowMode.preview`
+  - watching a run is the live preview now. Saved workflows with the old node still load and run (hidden from the
+  node menu); its `preview` switch is ignored with a log line, so the run goes on into high-res. The example
+  workflows use H3MD Redraw and include an H3MD Live Preview window.
+  局部重绘节点改为只管重画（H3MD Redraw）；原来"只跑低清就停"的 preview 开关取消，看画面改用实时预览。旧节点保存的工作流照常
+  能打开、能用（节点菜单里隐藏），它的 preview 开关不再起作用。
+
 ## [0.6.4] - 2026-11-26
 
 ### Changed / 变更
