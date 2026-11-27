@@ -121,21 +121,57 @@ def pick(t: int, n: int = N_FRAMES):
     return sorted({round(k * (t - 1) / (n - 1)) for k in range(n)})
 
 
+PX_BATCH = 4 * 832 * 480   # output pixels decoded at once (~0.5 GB peak); 4 low-res frames, 1 high-res frame
+
+
 @torch.inference_mode()
-def decode_frames(video, idx):
-    """-> list of HxWx3 uint8 CPU tensors, one per latent frame index (decoded one at a time: small peak memory)."""
+def decode_frames(video, idx, max_side=None):
+    """-> list of HxWx3 uint8 CPU tensors, one still frame per latent frame index (a few at a time: small peak
+    memory).  max_side: shrink the frames to this longest side (the clip in the window does not need full size)."""
+    import torch.nn.functional as F
     device = video.device
     model, dtype = _decoder(device)
+    out_h, out_w = int(video.shape[-2]) * 16, int(video.shape[-1]) * 16
+    batch = max(1, PX_BATCH // (out_h * out_w))
     out = []
     try:
-        for i in idx:
-            z = video[:1, :, i:i + 1].to(dtype)          # [1, 24, 1, h, w] -> single still frame
-            img = model.decode(z)                        # 5-D in 0..1: [1, 3, T, H, W] or [1, T, 3, H, W]
-            img = img[0, :, 0] if img.shape[1] == 3 else img[0, 0]   # first output frame, [3, H, W]
-            out.append((img.clamp(0, 1) * 255).to(torch.uint8).movedim(0, -1).cpu())
+        for s in range(0, len(idx), batch):
+            ii = list(idx[s:s + batch])
+            z = video[0][:, ii].movedim(1, 0).unsqueeze(2).to(dtype)   # [n, 24, 1, h, w]: n single still frames
+            img = model.decode(z)                        # 5-D in 0..1: [n, 3, 1, H, W] or [n, 1, 3, H, W]
+            img = img[:, :, 0] if img.shape[1] == 3 else img[:, 0]     # [n, 3, H, W]
+            if max_side and max(img.shape[-2:]) > max_side:
+                img = F.interpolate(img.float(), scale_factor=max_side / max(img.shape[-2:]), mode="bilinear",
+                                    antialias=True)
+            img = (img.clamp(0, 1) * 255).to(torch.uint8).movedim(1, -1).cpu()
+            out.extend(img.unbind(0))
     finally:
         model.to("cpu")
     return out
+
+
+CLIP_SIDE = 480        # longest side of the clip in the window
+
+
+def pixel_frames(t_latent: int) -> int:
+    """H3 latent frames -> video frames (5n+2 latent <-> 17n+5 frames at 24 fps)."""
+    return max(1, (t_latent - 2) // 5 * 17 + 5) if t_latent > 1 else 1
+
+
+def frame_ms(t_latent: int, n: int) -> int:
+    """Display time of each clip frame so the clip lasts as long as the segment (24 fps)."""
+    return max(20, int(round(1000.0 * pixel_frames(t_latent) / 24.0 / max(1, n))))
+
+
+def clip_webp(frames, t_latent: int) -> bytes:
+    """Animated WebP of all latent frames, played in real time (each latent frame ~ 3.4 video frames)."""
+    import io
+    from PIL import Image
+    ims = [Image.fromarray(f.numpy()) for f in frames]
+    ms = frame_ms(t_latent, len(ims))
+    buf = io.BytesIO()
+    ims[0].save(buf, "WEBP", save_all=True, append_images=ims[1:], duration=ms, loop=0, quality=60, method=0)
+    return buf.getvalue()
 
 
 def strip_image(frames, label: str = ""):
@@ -158,23 +194,22 @@ def strip_image(frames, label: str = ""):
 EVENT = "h3md.live_preview"   # websocket event for the H3MD Live Preview window node (web/js/h3md_live_preview.js)
 
 
-def _send(step, total, img):
-    """1) the running node's own sampler preview (the Loop, also inside a subgraph);
-    2) every H3MD Live Preview window node, wherever it sits (outer graph, subgraph)."""
+def _send_node(step, total, strip):
+    """The running node's own sampler preview (the Loop, also inside a subgraph): the strip of 8 frames."""
     import comfy.utils
     hook = comfy.utils.PROGRESS_BAR_HOOK
     if hook is not None:
-        hook(step, total, ("JPEG", img, MAX_SIDE), node_id=None)
+        hook(step, total, ("JPEG", strip, MAX_SIDE), node_id=None)
+
+
+def _send_window(clip: bytes, label: str):
+    """Every H3MD Live Preview window node, wherever it sits (outer graph, subgraph): the playing clip."""
     try:
         import base64
-        import io
         from server import PromptServer
-        buf = io.BytesIO()
-        img.save(buf, "JPEG", quality=85)
         PromptServer.instance.send_sync(EVENT, {
-            "image": "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode("ascii"),
-            "step": int(step), "total": int(total)})
-    except Exception as exc:   # no server (tests) / no client: the node preview above is enough
+            "video": "data:image/webp;base64," + base64.b64encode(clip).decode("ascii"), "label": label})
+    except Exception as exc:   # no server (tests) / no client: the node preview is enough
         LOG.debug("%s window event not sent: %s", _TAG, exc)
 
 
@@ -204,14 +239,17 @@ NODE_DISPLAY_NAME_MAPPINGS = {"H3MDLivePreviewWindow": "H3MD Live Preview 实时
 
 def show(stage: str, step: int, total: int, denoised, shapes=None):
     """Sampler callback hook (H3MD timed_sampler), called after ComfyUI's own step preview.  Never raises.
-    shapes: latent_shapes_of(model) when the sampler works on a packed AV latent."""
+    shapes: latent_shapes_of(model) when the sampler works on a packed AV latent.
+    Decodes every latent frame of the model's current x0: a playing clip for the window node(s), and 8 of those
+    frames as a strip for the running node."""
     if _cfg["mode"] == "off" or _state["failed"]:
         return
     try:
         if not wanted(stage, step):
-            # keep the last strip on screen (ComfyUI's own preview would replace it with a colour-noise image)
+            # keep the last strip on the node (ComfyUI's own preview would replace it with a colour-noise image);
+            # the window keeps its last clip by itself
             if _state["last"] is not None:
-                _send(step, total, _state["last"])
+                _send_node(step, total, _state["last"])
             return
         video = video_stream(denoised, shapes)
         if video is None:   # never silent (0.6.5 test 01:10: a packed latent was skipped without a word)
@@ -220,14 +258,20 @@ def show(stage: str, step: int, total: int, denoised, shapes=None):
                         _TAG, type(denoised).__name__, tuple(getattr(denoised, "shape", ())), shapes)
             return
         t0 = time.perf_counter()
-        frames = decode_frames(video, pick(int(video.shape[2])))
+        t_lat = int(video.shape[2])
+        frames = decode_frames(video, list(range(t_lat)), CLIP_SIDE)
+        t1 = time.perf_counter()
         name = "low-res" if stage == "low_res" else "high-res"
-        img = strip_image(frames, f"{_cfg['seg']}{name} step {step}/{total}  (preview, not final quality)")
-        ms = (time.perf_counter() - t0) * 1000.0
-        _state["ms"].append(ms)
-        _state["last"] = img
-        _send(step, total, img)
-        LOG.info("%s %s step %d/%d: %d frames in %.0f ms", _TAG, name, step, total, len(frames), ms)
+        label = f"{_cfg['seg']}{name} step {step}/{total}"
+        strip = strip_image([frames[i] for i in pick(t_lat)], label + "  (preview, not final quality)")
+        clip = clip_webp(frames, t_lat)
+        t2 = time.perf_counter()
+        _state["ms"].append((t2 - t0) * 1000.0)
+        _state["last"] = strip
+        _send_node(step, total, strip)
+        _send_window(clip, label)
+        LOG.info("%s %s step %d/%d: %d frames decoded in %.0f ms, clip %.0f ms (%d KB)", _TAG, name, step, total,
+                 len(frames), (t1 - t0) * 1000.0, (t2 - t1) * 1000.0, len(clip) // 1024)
     except Exception as exc:  # display only: never stop the render
         _state["failed"] = True
         LOG.warning("%s turned off for this run: %s", _TAG, exc)

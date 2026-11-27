@@ -864,12 +864,14 @@ class H3MDLoopSampler:
         # 0.6.5 live preview, appended LAST (old workflows load); display only: never part of a cache key
         opt["live_preview"] = (list(LP.MODES), {"default": LP.DEFAULT_MODE, "tooltip":
             "Watch each segment while it samples: from the step set below, the model's current guess of the finished "
-            "segment is shown on this node as a strip of frames (fast tiny decoder, not final quality). The run does "
+            "segment plays as a short clip in the H3MD Live Preview window node (put one anywhere, no wires) and shows "
+            "as a strip of frames on this node (fast tiny decoder, not final quality, ~2 s per step). The run does "
             "not wait - press Cancel if it goes wrong. low-res: the low-res pass only (recommended). "
-            "low-res + high-res: also the high-res steps (a little more VRAM). off: no preview.\n"
-            "边跑边看：从下面设的那一步开始，每一步都把模型当前预测的成片解码成一排画面显示在这个节点上（小解码器，"
-            "不是最终画质）。不会停下来等你，看到不对就点取消。low-res：只看低清（推荐）；low-res + high-res：高清"
-            "每一步也看（多占一点显存）；off：关。"})
+            "low-res + high-res: also the high-res steps (slower previews). off: no preview.\n"
+            "边跑边看：从下面设的那一步开始，每一步都把模型当前预测的成片解码，在 H3MD Live Preview 实时预览窗口节点里"
+            "循环播放（放在画布任何地方，不用连线），这个节点上也显示一排画面（小解码器，不是最终画质，每步约 2 秒）。"
+            "不会停下来等你，看到不对就点取消。low-res：只看低清（推荐）；low-res + high-res：高清每一步也看（预览更慢）；"
+            "off：关。"})
         opt["live_preview_from_step"] = ("INT", {"default": LP.DEFAULT_FROM_STEP, "min": 1, "max": 100, "tooltip":
             "First low-res step that is shown (the first steps are mostly noise). 1 = from the start.\n"
             "低清从第几步开始显示（前几步基本是噪点）。1 = 从头显示。"})

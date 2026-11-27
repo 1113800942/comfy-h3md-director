@@ -114,4 +114,16 @@ def test_window_node_needs_no_wires_and_is_not_run():
 
 def test_send_without_server_does_not_raise():
     from PIL import Image
-    LP._send(1, 6, Image.new("RGB", (8, 8)))
+    LP._send_node(1, 6, Image.new("RGB", (8, 8)))
+    LP._send_window(b"x", "step 1/6")
+
+
+def test_clip_is_a_real_time_animated_webp():
+    from PIL import Image
+    import io
+    frames = [torch.full((32, 16, 3), k * 20, dtype=torch.uint8) for k in range(12)]   # 12 latent frames
+    data = LP.clip_webp(frames, 12)
+    im = Image.open(io.BytesIO(data))
+    assert im.format == "WEBP" and getattr(im, "n_frames", 1) == 12
+    assert LP.pixel_frames(142) == 481 and LP.pixel_frames(12) == 39
+    assert abs(LP.frame_ms(142, 142) * 142 - 1000 * 481 / 24) < 142   # plays as long as the segment (20 s)
