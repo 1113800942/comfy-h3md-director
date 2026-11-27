@@ -26,10 +26,19 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   节点或其它插件（如 Load LakonLab Adapter）打在模型上的权重补丁现在也进缓存键；模型上没有权重补丁的，键不变。
   升级后，用核心 LoRA 节点的工作流第一次续跑会重算一次。
 
-### Known limits / 已知限制
-- Swapping the base model file itself (another checkpoint in the UNet loader) is still not part of the cache key:
-  turn `resume_from_cache` off, or use another `cache_dir`, for the first run with another base model.
-  / 直接换底模文件仍不在缓存键里：换底模后的第一次运行请关掉 `resume_from_cache` 或换一个 `cache_dir`。
+- **`resume_from_cache` after swapping the base model.** The cache did not know which base model made a segment,
+  so after loading another checkpoint in the UNet loader a resumed run returned the old segment. Every cached
+  segment now records the base model file(s) it was made with - whichever file was loaded, identified by its
+  content (a renamed or moved copy is the same model) and the loader's weight dtype - and a segment made with
+  another base model is rendered again; the log says so. When only the high-res model changes, the low-res pass of
+  a window-mode segment is kept. Segments cached before 0.6.4 carry no record and stay usable; the check starts
+  with the first segment written by 0.6.4. A model from a loader that does not tell ComfyUI its file (no
+  `cached_patcher_init`) is not checked. A local redraw with another base model than the segment was rendered with
+  logs a warning.
+  / **换了底模后续跑，拿到的还是旧片段。** 缓存原来不记录一段是用哪个底模跑的。现在每段缓存都会记下当时加载的底模文件
+  （按文件内容识别，改名或挪位置算同一个模型；加载精度不同算不同），底模和当时不一样就重新生成，日志里会写明。
+  只换高清模型时，窗口模式的低清结果保留。0.6.4 之前的缓存没有这条记录，照常可用，从 0.6.4 写入的片段开始检查。
+  不向 ComfyUI 登记文件的第三方加载器加载的模型不检查。用另一个底模做局部重绘时日志会提醒。
 
 ## [0.6.3] - 2026-11-25
 

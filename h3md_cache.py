@@ -200,6 +200,74 @@ def _feed_patch(h, v, depth: int = 0) -> None:
             _feed_patch(h, getattr(v, attr), depth + 1)
 
 
+BASE_SIG_CHUNKS = 64       # base_model_signature reads this many pieces spread evenly over the model file ...
+BASE_SIG_CHUNK = 1 << 16   # ... of this many bytes each (4 MiB of a 20 GB file; the whole file when it is smaller)
+_BASE_SIG_CACHE = {}       # (path, size, mtime_ns, loader options) -> signature
+
+
+def _model_file(model):
+    """(file path, loader options) a ModelPatcher was loaded from, read from the reload recipe core loaders register
+    (ModelPatcher.cached_patcher_init, e.g. (load_diffusion_model, (unet_path, model_options))); (None, None) when the
+    loader did not register one."""
+    init = getattr(model, "cached_patcher_init", None)
+    args = init[1] if isinstance(init, (tuple, list)) and len(init) > 1 else None
+    if not isinstance(args, (tuple, list)):
+        return None, None
+    path = next((a for a in args if isinstance(a, str) and os.path.isfile(a)), None)
+    opts = next((a for a in args if isinstance(a, dict)), None)
+    return path, opts
+
+
+def base_model_signature(model):
+    """0.6.4: which BASE MODEL a ModelPatcher is - whatever file the user loaded, not a fixed one.  From the file's
+    content (size + sha256 of BASE_SIG_CHUNKS pieces spread evenly from its start to its end) and the loader's weight
+    dtype, so a renamed or moved copy of the same file keeps its signature and another checkpoint (or the same one
+    loaded as another dtype) gets a new one.  The pieces are spread over the whole file because merged checkpoints of
+    the same size (e.g. fl2va / ref2va hybrids that differ in half of the blocks) share their header and many
+    tensors.  None when the file is not known (a loader that does not register cached_patcher_init): such a model
+    is not checked."""
+    try:
+        path, opts = _model_file(model)
+        if not path:
+            return None
+        st = os.stat(path)
+        how = sorted((str(k), str(v)) for k, v in (opts or {}).items()
+                     if isinstance(v, (bool, int, float, str, torch.dtype)) or v is None)
+        ck = (os.path.normcase(os.path.abspath(path)), int(st.st_size), int(st.st_mtime_ns), repr(how))
+        if ck not in _BASE_SIG_CACHE:
+            h = hashlib.sha256()
+            size = int(st.st_size)
+            h.update(str(size).encode("utf-8"))
+            with open(path, "rb") as f:
+                if size <= BASE_SIG_CHUNKS * BASE_SIG_CHUNK:
+                    h.update(f.read())
+                else:
+                    last = size - BASE_SIG_CHUNK
+                    for i in range(BASE_SIG_CHUNKS):
+                        f.seek(last * i // (BASE_SIG_CHUNKS - 1))
+                        h.update(f.read(BASE_SIG_CHUNK))
+            h.update(repr(how).encode("utf-8"))
+            _BASE_SIG_CACHE[ck] = h.hexdigest()[:32]
+        return _BASE_SIG_CACHE[ck]
+    except Exception as exc:   # never stop a run for a signature
+        LOG.warning("%s could not read the base model file for the cache check (%s); the base model is not checked "
+                    "in this run", _TAG, exc)
+        return None
+
+
+def same_base(stored, current, roles=None) -> bool:
+    """False only when a role ('low' / 'high' / 'remake') recorded in `stored` is also known in `current` and
+    differs.  A cache written before 0.6.4 (nothing recorded) and a model whose file is not known both pass."""
+    if not isinstance(stored, dict) or not isinstance(current, dict):
+        return True
+    for role, sig in stored.items():
+        if roles is not None and role not in roles:
+            continue
+        if sig and current.get(role) and current[role] != sig:
+            return False
+    return True
+
+
 def patch_signature(model):
     """0.6.4: signature of the WEIGHT PATCHES on a ModelPatcher (core LoRA loaders, adapters loaded by other packs
     such as Load LakonLab Adapter): keys, strengths, shapes and sampled values.  None when the model has no weight
