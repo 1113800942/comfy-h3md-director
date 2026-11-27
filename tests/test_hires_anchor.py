@@ -22,7 +22,8 @@ OV = 39     # 12 tokens
 class HiresAnchorTests(unittest.TestCase):
     def test_option_is_last_and_off_by_default(self):
         names = list(LS.H3MDLoopOptions.INPUT_TYPES()["required"])
-        self.assertEqual(names[-1], "hires_anchor")
+        # appended after every older option; 0.6.5 appended live_preview / live_preview_from_step after it
+        self.assertEqual(names[-3:], ["hires_anchor", "live_preview", "live_preview_from_step"])
         self.assertEqual(LS.option_defaults()["hires_anchor"], 0.0)
 
     def test_reference_then_correction(self):

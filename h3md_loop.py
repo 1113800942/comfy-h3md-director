@@ -46,6 +46,7 @@ try:
     from . import h3md_stream_save as SS          # H3MD stream save ('long video' output)
     from . import h3md_depth_control as DC        # H3MD depth ControlNet (optional input depth_control)
     from . import h3md_lowres_anchor as LA        # H3MD low-res anchor (2026-10-30)
+    from . import h3md_live_preview as LP         # 0.6.5 live preview (display only)
     from . import h3md_window as WIN              # window-exp branch (2026-11-07)
     from . import h3md_progress as PROG           # window-exp: per-step progress cache
     from . import h3md_remake_engine as SWAP      # 2026-11-14 multi-person swap engine
@@ -60,6 +61,7 @@ except ImportError:  # flat import (tests)
     import h3md_stream_save as SS
     import h3md_depth_control as DC
     import h3md_lowres_anchor as LA
+    import h3md_live_preview as LP
     import h3md_window as WIN
     import h3md_progress as PROG
     import h3md_remake_engine as SWAP
@@ -859,6 +861,18 @@ class H3MDLoopSampler:
             "generate only these this time (cached ones again too); missing earlier segments are generated as well. "
             "Overrides rerun_segments / stop_after when not empty.\n直接填或接总控台。空 = 全部跑完（有缓存的直接用）；"
             "填 2 / 1-2 / 3, 6-7, 9 = 这次只生成这几段（有缓存的也重新生成），前面缺的段一起生成。"})
+        # 0.6.5 live preview, appended LAST (old workflows load); display only: never part of a cache key
+        opt["live_preview"] = (list(LP.MODES), {"default": LP.DEFAULT_MODE, "tooltip":
+            "Watch each segment while it samples: from the step set below, the model's current guess of the finished "
+            "segment is shown on this node as a strip of frames (fast tiny decoder, not final quality). The run does "
+            "not wait - press Cancel if it goes wrong. low-res: the low-res pass only (recommended). "
+            "low-res + high-res: also the high-res steps (a little more VRAM). off: no preview.\n"
+            "边跑边看：从下面设的那一步开始，每一步都把模型当前预测的成片解码成一排画面显示在这个节点上（小解码器，"
+            "不是最终画质）。不会停下来等你，看到不对就点取消。low-res：只看低清（推荐）；low-res + high-res：高清"
+            "每一步也看（多占一点显存）；off：关。"})
+        opt["live_preview_from_step"] = ("INT", {"default": LP.DEFAULT_FROM_STEP, "min": 1, "max": 100, "tooltip":
+            "First low-res step that is shown (the first steps are mostly noise). 1 = from the start.\n"
+            "低清从第几步开始显示（前几步基本是噪点）。1 = 从头显示。"})
         # hidden 'prompt' (no widget / no slot): only to warn when 'images' (now a placeholder) is used downstream
         return {"required": req, "optional": opt, "hidden": {"unique_id": "UNIQUE_ID", "prompt": "PROMPT"}}
 
@@ -912,6 +926,8 @@ class H3MDLoopSampler:
         self._depth = DC.LoopDepth(_dc, plan)  # H3MD depth (never reaches the sampler)
         self._vram_release = str(sampler_kwargs.pop("vram_release", "deep") or "deep")      # H3MD memguard (not in keys)
         guard = str(sampler_kwargs.pop("slow_step_guard", "stop") or "stop")                 # H3MD memguard (not in keys)
+        LP.configure(sampler_kwargs.pop("live_preview", LP.DEFAULT_MODE),                     # 0.6.5 (display only,
+                     sampler_kwargs.pop("live_preview_from_step", LP.DEFAULT_FROM_STEP))      # not in keys)
         self._anchor = max(0.0, min(1.0, float(sampler_kwargs.pop("lowres_anchor", 0.0) or 0.0)))  # H3MD low-res anchor
         self._hires_anchor = max(0.0, min(1.0, float(sampler_kwargs.pop("hires_anchor", 0.0) or 0.0)))  # H3MD hi-res anchor
         for gone in ("drift_handoff_match", "drift_seam_anchor", "drift_detail"):  # removed 2026-10-30 (ineffective)
@@ -1083,6 +1099,7 @@ class H3MDLoopSampler:
         for step, k in enumerate(indices):
             check_interrupt()
             seg = segs[k]
+            LP.set_segment(k + 1, len(segs))   # 0.6.5 live preview label
             where = f"segment {k + 1}/{len(segs)}" + (f" (shot {seg['shot'] + 1}.{seg['sub'] + 1}/{seg['subCount']})" if "shot" in seg else "")
             if "autoPart" in seg:  # H3MD autosplit (2026-10-27)
                 where += f" (shot {seg['shotIndex'] + 1} part {seg['autoPart'] + 1}/{seg['autoParts']})"

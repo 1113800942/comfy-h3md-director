@@ -103,6 +103,16 @@ MIT 许可，全文见 `h3md_rife/LICENSE_RIFE.txt`。外面的加载、批量�
 
 ---
 
+## 2c. taeh3 tiny decoder for the live preview (included since 0.6.5) / taeh3 小解码器（实时预览用，0.6.5 起内置）
+
+`h3md_preview/taeh3.safetensors` is the tiny MiniMax H3 decoder taeh3 by Ollin Boer Bohan, unchanged, from
+<https://github.com/madebyollin/taehv> (`safetensors/taeh3.safetensors`). **MIT License, Copyright (c) 2025 Ollin
+Boer Bohan** - full text in `h3md_preview/LICENSE_TAEHV.txt`. It is only used to show the live preview while a
+segment samples; the network class is ComfyUI's own (`comfy.taesd.taehv`), the preview code is H3MD's own.
+
+`h3md_preview/taeh3.safetensors` 是 Ollin Boer Bohan 的 MiniMax H3 小解码器 taeh3（原文件未改动），采用 MIT 许可，全文见
+`h3md_preview/LICENSE_TAEHV.txt`。只用于采样时的实时预览；网络结构用的是 ComfyUI 自带的类，预览代码是 H3MD 自己写的。
+
 ## 3. Runtime dependencies (not included) / 运行时依赖（不包含在本包里）
 
 | Project | Status (checked 2026-10-19) | How H3MD uses it |
