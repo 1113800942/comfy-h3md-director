@@ -70,3 +70,33 @@ def test_loop_inputs_appended_last_and_popped_before_cache_key():
     assert opt["live_preview"][1]["default"] == "low-res"
     import h3md_loop_split as LS
     assert "live_preview" in LS.option_defaults() and "live_preview_from_step" in LS.option_defaults()
+
+
+def test_packed_av_latent_inside_the_sampler():
+    """0.6.5 test 01:10: inside the sampler ComfyUI packs video + audio into one flat [B, 1, N] tensor."""
+    import comfy.utils
+
+    class Base:
+        pass
+
+    class Wrap:
+        def __init__(self, inner):
+            self.inner_model = inner
+
+    video = torch.randn(1, 24, 7, 4, 3)
+    audio = torch.randn(1, 32, 2, 9)
+    packed, shapes = comfy.utils.pack_latents([video, audio])
+    base = Base()
+    base.latent_shapes = shapes
+    model_k = Wrap(Wrap(base))                       # KSamplerX0Inpaint -> CFGGuider -> BaseModel
+    got = LP.latent_shapes_of(model_k)
+    assert got == [tuple(video.shape), tuple(audio.shape)]
+    assert torch.equal(LP.video_stream(packed, got), video)
+    assert LP.video_stream(packed, None) is None     # no shapes -> not guessed
+
+
+def test_no_video_is_reported_not_silent(caplog):
+    LP.configure("low-res", 1)
+    with caplog.at_level("WARNING", logger="H3MD"):
+        LP.show("low_res", 1, 6, torch.zeros(1, 1, 50))
+    assert LP._state["failed"] and "no H3 video latent" in caplog.text

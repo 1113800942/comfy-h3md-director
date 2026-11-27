@@ -80,13 +80,35 @@ def _decoder(device):
     return m.to(device=device, dtype=dtype), dtype
 
 
-def video_stream(denoised):
-    """The video latent [B, 24, T, H, W] of the sampler's x0 (H3 AV latents are nested: video, audio)."""
+def latent_shapes_of(model):
+    """ComfyUI packs an AV latent (video + audio) into one flat [B, 1, N] tensor while sampling and stores the
+    stream shapes on the BaseModel (CFGGuider.inner_sample).  model = the k-diffusion model the sampler gets
+    (KSamplerX0Inpaint -> CFGGuider -> BaseModel)."""
+    m = model
+    for _ in range(4):
+        shapes = getattr(m, "latent_shapes", None)
+        if shapes:
+            return [tuple(s) for s in shapes]
+        m = getattr(m, "inner_model", None)
+        if m is None:
+            break
+    return None
+
+
+def video_stream(denoised, shapes=None):
+    """The video latent [B, 24, T, H, W] of the sampler's x0: nested (video, audio), packed flat (inside the
+    sampler; needs the stream shapes) or a plain video latent."""
     if denoised is None:
         return None
     if getattr(denoised, "is_nested", False):
         parts = denoised.unbind() if hasattr(denoised, "unbind") else denoised.tensors
         denoised = parts[0]
+    elif isinstance(denoised, torch.Tensor) and denoised.ndim == 3 and shapes:
+        vs = shapes[0]
+        cut = math.prod(vs[1:])
+        if denoised.shape[-1] < cut:
+            return None
+        denoised = denoised[:, :, :cut].reshape([denoised.shape[0]] + list(vs[1:]))
     if not isinstance(denoised, torch.Tensor) or denoised.ndim != 5 or denoised.shape[1] != 24:
         return None
     return denoised
@@ -140,8 +162,9 @@ def _send(step, total, img):
         hook(step, total, ("JPEG", img, MAX_SIDE), node_id=None)
 
 
-def show(stage: str, step: int, total: int, denoised):
-    """Sampler callback hook (H3MD timed_sampler), called after ComfyUI's own step preview.  Never raises."""
+def show(stage: str, step: int, total: int, denoised, shapes=None):
+    """Sampler callback hook (H3MD timed_sampler), called after ComfyUI's own step preview.  Never raises.
+    shapes: latent_shapes_of(model) when the sampler works on a packed AV latent."""
     if _cfg["mode"] == "off" or _state["failed"]:
         return
     try:
@@ -150,8 +173,11 @@ def show(stage: str, step: int, total: int, denoised):
             if _state["last"] is not None:
                 _send(step, total, _state["last"])
             return
-        video = video_stream(denoised)
-        if video is None:
+        video = video_stream(denoised, shapes)
+        if video is None:   # never silent (0.6.5 test 01:10: a packed latent was skipped without a word)
+            _state["failed"] = True
+            LOG.warning("%s turned off for this run: no H3 video latent in the sampler's x0 (%s %s, shapes %s)",
+                        _TAG, type(denoised).__name__, tuple(getattr(denoised, "shape", ())), shapes)
             return
         t0 = time.perf_counter()
         frames = decode_frames(video, pick(int(video.shape[2])))

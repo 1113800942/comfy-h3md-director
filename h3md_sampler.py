@@ -217,6 +217,7 @@ def timed_sampler(sampler, stage: str, total: int, log: list | None = None, prog
     @functools.wraps(inner)
     def fn(model, x, sigmas, *a, callback=None, **kw):
         state = {"t": time.perf_counter(), "n": 0}
+        shapes = LP.latent_shapes_of(model)   # 0.6.5 live preview: the AV latent is packed flat while sampling
         offset = 0
         n_sig = int(sigmas.shape[-1])
         if progress is not None:   # window-exp progress cache: restart this pass at the last saved step
@@ -261,7 +262,7 @@ def timed_sampler(sampler, stage: str, total: int, log: list | None = None, prog
                             "peak_gib": None if peak is None else round(peak, 2)})
             ret = callback(dict(d, i=i) if offset else d) if callback is not None else None
             # 0.6.5 live preview: after ComfyUI's own preview, so the strip of decoded frames is what stays on screen
-            LP.show(stage, i + 1, total, d.get("denoised"))
+            LP.show(stage, i + 1, total, d.get("denoised"), shapes)
             return ret
 
         return inner(model, x, sigmas, *a, callback=cb, **kw)
