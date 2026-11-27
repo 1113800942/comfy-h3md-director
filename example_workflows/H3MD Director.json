@@ -3434,7 +3434,7 @@
   },
   {
    "id": 337,
-   "type": "H3MDRedrawPreview",
+   "type": "H3MDRedraw",
    "pos": [
     780,
     1460
@@ -3484,10 +3484,9 @@
     }
    ],
    "properties": {
-    "Node name for S&R": "H3MDRedrawPreview"
+    "Node name for S&R": "H3MDRedraw"
    },
    "widgets_values": [
-    false,
     ""
    ]
   },

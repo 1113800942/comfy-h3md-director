@@ -347,7 +347,7 @@ class LoopRerunTests(unittest.TestCase):
         old_low0 = torch.load(os.path.join(self.cache_dir(), "seg_000_lowres.pt"), weights_only=True)["video"]
 
         FakeSampler.calls = []
-        redraw = WIN.H3MDRedrawPreview().run(plan, False, "1-2")[0]   # seconds 1-2 = frames 24-48 of segment 1
+        redraw = WIN.H3MDRedraw().run(plan, "1-2")[0]   # seconds 1-2 = frames 24-48 of segment 1
         self.run_loop(redraw)
         self.assertEqual(len(FakeSampler.calls), 1)                 # only the touched group
         call = FakeSampler.calls[0]
@@ -381,7 +381,7 @@ class LoopRerunTests(unittest.TestCase):
         edited["segments"][0]["prompt"] = "segment 0, now with a plain dress without buttons"
         FakeSampler.calls = []
         with self.assertLogs("H3MD", level="INFO") as logs:
-            self.run_loop(WIN.H3MDRedrawPreview().run(edited, False, "1-2")[0])
+            self.run_loop(WIN.H3MDRedraw().run(edited, "1-2")[0])
         self.assertEqual(len(FakeSampler.calls), 1)                 # only segment 1, from its cached take
         self.assertTrue(any("changed since it was rendered" in m for m in logs.output))
         new0 = self.latent(0)
@@ -396,7 +396,7 @@ class LoopRerunTests(unittest.TestCase):
         moved = copy.deepcopy(edited)
         moved["segments"][0]["windowCuts"] = [68]
         with self.assertRaises(ValueError) as err:
-            self.run_loop(WIN.H3MDRedrawPreview().run(moved, False, "1-2")[0])
+            self.run_loop(WIN.H3MDRedraw().run(moved, "1-2")[0])
         self.assertIn("hard cuts moved", str(err.exception))
 
     def test_lowres_anchor_option(self):

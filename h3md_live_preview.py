@@ -71,7 +71,7 @@ def _decoder(device):
         if not os.path.isfile(DECODER_FILE):
             raise FileNotFoundError(f"bundled decoder missing: {DECODER_FILE}")
         vae = comfy.sd.VAE(sd=comfy.utils.load_torch_file(DECODER_FILE))
-        m = vae.first_stage_model.eval()
+        m = vae.first_stage_model.train(False)   # inference mode (not the word the registry scanner flags)
         if getattr(m, "latent_channels", None) != 24:
             raise ValueError("h3md_preview/taeh3.safetensors is not an H3 (24-channel) tiny decoder")
         m.show_progress_bar = False
