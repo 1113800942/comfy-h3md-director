@@ -16,7 +16,7 @@
     2030
    ],
    "flags": {},
-   "order": 3,
+   "order": 6,
    "mode": 0,
    "inputs": [
     {
@@ -132,15 +132,15 @@
    "id": 271,
    "type": "H3MDVideoPreview",
    "pos": [
-    560,
-    1230
+    660,
+    1210
    ],
    "size": [
-    923.8101194841042,
-    575
+    930,
+    600
    ],
    "flags": {},
-   "order": 6,
+   "order": 9,
    "mode": 0,
    "inputs": [
     {
@@ -162,14 +162,14 @@
    "type": "489eeb82-04ff-4c9c-9555-4ee9fc216a2e",
    "pos": [
     170,
-    1110
+    900
    ],
    "size": [
     320,
-    200
+    230
    ],
    "flags": {},
-   "order": 5,
+   "order": 8,
    "mode": 0,
    "inputs": [
     {
@@ -305,10 +305,10 @@
    ],
    "size": [
     420,
-    1000
+    1007
    ],
    "flags": {},
-   "order": 2,
+   "order": 5,
    "mode": 0,
    "inputs": [
     {
@@ -552,8 +552,8 @@
     560
    ],
    "size": [
-    250,
-    190
+    320,
+    230
    ],
    "flags": {},
    "order": 1,
@@ -619,15 +619,15 @@
    "id": 339,
    "type": "9e2db2ef-33af-4484-9b02-ce2742ada61b",
    "pos": [
-    170,
-    820
+    660,
+    560
    ],
    "size": [
-    230.51860146586858,
-    220
+    240,
+    230
    ],
    "flags": {},
-   "order": 4,
+   "order": 7,
    "mode": 0,
    "inputs": [
     {
@@ -725,15 +725,15 @@
    "id": 341,
    "type": "MarkdownNote",
    "pos": [
-    -2020,
-    560
+    -1900,
+    590
    ],
    "size": [
-    400,
-    440
+    282.1890000000001,
+    406.04200000000003
    ],
    "flags": {},
-   "order": 0,
+   "order": 2,
    "mode": 0,
    "inputs": [],
    "outputs": [],
@@ -749,15 +749,15 @@
    "id": 357,
    "type": "H3MDLivePreviewWindow",
    "pos": [
-    560,
-    560
+    170,
+    1210
    ],
    "size": [
     420,
     600
    ],
    "flags": {},
-   "order": 18,
+   "order": 3,
    "mode": 0,
    "inputs": [],
    "outputs": [],
@@ -771,15 +771,15 @@
    "id": 358,
    "type": "MarkdownNote",
    "pos": [
-    -2020,
-    230
+    -1120,
+    240
    ],
    "size": [
-    1300,
-    270
+    1250,
+    218.05599999999998
    ],
    "flags": {},
-   "order": 0,
+   "order": 4,
    "mode": 0,
    "inputs": [],
    "outputs": [],
@@ -1150,16 +1150,16 @@
       "type": "H3MDSaveVideoFaceRefineInterp",
       "pos": [
        1640,
-       420
+       -40
       ],
       "size": [
        700,
-       1410
+       1760
       ],
       "flags": {
        "collapsed": false
       },
-      "order": 2,
+      "order": 1,
       "mode": 0,
       "inputs": [
        {
@@ -1857,8 +1857,8 @@
       "id": 305,
       "type": "Note",
       "pos": [
-       2360,
-       1070
+       2390,
+       720
       ],
       "size": [
        210,
@@ -2097,10 +2097,10 @@
       "type": "UNETLoader",
       "pos": [
        -750,
-       -60
+       -360
       ],
       "size": [
-       550,
+       640,
        100
       ],
       "flags": {},
@@ -2391,15 +2391,15 @@
       "id": 299,
       "type": "H3MDSageAttention",
       "pos": [
-       -160,
-       -60
+       0,
+       -360
       ],
       "size": [
-       330,
-       58
+       450,
+       46
       ],
       "flags": {},
-      "order": 8,
+      "order": 9,
       "mode": 0,
       "inputs": [
        {
@@ -2429,15 +2429,15 @@
       "id": 302,
       "type": "H3MDChunkFeedForward",
       "pos": [
-       -160,
-       50
+       500,
+       -360
       ],
       "size": [
        280,
        90
       ],
       "flags": {},
-      "order": 9,
+      "order": 11,
       "mode": 0,
       "inputs": [
        {
@@ -2491,15 +2491,15 @@
       "id": 311,
       "type": "H3MDChunkFeedForward",
       "pos": [
-       -160,
-       370
+       500,
+       40
       ],
       "size": [
        280,
        90
       ],
       "flags": {},
-      "order": 10,
+      "order": 12,
       "mode": 0,
       "inputs": [
        {
@@ -2553,15 +2553,15 @@
       "id": 116,
       "type": "H3MDLowVRAMLoraLoader",
       "pos": [
-       210,
-       -60
+       500,
+       -200
       ],
       "size": [
-       630,
+       717.6695312500001,
        130
       ],
       "flags": {},
-      "order": 11,
+      "order": 13,
       "mode": 0,
       "inputs": [
        {
@@ -2642,15 +2642,15 @@
       "id": 117,
       "type": "H3MDLowVRAMLoraLoader",
       "pos": [
-       210,
-       260
+       500,
+       220
       ],
       "size": [
        630,
        130
       ],
       "flags": {},
-      "order": 12,
+      "order": 14,
       "mode": 0,
       "inputs": [
        {
@@ -2757,8 +2757,8 @@
       "id": 324,
       "type": "Note",
       "pos": [
-       -160,
-       500
+       -130,
+       390
       ],
       "size": [
        260,
@@ -2783,15 +2783,15 @@
       "id": 342,
       "type": "H3MDSageAttention",
       "pos": [
-       -160,
-       260
+       0,
+       60
       ],
       "size": [
-       330,
-       58
+       450,
+       50
       ],
       "flags": {},
-      "order": 8,
+      "order": 10,
       "mode": 0,
       "inputs": [
        {
@@ -2822,15 +2822,15 @@
       "type": "LoraLoaderModelOnly",
       "title": "TARA 动作复刻 LoRA / Motion Transfer TARA (第三方，用时打开 / third-party, enable to use)",
       "pos": [
-       -580,
-       100
+       -770,
+       -50
       ],
       "size": [
-       420,
+       640,
        82
       ],
       "flags": {},
-      "order": 3,
+      "order": 8,
       "mode": 4,
       "inputs": [
        {
@@ -2883,15 +2883,15 @@
       "type": "BFSMiniMaxH3NativeTemporal",
       "title": "TARA 对齐（只接低清，第三方 ComfyUI-BFSNodes，用时打开）/ TARA low-res only",
       "pos": [
-       890,
-       -60
+       1300,
+       -410
       ],
       "size": [
-       420,
-       250
+       590,
+       560
       ],
       "flags": {},
-      "order": 20,
+      "order": 15,
       "mode": 4,
       "inputs": [
        {
@@ -2932,15 +2932,15 @@
       "type": "Note",
       "title": "动作复刻 TARA / Motion copy with TARA",
       "pos": [
-       -580,
-       220
+       -680,
+       100
       ],
       "size": [
        420,
        200
       ],
       "flags": {},
-      "order": 0,
+      "order": 6,
       "mode": 0,
       "inputs": [],
       "outputs": [],
@@ -3324,7 +3324,7 @@
        110
       ],
       "flags": {},
-      "order": 2,
+      "order": 4,
       "mode": 0,
       "inputs": [
        {
@@ -3422,7 +3422,7 @@
        150
       ],
       "flags": {},
-      "order": 3,
+      "order": 5,
       "mode": 0,
       "inputs": [
        {
@@ -3813,10 +3813,10 @@
       ],
       "size": [
        340,
-       300
+       420
       ],
       "flags": {},
-      "order": 5,
+      "order": 7,
       "mode": 0,
       "inputs": [
        {
@@ -3994,10 +3994,10 @@
       ],
       "size": [
        340,
-       670
+       710
       ],
       "flags": {},
-      "order": 4,
+      "order": 6,
       "mode": 0,
       "inputs": [
        {
