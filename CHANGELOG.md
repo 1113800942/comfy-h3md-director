@@ -2,6 +2,62 @@
 
 Dates are development dates (2026). / 日期为开发日期（2026 年）。
 
+## [0.6.6] - 2026-11-28
+
+### Added / 新增
+- **Open and run: the simple and Remake workflows need only H3MD and ComfyUI core.** Face refine, VOSR 2.0, the
+  sigma refiner and the chunked feed-forward patch are now inside H3MD; still no extra `pip install`.
+  清爽版和多人换人版打开就能跑：只要 H3MD 和 ComfyUI 自带节点。修脸、VOSR 2.0、Sigma Refiner、前馈分块都搬进了 H3MD，仍然不需要
+  额外 pip 安装。
+- **Face refine built in.** The tracking and paste-back code of ComfyUI-H3-FaceRefine 1.1.2 (Carasibana, MIT) ships
+  inside H3MD (its nodes are not registered, so the pack can stay installed), with H3MD's own face detector
+  (`face_yolov8n_v2`, first in the `detector` list). No ultralytics / insightface install, no detector download.
+  Another detector file still works when the `ultralytics` package is installed. Node options unchanged (NOTICE 2d).
+  修脸内置：跟脸和贴回的代码随 H3MD 一起，自带人脸检测模型（`detector` 列表第一项），不用装 ultralytics / insightface，也不用下
+  检测模型。节点选项没变。
+- **VOSR 2.0 built in** (code from ComfyUI-VOSR2, Apache-2.0, NOTICE 2e): with `refine_model = VOSR2` and nothing
+  wired to `vosr2_model`, H3MD loads it itself; the model files (about 7 GB) download on first use into
+  `models/vosr2/VOSR2`. An external loader on `vosr2_model` still works. A missing restore model no longer stops the
+  save: the video is saved without that step and the report says why.
+  VOSR 2.0 内置：`vosr2_model` 不接时 H3MD 自己加载，模型（约 7 GB）第一次用时自动下载；外接加载器照常能用。修复模型缺失时不再
+  卡住，照常保存并写明原因。
+- **Redraw in the Control Panel.** A "redraw" box above "trial": type the seconds to redraw (same syntax as the H3MD
+  Redraw node) and run. It goes out of the panel's new last output `redraw` into the Loop's new last input `redraw`
+  (wired in the simple and Remake workflows). Seamless long video only; in other modes it is ignored with a log line.
+  The H3MD Redraw node still works.
+  重画进总控台：“试镜”上面多了“重画”框，填要重画的秒数再运行（写法和 H3MD Redraw 节点一样）。只在无接缝长视频模式下起作用。
+- **New nodes**: `H3MD Sigma Refiner` (same numbers as YCNodes' H3SigmaRefiner), `H3MD Chunk Feed-Forward` (exact,
+  less VRAM) and `H3MD Sage Attention`. The Sage node calls ComfyUI-KJNodes' patch when KJNodes and the SageAttention
+  package are installed, shows on the node whether it is active, and lists the install steps when it is not; without
+  them there is no error, the model passes through (slower, more VRAM). (NOTICE 2f, 2g)
+  新节点：H3MD Sigma Refiner、H3MD Chunk Feed-Forward、H3MD Sage Attention。Sage 节点上显示是否已加速，没装时给出安装步骤；
+  不装也不报错，只是更慢、更占显存。
+- **Recommended LoRAs are recognised by content, not by name.** The Control Panel's list uses the authors' official
+  file names and finds a renamed copy by size + SHA256. A recommended LoRA you do not have shows "not downloaded" with
+  its link and is skipped with a note - never an error. The list is a recommendation: switch rows off or use your own.
+  推荐 LoRA 按内容认，不看名字：列表写作者的官方文件名，改过名的本地文件按大小 + SHA256 也能认出来。没有的显示“未下载”和下载地址，
+  运行时跳过并提示，不报错。
+
+### Changed / 变更
+- Recommended LoRA set: the cinematic LoRA and the paid speed slider are no longer in the styles.
+  推荐列表里去掉了电影感 LoRA 和付费的 speed slider。
+- Example workflows `H3MD Director simple.json` / `H3MD Director Remake.json`: KJNodes / YCNodes nodes replaced by
+  H3MD's, the VOSR loader and the bypassed redraw / semantic bridge nodes removed, the title banner is a core Markdown
+  note, the model-links note rewritten (recommended LoRAs marked optional, official names), layout tidied.
+  `H3MD Director.json` (full): the same three node types replaced, otherwise unchanged.
+  示例工作流：清爽版和多人换人版换成 H3MD 自己的节点，删掉 VOSR 加载器和旁路的重画 / 语义桥节点，标题换成自带便签，模型下载便签重写，
+  重新排版。完整版只换了那三种节点。
+- The Control Panel's start-up check no longer asks for the FaceRefine pack; with face refine on it warns when the
+  VOSR 2.0 files are not there yet (they download on first use).
+  总控台开跑前的检查不再要求 FaceRefine 包。
+
+### Fixed / 修复
+- README model list: `Motion_Repair_V2.safetensors` is on Civitai (the Hugging Face repo named before holds V1), and
+  the lms LoRA is `minimax_h3_lms_v1.0_r64.safetensors` from Alissonerdx's repo (the `..._r64_r` file named before is
+  a different file).
+  README 模型清单更正：Motion Repair V2 在 Civitai（之前写的 Hugging Face 仓库里是 V1）；lms LoRA 是 Alissonerdx 仓库里的
+  `minimax_h3_lms_v1.0_r64.safetensors`（之前写的 `..._r64_r` 是另一个文件）。
+
 ## [0.6.5] - 2026-11-27
 
 ### Added / 新增
