@@ -14,14 +14,16 @@ def test_presets_match_measured_mix():
     lo = {r["key"]: r for r in CP.preset_rows("balanced", "low")}
     hi = {r["key"]: r for r in CP.preset_rows("balanced", "high")}
     assert lo["enhancer"]["on"] and lo["enhancer"]["strength"] == 0.55
-    assert hi["realism"]["strength"] == 0.6 and hi["cinematic"]["on"]
+    assert hi["realism"]["strength"] == 0.6 and hi["lms"]["on"]
+    # 0.6.6: the paid speed slider and the cinematic LoRA are no longer recommended rows
+    assert "speed" not in CP.FILES and "cinematic" not in CP.FILES and "speed" not in lo and "cinematic" not in hi
     assert not lo["fightflow"]["on"] and not lo["weapon"]["on"]
     # 0.4.6: high motion = one weapon LoRA per pass, nothing else on (YJ's 1-minute fight, 11-12)
     for which, strength in (("low", 0.85), ("high", 0.5)):
         on = {r["key"]: r["strength"] for r in CP.preset_rows("high_motion", which) if r["on"]}
         assert on == {"weapon": strength}
     off = {r["key"] for r in CP.preset_rows("high_motion", "low") if not r["on"]}
-    assert {"combat", "fightflow", "motion_repair", "speed", "cinematic", "vbvr", "enhancer"} <= off
+    assert {"combat", "fightflow", "motion_repair", "vbvr", "enhancer"} <= off
     # the weapon row switched off keeps the tested strength, so turning it on again starts from it
     bal = {r["key"]: r for r in CP.preset_rows("balanced", "low")}
     assert not bal["weapon"]["on"] and bal["weapon"]["strength"] == 0.85
@@ -56,7 +58,7 @@ def test_style_button_keeps_user_rows():
     out = CP.apply_style(rows, "motion_copy", "low")
     mine = [r for r in out if r["lora"] == "my_anime.safetensors"][0]
     assert mine["on"] and mine["strength"] == 0.8
-    assert not [r for r in out if r.get("key") == "cinematic"][0]["on"]
+    assert not [r for r in out if r.get("key") == "vbvr"][0]["on"]
 
 
 def test_parse_rows():
@@ -75,12 +77,37 @@ def test_missing_lora_listed_and_off_rows_skipped():
     out, used = CP.apply_rows(model, [{"key": None, "lora": "nope.safetensors", "on": False, "strength": 1}],
                               CP._LoraCache(), "low")
     assert out is model and used == []
-    try:
-        CP.apply_rows(model, [{"key": None, "lora": "nope.safetensors", "on": True, "strength": 1}],
-                      CP._LoraCache(), "low")
-        raise AssertionError("missing file accepted")
-    except ValueError as exc:
-        assert "nope.safetensors" in str(exc)
+    # 0.6.6: the LoRAs are recommendations - a switched-on row whose file is missing is skipped, the run goes on
+    skipped = []
+    out, used = CP.apply_rows(model, [{"key": None, "lora": "nope.safetensors", "on": True, "strength": 1},
+                                      {"key": "vbvr", "lora": CP.FILES["vbvr"], "on": True, "strength": 1}],
+                              CP._LoraCache(), "low", skipped)
+    assert out is model and used == [] and skipped == ["nope.safetensors", CP.FILES["vbvr"]]
+
+
+def test_066_official_names_and_renamed_copy_found_by_sha256(tmp_path, monkeypatch):
+    import hashlib
+    # official file names only: no strengths / trigger words / Chinese in a recommended file name
+    for key, spec in CP.RECOMMENDED.items():
+        assert spec["file"].endswith(".safetensors") and " " not in spec["file"] and spec["file"].isascii()
+        assert len(spec["sha256"]) == 64 and spec["bytes"] > 0 and spec["url"].startswith("https://")
+    data = b"renamed lora bytes"
+    (tmp_path / "my renamed 0.6-0.8.safetensors").write_bytes(data)
+    (tmp_path / "same size other.safetensors").write_bytes(b"x" * len(data))
+    files = {p.name: str(p) for p in tmp_path.iterdir()}
+    monkeypatch.setattr(CP.folder_paths, "get_full_path", lambda kind, name: files.get(name))
+    monkeypatch.setattr(CP.folder_paths, "get_filename_list", lambda kind: sorted(files))
+    monkeypatch.setitem(CP.RECOMMENDED, "vbvr", dict(CP.RECOMMENDED["vbvr"], bytes=len(data),
+                                                     sha256=hashlib.sha256(data).hexdigest()))
+    official = CP.FILES["vbvr"]
+    assert CP.find_lora(official) == "my renamed 0.6-0.8.safetensors"      # same bytes under another name
+    assert CP.find_lora(CP.FILES["combat"]) is None                        # not there at all
+    assert CP.find_lora("someone elses.safetensors") is None               # not a recommended file: name only
+    # a recommended row saved under an older renamed name is looked up by its key's official file
+    assert CP.find_row({"key": "vbvr", "lora": "H3-Licon-VBVR-I2V-1pass1.0-2pass0.3.safetensors"}) \
+        == "my renamed 0.6-0.8.safetensors"
+    files[official] = str(tmp_path / "same size other.safetensors")        # the official name wins when present
+    assert CP.find_lora(official) == official
 
 
 def test_outputs_and_fps_lock():
@@ -103,22 +130,77 @@ def test_styles_switch_no_semantic_bridge():
         assert res[9] is None, style
 
 
-def test_simple_workflow_bridge_wired_and_bypassed():
-    """The simple example workflow: a bypassed H3MD Semantic Bridge feeds the sampler's semantic_bridge input; the
-    Control Panel's semantic_bridge output is not connected."""
-    path = os.path.join(os.path.dirname(HERE), "example_workflows", "H3MD Director simple.json")
+def _example(name):
+    path = os.path.join(os.path.dirname(HERE), "example_workflows", name)
     wf = json.load(open(path, encoding="utf-8"))
-    nodes = {n["id"]: n for n in wf["nodes"]}
-    bridges = [n for n in wf["nodes"] if n["type"] == "H3MDSemanticBridge"]
-    assert len(bridges) == 1 and bridges[0]["mode"] == 4                  # 4 = bypassed
-    out = bridges[0]["outputs"][0]["links"]
-    assert len(out) == 1
-    link = [l for l in wf["links"] if l[0] == out[0]][0]
-    target = nodes[link[3]]
-    assert target["inputs"][link[4]]["name"] == "semantic_bridge"
-    panel = [n for n in wf["nodes"] if n["type"] == "H3MDControlPanel"][0]
-    assert not [o for o in panel["outputs"] if o["name"] == "semantic_bridge"][0]["links"]
+    subs = (wf.get("definitions") or {}).get("subgraphs") or []
+    return wf, subs
 
+
+def test_066_simple_and_remake_workflows_need_no_other_node_pack_to_open():
+    """0.6.6: a new user opens the default workflows without red nodes - no rgthree / YCNodes / KJNodes / VOSR2 node
+    is enabled in them; the bypassed Redraw and Semantic Bridge helper nodes are gone (the Loop keeps its input)."""
+    gone = {"Label (rgthree)", "H3SigmaRefiner", "MiniMaxChunkFeedForward", "VOSR2ModelLoader",
+            "MiniMaxH3MemoryEfficientSageAttentionPatch", "H3MDRedraw", "H3MDRedrawPreview", "H3MDSemanticBridge"}
+    core_or_ours = ("H3MD", "MarkdownNote", "Note", "UNETLoader", "VAELoader", "CLIPLoader", "KSamplerSelect",
+                    "BasicScheduler", "LoraLoaderModelOnly")
+    for name in ("H3MD Director simple.json", "H3MD Director Remake.json"):
+        wf, subs = _example(name)
+        sub_ids = {s["id"] for s in subs}
+        for g in [wf] + subs:
+            for n in g["nodes"]:
+                assert n["type"] not in gone, (name, n["type"])
+                if n.get("mode", 0) == 0 and n["type"] not in sub_ids:        # every ENABLED node is ours or core
+                    assert n["type"].startswith(core_or_ours), (name, n["type"])
+        types = [n["type"] for g in [wf] + subs for n in g["nodes"]]
+        assert types.count("H3MDSageAttention") == 2 and types.count("H3MDChunkFeedForward") == 2, name
+        assert types.count("H3MDSigmaRefiner") == 1, name
+        loop = [n for s in subs for n in s["nodes"] if n["type"].startswith("H3MDLoopSampler")][0]
+        assert [i for i in loop["inputs"] if i["name"] == "semantic_bridge"]      # the input stays for users' own bridge
+        roles = {(n.get("properties") or {}).get("h3md_role") for s in subs for n in s["nodes"]}
+        assert {"sage_low", "sage_high", "turbo768_low", "turbo768_high"} <= roles, name   # the panel's switches find them
+
+
+def test_066_redraw_runs_from_the_control_panel_to_the_loop():
+    for name in ("H3MD Director simple.json", "H3MD Director Remake.json"):
+        wf, subs = _example(name)
+        nodes = {n["id"]: n for n in wf["nodes"]}
+        panel = [n for n in wf["nodes"] if n["type"] == "H3MDControlPanel"][0]
+        out = [o for o in panel["outputs"] if o["name"] == "redraw"]
+        assert len(out) == 1 and panel["outputs"][-1]["name"] == "redraw" and len(out[0]["links"]) == 1
+        link = [l for l in wf["links"] if l[0] == out[0]["links"][0]][0]
+        inst = nodes[link[3]]
+        assert inst["inputs"][link[4]]["name"] == "redraw" and inst["inputs"][link[4]]["link"] == link[0]
+        sg = [s for s in subs if s["id"] == inst["type"]][0]
+        sg_in = [i for i in sg["inputs"] if i["name"] == "redraw"][0]
+        inner = [l for l in sg["links"] if l["id"] == sg_in["linkIds"][0]][0]
+        assert inner["origin_id"] == -10 and inner["origin_slot"] == sg["inputs"].index(sg_in)
+        loop = [n for n in sg["nodes"] if n["id"] == inner["target_id"]][0]
+        assert loop["type"].startswith("H3MDLoopSampler") and loop["inputs"][inner["target_slot"]]["name"] == "redraw"
+        # the plan goes from the Director straight to the sampler (no Redraw node in between any more)
+        plan_in = [i for i in inst["inputs"] if i["name"] == "plan"][0]
+        src = [l for l in wf["links"] if l[0] == plan_in["link"]][0]
+        assert nodes[src[1]]["type"].startswith("H3MDDirector") and src[5] == "H3MD_PLAN"
+        assert not [o for o in panel["outputs"] if o["name"] == "semantic_bridge"][0]["links"]
+
+
+def test_066_workflow_lora_lists_use_official_names():
+    for name in ("H3MD Director simple.json", "H3MD Director Remake.json"):
+        wf, _subs = _example(name)
+        panel = [n for n in wf["nodes"] if n["type"] == "H3MDControlPanel"][0]
+        vals = panel["widgets_values"]
+        assert vals[-1] == ""                                                    # redraw: empty
+        for text in (vals[-3], vals[-2]):
+            rows = json.loads(text)
+            assert rows and not [r for r in rows if r.get("key") in ("speed", "cinematic")]
+            for r in rows:
+                if r.get("key") in CP.FILES:
+                    assert r["lora"] == CP.FILES[r["key"]], (name, r)
+        note = [n for n in wf["nodes"] if n["type"] == "MarkdownNote" and "Model links" in (n.get("title") or "")][0]
+        text = note["widgets_values"][0]
+        for f in CP.FILES.values():
+            assert f in text, (name, f)
+        assert "speed_slider" not in text and "CSWRY/VOSR" in text and "sageattention" in text
 
 
 def test_lora_dropdowns_filled_on_open():
@@ -286,3 +368,42 @@ if __name__ == "__main__":
         if n.startswith("test_"):
             f()
     print("ok")
+
+
+def test_066_redraw_row_output_and_loop_input():
+    """0.6.6: redraw by seconds is a Control Panel row.  Declared last + optional (old workflows / API prompts load),
+    handed on as the LAST output; wrong writing stops the run at the panel; the Loop takes it as its last input."""
+    spec = CP.H3MDControlPanel.INPUT_TYPES()
+    assert list(spec["optional"]) == ["redraw"] and "redraw" not in spec["required"]
+    assert CP.H3MDControlPanel.RETURN_NAMES[-1] == "redraw" and CP.H3MDControlPanel.RETURN_NAMES[9] == "semantic_bridge"
+    node = CP.H3MDControlPanel()
+    m1, m2 = object(), object()
+    res = node.run(m1, m2, 704, 1280, False, 24.0, False, 7, "", "balanced", "[]", "[]")["result"]
+    assert len(res) == 11 and res[10] == ""                      # not given (older workflow): empty
+    res = node.run(m1, m2, 704, 1280, False, 24.0, False, 7, "", "balanced", "[]", "[]", " 4-8, 1:12-1:15 ")["result"]
+    assert res[10] == "4-8, 1:12-1:15"
+    try:
+        node.run(m1, m2, 704, 1280, False, 24.0, False, 7, "", "balanced", "[]", "[]", "eight")
+        raise AssertionError("wrong redraw writing accepted")
+    except ValueError as exc:
+        assert "redraw" in str(exc)
+    import h3md_loop as L
+    import h3md_loop_split as LS
+    assert list(L.H3MDLoopSampler.INPUT_TYPES()["optional"])[-1] == "redraw"
+    main = LS.H3MDLoopSampler2.INPUT_TYPES()["optional"]
+    assert list(main)[-2:] == ["segments_to_run", "redraw"] and "redraw" not in LS.option_defaults()
+    import inspect
+    src = inspect.getsource(L.H3MDLoopSampler.run)
+    assert src.index('pop("redraw"') < src.index("WIN.wrap_models")      # applied to the plan before anything runs
+
+
+def test_066_redraw_ignored_without_window_mode():
+    import h3md_window as WIN
+    plan = {"segments": [{"startFrame": 0, "length": 243}], "windowMode": {"length": 243, "overlap": 22}}
+    out = WIN.redraw_plan(plan, "4-8")
+    assert out["windowMode"]["redraw"] == [[4.0, 8.0]] and "redraw" not in plan["windowMode"]
+    try:                                                         # the Redraw NODE still says why (it was added on purpose)
+        WIN.redraw_plan({"segments": plan["segments"]}, "4-8")
+        raise AssertionError("redraw without window mode accepted by the node")
+    except ValueError:
+        pass

@@ -76,6 +76,14 @@ def _m_h3md_live_preview():
     from . import h3md_live_preview as m
     return m
 
+def _m_h3md_sigma_refiner():
+    from . import h3md_sigma_refiner as m
+    return m
+
+def _m_h3md_speed_patches():
+    from . import h3md_speed_patches as m
+    return m
+
 def _m_h3md_director_refmod():
     from . import h3md_director_refmod as m
     return m
@@ -98,6 +106,8 @@ for _name, _load in (
         ("h3md_keyframe_nodes", _m_h3md_keyframe_nodes),
         ("h3md_ref_splice", _m_h3md_ref_splice),
         ("h3md_live_preview", _m_h3md_live_preview),
+        ("h3md_sigma_refiner", _m_h3md_sigma_refiner),
+        ("h3md_speed_patches", _m_h3md_speed_patches),
         ("h3md_director_refmod", _m_h3md_director_refmod),
 ):
     try:

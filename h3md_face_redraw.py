@@ -4,13 +4,14 @@ A small face in a wide shot has too few pixels for any restore model: VOSR2 at s
 drawn.  Here the tracked face crop (enlarged to a 768x768 canvas) is redrawn by H3 itself, but only inside a mask of
 the head, the way the published 'minimax_h3_r2v_perfect_face_refine' workflow does it:
 
-  1. SAM3 (ComfyUI core) tracks "head" on the crops -> per-frame head masks;
+  1. SAM3 (ComfyUI core) tracks "head" on the crops -> per-frame head masks, made solid and steady in time
+     (solid_masks, 0.6.6: on a small face the raw masks break up and the face flickered);
   2. the masks are cleaned (specks and flickers dropped, edge grown) and reduced to H3's latent grid (16x space,
      2x2 tokens, 1+4+4+4+4 frames per 17-frame clip), grown first so the redraw reaches a little past the head;
   3. the crops are VAE-encoded, that latent mask is the noise mask, DifferentialDiffusion softens its edge;
   4. the clip's own sound is encoded and locked (noise mask 0), so the lips keep the timing of the audio;
   5. conditioning = one face close-up (the reference photo cropped to its face, 2 MP), prompt empty;
-  6. euler, beta schedule, 6 steps (our 768 turbo LoRA; tested at 4 and 8), denoise 0.8 (0.5 lighter, up to 1.0);
+  6. euler, beta schedule, 6 steps (our 768 turbo LoRA; tested at 4 and 8), denoise 0.5 (0.8 stronger, up to 1.0);
   7. the save node then runs its restore model (VOSR2) and pastes the crops back through the RAW SAM3 head mask.
 
 Tested 11-17 (L15b, Water wide shot, face ~90 px): face and hair strands clear and close to the reference, calm
@@ -47,7 +48,8 @@ OVERLAP_FRAMES = 17          # cross-fade between neighbouring units
 MASK_DIR, LAYER_DIR = "face_mask", "face_layer"
 
 MASK_TEXT = "head"           # 11-17: "face" left the hair blurry; "head" redraws hair and face together
-DENOISE = 0.8                # 0.5 = the published baseline; 0.8 tested best on a 90 px face
+DENOISE = 0.5                # the published baseline. 0.8 (default until 0.6.5) is clearer on a 90 px front
+                             # face but turned a 45 px profile to the front (2026-11-28); 0.5 kept it
 STEPS, SCHEDULER, SAMPLER = 6, "beta", "euler"   # YJ 11-17: 6 (our 768 turbo LoRA is a 4-step LoRA; the reference used an 8-step one)
 SEED = 42
 
@@ -59,6 +61,10 @@ CLEAN_THRESHOLD = 0.3        # mask cleanup: what counts as head
 CLEAN_SHRINK = 12            # blobs thinner than ~2x this (px) are specks
 CLEAN_MIN_FRAMES = 4         # blobs present in fewer frames are flicker
 CLEAN_EDGE_GROW = 16         # kept blobs are grown by this (px) so the soft edge survives
+SOLID_WINDOW = 17            # solid_masks: frames voting on each pixel (one 17-frame clip)
+SOLID_SHARE = 0.25           # ... a pixel is head when this share of them says so
+SOLID_CLOSE = 12             # ... gaps up to about 2x this (px) are closed before holes are filled
+MASK_VERSION = 2             # part of the mask cache key: 2 = solid_masks (0.6.6)
 
 LATENT_GROW_PX = 36          # the redraw reaches this far past the head (pixels, before the 16x reduction)
 LATENT_GROW_FRAMES = 1       # and one frame before / after
@@ -262,6 +268,52 @@ def clean_masks(m: torch.Tensor, threshold: float = CLEAN_THRESHOLD, shrink: int
     gate = torch.from_numpy(keep[labels]).to(torch.float32)
     gate = _grow(gate, int(edge_grow))
     return m * gate
+
+
+def solid_masks(m: torch.Tensor, threshold: float = CLEAN_THRESHOLD, window: int = SOLID_WINDOW,
+                share: float = SOLID_SHARE, close_px: int = SOLID_CLOSE) -> torch.Tensor:
+    """Head masks [T, H, W] as SAM3 returns them -> the same masks, solid and steady in time (0.6.6).
+
+    On a small face (a 45 px face enlarged 7x is blurry) SAM3's head mask breaks up: one frame holds only the hair
+    with speckled holes over the face, the next the face with a hole at the mouth.  The redraw and the paste both
+    follow this mask, so the pixels that were refined changed from frame to frame - the face flickered.
+      1. time: a pixel is head when at least `share` of the frames in a `window`-frame window say so (the crop
+         follows the face, so the head hardly moves in it): "hair only" / "face only" frames become one head,
+         a speck seen in a frame or two is dropped;
+      2. space, per frame: closing by `close_px` px, then holes inside the head are filled;
+      3. where SAM3 itself found the head its soft value is kept, recovered pixels count as 1.
+    A frame without any head stays empty, and so does a clip in which SAM3 found nothing."""
+    from scipy import ndimage
+    m = m.to(torch.float32).cpu()
+    on = m > float(threshold)
+    if not bool(on.any()):
+        return torch.zeros_like(m)
+    T = int(on.shape[0])
+    half = max(0, int(window) // 2)
+    f = on.to(torch.float32)
+    if half > 0 and T > 1:
+        csum = torch.cat([torch.zeros_like(f[:1]), f.cumsum(0)], 0)
+        t = torch.arange(T)
+        a, b = (t - half).clamp(min=0), (t + half + 1).clamp(max=T)     # only real frames vote (clip ends too)
+        vote = (csum[b] - csum[a]) / (b - a).to(torch.float32)[:, None, None]
+    else:
+        vote = f
+    seen = on.flatten(1).any(1)                     # frames in which SAM3 found a head at all
+    solid = (vote >= float(share)) & seen[:, None, None]
+    if close_px > 0:
+        grown = _grow(solid.to(torch.float32), int(close_px)) > 0.5
+        solid = _erode_bool(grown, int(close_px)) | solid
+    arr = solid.numpy()
+    for i in range(T):
+        if arr[i].any():
+            arr[i] = ndimage.binary_fill_holes(arr[i])
+    solid = torch.from_numpy(arr)
+    # a head has no gap along a row: between its left-most and right-most pixel everything is head (the mouth and
+    # chin that SAM3 leaves out between the two cheeks on a small front face)
+    left = solid.to(torch.int32).cumsum(2) > 0
+    right = solid.flip(2).to(torch.int32).cumsum(2).flip(2) > 0
+    solid = left & right
+    return torch.where(on & solid, m, solid.to(torch.float32))
 
 
 def to_latent_mask(m: torch.Tensor, latents: int, grow_px: int = LATENT_GROW_PX,
@@ -557,7 +609,7 @@ def build(read, crop, transform, todo, tracker, painter, masks: UnitStore, layer
             if check is not None:
                 check()
             if not masks.has((a, b)):
-                masks.put((a, b), tracker.track(crops_of(a, b)))
+                masks.put((a, b), solid_masks(tracker.track(crops_of(a, b))))
             done_steps += 1
             if progress is not None:
                 progress(done_steps, steps)

@@ -130,7 +130,7 @@ def test_made_with_changes_with_loras_and_settings():
 
 def test_input_on_main_node_last():
     main, opts = LS.split_spec(L.H3MDLoopSampler.INPUT_TYPES())
-    assert list(main["optional"])[-1] == "segments_to_run"
+    assert list(main["optional"])[-2:] == ["segments_to_run", "redraw"]   # 0.6.6: redraw appended after it
     assert "segments_to_run" not in opts["required"]
 
 

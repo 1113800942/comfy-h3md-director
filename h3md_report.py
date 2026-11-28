@@ -37,7 +37,6 @@ PACKS = [
     ("ComfyUI core MiniMax H3 context windows", ()),     # checked by import (window mode / CCW)
     ("ComfyUI-Viggle-Remake (multi-person swap)", ("RemakeConditioning",)),
     ("MiniMax H3 RefMods", ("MiniMaxH3RefModsLoader",)),
-    ("ComfyUI-H3-FaceRefine", ("H3FaceTrackCrop",)),
     ("ComfyUI-H3-FaceRefine-Plus", ("H3FaceStitchPlus",)),
     ("Depth Anything V2 (controlnet_aux)", ("DepthAnythingV2Preprocessor",)),
     ("VideoHelperSuite", ("VHS_VideoCombine",)),

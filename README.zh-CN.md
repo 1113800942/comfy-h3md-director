@@ -27,7 +27,7 @@
   一起生成——没有续接接缝、不漂移、不重影；硬切照常是干净的硬切。
 - **一次生成长视频**：1080p 2–3 分钟（实测：2 分 20 秒 MV，1920×1088，RTX 5090 用时 2 小时 18 分）。
 - **边跑边看（0.6.5）**：**H3MD Live Preview 实时预览**窗口从低清第 3 步开始播放模型当前预测的这一段，放在画布任何地方，不用连线；看到不对就点取消。
-- **坏了只修那几秒**：**H3MD Redraw 局部重绘**节点只重画成片里的几秒（可以先改这个镜头的提示词、参考图）；`rerun_segments`
+- **坏了只修那几秒**：总控台的**重画**框（或 **H3MD Redraw 局部重绘**节点）只重画成片里的几秒（可以先改这个镜头的提示词、参考图）；`rerun_segments`
   重跑整段，两头锁住前后段。
 - **动作复刻**：参考视频只提供动作（深度图 + SAM3 + Fun ControlNet），长相来自你的照片。
 - **长视频不漂色**：`lowres_anchor` 让单场景长镜头从头到尾颜色和人脸都稳定。
@@ -97,7 +97,7 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
 * 长镜头里的台词、歌词和动作：写上从镜头开头算起的时间，用平常的写法（`At 00:07.9 she sings: <d>[English] ...</d>.`）或 `[8s] ...`；每一条只交给含那一秒的那个窗口，不会唱两遍、演两遍（见提示词 skill）。
 * 同一条连续镜头里，每个镜头只靠自己的文字：场景、光线、服装在每个镜头（包括续接镜头）里都写全，大的变化写上时间。有了接续窗口，连续镜头里的大变化（转圈、背影转正面、跑步时背景一直在换）在窗口重叠处不会再叠化（11-08 实测：转圈、背影转正面、22 秒接手两次的长镜头、12 秒海边跑步）；`"chain": false` 时仍可能叠化。
 * 自动关闭：深度图 / 骨骼图控制（视频改作普通参考视频；选动作复刻时也关闭）、RefMod（人物一致性靠参考照片）。
-* 局部重绘：见下面的操作步骤（节点 **H3MD Redraw 局部重绘**；手写计划时 `"redraw"` 键效果一样）。跑的时候看画面用 **H3MD Live Preview 实时预览**窗口（0.6.5，取代原来只跑低清的 `preview`）。
+* 局部重绘：见下面的操作步骤（0.6.6 起用总控台的**重画**框，或节点 **H3MD Redraw 局部重绘**；手写计划时 `"redraw"` 键效果一样）。跑的时候看画面用 **H3MD Live Preview 实时预览**窗口（0.6.5，取代原来只跑低清的 `preview`）。
 * 插帧（48 / 60 fps）在硬切处不再把两个镜头混在一起：两个镜头之间的那一帧直接用离它最近的原帧（0.4.0；以前每个硬切都有一帧前后镜头糊在一起）。
 * 内存：结果按约 10 秒一块解码并直接写进缓存，高清条带按窗口估算，2K 在 64 GB 内存上能跑（RTX 5090 实测 2560×1408、21 秒用 41 分钟）。
 * 锁定的歌如果同时是 `<Audio N>`，每个窗口只带自己那一段（不再整首都带）；只改高清设置（高清 LoRA、高清窗口）时，直接用已经跑完的低清结果。
@@ -107,7 +107,7 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
 ### 操作步骤
 1. 在导演台勾上 **无接缝长视频**。Loop 节点上的 `resume_from_cache` 保持**打开**（示例工作流里是开的；局部重绘、续跑都靠缓存）。
 2. *边跑边看（0.6.5）：* **H3MD Live Preview 实时预览**窗口节点（示例工作流里放在其他节点右边；放哪里都行，不用连线）从低清第 3 步开始，每一步循环播放模型当前预测的这一段，Loop 节点上也显示其中 8 张。不会停下来等：动作、构图不对就点取消，跑完的步数留在缓存里。设置在 H3MD Loop Options 最后两项 `live_preview`（low-res / low-res + high-res / off）和 `live_preview_from_step`。每次预览约 2 秒；用的是内置的小解码器 taeh3（MIT），比成片糊一些。
-3. *只改几秒：* 示例工作流里，导演台和 Loop 之间有一个 **H3MD Redraw 局部重绘**节点，默认旁路。选中它按 Ctrl+B 打开，在 `redraw` 里写要重画的时间，按整条视频的时间算：`20-24`、`1:12-1:15`，几段用逗号隔开。运行：只重算碰到这几秒的窗口，换一个新种子；其他每一帧都不变，没碰到的组直接从缓存取。不满意就再跑一次（每次换种子）；满意了清空 `redraw`（或把节点旁路），重画的这一版就保留下来。
+3. *只改几秒：* 在总控台的**重画**框里（0.6.6，在“试镜”上面）写要重画的时间（完整版没有总控台：用导演台和 Loop 之间那个默认旁路的 **H3MD Redraw 局部重绘**节点，选中按 Ctrl+B 打开），按整条视频的时间算：`20-24`、`1:12-1:15`，几段用逗号隔开。运行：只重算碰到这几秒的窗口，换一个新种子；其他每一帧都不变，没碰到的组直接从缓存取。不满意就再跑一次（每次换种子）；满意了把框清空（或把节点旁路），重画的这一版就保留下来。
    重画前还可以先改这个镜头：改提示词、加一张或换一张参考图（比如从衣服画对了的镜头里截一张）、换参考视频或参考音频。只有重画的那几秒用改过的内容，其余保持原样。重画做不到的：换分辨率或长度、移动硬切位置、换锁定的歌。改动大的时候，从硬切开始重画最稳（左边不用和前面的画面接）。
 4. *整组都不行：* 在 `rerun_segments` 填组号（组号以导演台说明里列出的为准）。
 5. *中途停了、报错了、电脑重启了：* 再跑一次。跑完的组从缓存取，没跑完的那组从停下时的那一步接着跑（实测：和一口气跑完的结果逐帧相同）。
@@ -227,7 +227,7 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
 
 **示例工作流**
 * `H3MD Director simple.json`（清爽版，**推荐从这里开始**）：总控台 + 导演台 + 预览，模型 / 采样 / 保存收在子图里；不用
-  Crystools、easy-use、LayerStyle、TE-Speed 这些节点（rgthree 只用来画顶上的标题横幅，没装也只是横幅不显示）。小显存：把 32B 编码器换成 4B + ClipProj（完整版里 ClipProj 节点默认旁路，见下面“文本编码器怎么选”）。
+  Crystools、easy-use、LayerStyle、TE-Speed 这些节点；0.6.6 起里面的节点全部是 H3MD 自己的或 ComfyUI 自带的（只有动作复刻用的 TARA 节点是第三方的，默认旁路）。小显存：把 32B 编码器换成 4B + ClipProj（完整版里 ClipProj 节点默认旁路，见下面“文本编码器怎么选”）。
 * `example_plans/h3md_silver_warrior_1min_v3.zip`——可直接导入的 **1 分钟打斗**示范计划（9 个镜头，1280×704，不带素材）：
   导演台点 **Import plan…**，选这个 zip，选"只导入计划"。配合总控台"高动态"风格（每条线只开一个 weapon LoRA）。
 * `H3MD Director.json`（完整版）——样片用的完整设置，画布上有修脸和补帧开关（发布时都是关的）、多 1 步精修和几个方便的小工具。
@@ -239,21 +239,36 @@ H3MD Director --plan--> H3MD Loop Sampler（+ H3MD Loop Options）--long video--
 |---|---|---|---|
 | ComfyUI 0.43+（自带 MiniMax H3 节点；无接缝长视频需要 0.44+） | 模型、采样器、VAE | **必需** | — |
 | H3MD Director（本包） | 导演台、循环采样、保存、深度 / SAM3 动作复刻 | **必需** | — |
-| [ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) | SageAttention 和 FeedForward 分块补丁（省显存） | 推荐（清爽版和完整版都用） | 能跑，但显存占用更高；SageAttention 补丁还需要装 SageAttention 包，没装就把那个节点绕过 |
+| [ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) + SageAttention 包（2.x） | SageAttention：注意力更快、更省显存。`H3MD Sage Attention` 节点调用 KJNodes 的补丁，并在节点上显示是否生效；没生效时点“怎么装”按钮看安装步骤。FeedForward 分块补丁 0.6.6 起内置在 H3MD 里 | 推荐 | 不报错：节点原样放行，只是更慢、显存占用更高 |
 | [ComfyUI-ClipProj](https://github.com/nicolab28/ComfyUI-ClipProj) | 4B 文本编码器投影，省 10 GB 以上显存 | 只有用 4B 编码器时需要 | 改用 32B 编码器 |
 | RIFE 补帧 | 总控台 / `H3MD Save Video Interp` 的 `interpolate`（24 → 30 / 48 / 60 fps） | **0.6.3 起内置**（网络和权重随 H3MD 一起，MIT） | 不用另装；发布时默认关 |
-| [ComfyUI-VOSR2](https://github.com/ylchen333/ComfyUI-VOSR2)（清爽版）/ TE-Speed-VOSR2（完整版） | `H3MD Save Video Interp` 里的修脸 | 可选 | `face_refine` 保持关（默认就是关） |
+| VOSR 2.0（人脸修复） | `H3MD Save Video Interp` 里的修脸 | **0.6.6 起内置**（代码来自 ComfyUI-VOSR2，Apache-2.0）。模型文件（约 7 GB）第一次用时自动下载到 `models/vosr2/VOSR2`；外接的 VOSR 2.0 加载器仍然可以接 `vosr2_model`（完整版就是这样接的） | 不用另装；修脸发布时默认关。模型下载不了时不做修复照常保存，报告里写明原因 |
 | SAM3.1（`sam3.1_multiplex_fp16.safetensors`，放 `checkpoints/`，ComfyUI 核心自带节点） | 修脸（0.5.3）：在脸部裁图上找出头部，H3 只在里面重画。保存节点的 `redraw_model` / `redraw_clip` / `redraw_vae` / `redraw_audio_vae` 接采样用的 H3 模型（带 768 加速 LoRA）、文字编码器和两个 VAE（示例工作流已接好） | 修脸必需 | `face_refine` 保持关 |
-| [ComfyUI-H3-FaceRefine](https://github.com/Carasibana/ComfyUI-H3-FaceRefine) + 人脸检测模型（如 `face_yolov8m.pt` / `face_yolov8n.pt`），放 `models/ultralytics/bbox/` | 修脸：找脸、跟脸（`detector`），镜头切换检测（`cut_detection = auto`，要它的 `scenedetect` 依赖）。0.5.9 起 H3MD 自己登记 `models/ultralytics/bbox`，不用再装 ComfyUI-Impact-Subpack 也能在下拉框里看到模型。它需要较新的 ComfyUI 和它的依赖（`ultralytics scipy insightface scenedetect`）：ComfyUI 太旧或依赖没装会加载失败（启动日志里搜 `IMPORT FAILED`），这时 `detector` / `cut_detection` 只剩 H3MD 能给的选项 | 修脸必需 | 0.5.9 起保存节点不再卡住：会不修脸照常保存，并写明原因（没装插件、`detector = none`、找不到模型文件）；或把 `face_refine` 关掉 |
-| [ComfyUI-H3-FaceRefine-Plus](https://github.com/AnniCodex/ComfyUI-H3-FaceRefine-Plus)（AnniCodex，MIT）+ ComfyUI-H3-FaceRefine | 修脸保存节点的可选输入 `stitch_mode = plus`（去锯齿贴回，光影取原图、细节取修复图）和 `flow_lock`（把修复后的五官用光流钉回原位，减少脸抖动），需要 opencv-python | 可选 | 两项保持默认（`standard` / 关）；没装 Plus 包时节点自动退回并在报告里说明 |
+| 跟脸和贴回（ComfyUI-H3-FaceRefine 1.1.2，Carasibana，MIT）+ 人脸检测 | 修脸：找到并跟住主角的脸（`detector`），把修好的脸贴回去 | **0.6.6 起内置**，自带人脸检测模型（`face_yolov8n_v2`，随 H3MD 一起）：不用装 ultralytics / insightface，也不用下检测模型。只有额外功能才按需加载：用 `models/ultralytics/bbox/` 里别的检测模型要装 `ultralytics`，`cut_detection = auto` 要装 `scenedetect` | 不用另装 |
+| [ComfyUI-H3-FaceRefine-Plus](https://github.com/AnniCodex/ComfyUI-H3-FaceRefine-Plus)（AnniCodex，MIT） | 修脸保存节点的可选输入 `stitch_mode = plus`（去锯齿贴回，光影取原图、细节取修复图）和 `flow_lock`（把修复后的五官用光流钉回原位，减少脸抖动），需要 opencv-python | 可选 | 两项保持默认（`standard` / 关）；没装 Plus 包时节点自动退回并在报告里说明 |
 | [ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler) | 修脸选 `refine_model = SeedVR2` 时用：它的 DiT / VAE 加载节点接保存节点的 `seedvr2_model` / `seedvr2_vae`（TE-Speed 加速版也能接） | 可选 | 用 VOSR2，或 `face_refine` 保持关 |
 | T8 语义桥（MiniMax H3 prompt enhancer T8） | 它的"语义桥 / 模型与设置"或多桥组合可以直接接 Loop 的 `semantic_bridge`（计算和我们自己的语义桥节点一样） | 可选 | 用我们的 H3MD 语义桥节点（示例工作流里已经接好、默认旁路：选中按 Ctrl+B 打开；风格按钮不再自动开桥）。语义桥原作者不建议和参考图、参考音频对口型一起用 |
-| [ComfyUI-YCNodes-MiniMax-H3](https://github.com/yichengup/ComfyUI-YCNodes-MiniMax-H3) | `H3SigmaRefiner`：多 1 步精修 | 可选 | 用普通 `BasicScheduler` |
-| [rgthree-comfy](https://github.com/rgthree/rgthree-comfy) | Power Lora Loader（一个节点挂多个 LoRA） | 仅完整版，可选 | 清爽版的总控台自己加载 LoRA |
+| Sigma Refiner（多 1 步精修） | `H3MD Sigma Refiner` | **0.6.6 起内置**（数值和 YCNodes 的 `H3SigmaRefiner` 一致） | 不用另装 |
+| [rgthree-comfy](https://github.com/rgthree/rgthree-comfy) | Power Lora Loader（一个节点挂多个 LoRA）和标题标签 | 仅完整版，可选 | 清爽版和多人换人版只用 H3MD 和 ComfyUI 自带节点 |
 | ComfyUI-Dehypnotic、Crystools、Easy-Use、LayerStyle、CRT-Nodes | 比例选择、开关、数值、清显存、计时 | 仅完整版，可选 | 出片用不到 |
 
-所有示例工作流里**补帧和修脸默认都是关的**，需要时自己打开。补帧不用另装任何东西（0.6.3 起内置）。修脸的节点包只有打开 `face_refine` 时才会用到，没装就不修脸照常保存。
+所有示例工作流里**补帧和修脸默认都是关的**，需要时自己打开。补帧不用另装任何东西（0.6.3 起内置）。0.6.6 起修脸不用再装别的节点包（只需要 SAM3.1，第一次用时自动下载 VOSR 2.0）；缺东西时不修脸照常保存，报告里写明原因。
 缺哪个节点包，ComfyUI 打开工作流时会列出来（ComfyUI-Manager → **Install Missing Custom Nodes**）。
+
+**推荐 LoRA（全部可选）。** 总控台的风格按钮用的是这几个。它们是推荐，不是必装：没有的那一行显示“未下载”并自动跳过（不报错），
+每一行都可以关掉或换成你自己的。文件名用作者的原名或者自己改名都行：0.6.6 起总控台按文件大小和 SHA256 认文件，不看名字。
+都放 `models/loras/`。
+
+| 文件（官方名） | 用途 | 来源 |
+|---|---|---|
+| `H3_Combat_V2.safetensors` | 打斗 | huggingface.co/JOKER141/MiniMax-H3-Combat-Base-V2 |
+| `Bunny_weapon_combatV1.safetensors` | 兵器打斗 | huggingface.co/JOKER141/MiniMax-H3-Weapon-Combat-LoRA |
+| `H3_Fight_Flow_V1.safetensors` | 打斗互动 | huggingface.co/JOKER141/H3-Fight-Flow-Fight-Interaction-LoRA |
+| `Motion_Repair_V2.safetensors` | 动作连贯 | civitai.com/models/2890788（V2；Hugging Face 上 JOKER141/MiniMax-H3-General-Motion-Continuity-Repair 放的是 V1，不是同一个文件） |
+| `H3-Licon-VBVR-I2V.safetensors` | 动态 / 物理 | huggingface.co/LiconStudio/Minimax-H3-VBVR |
+| `MiniMaxH3_Enhancer_minimaxh3_3432130_epoch_10.safetensors` | 细节 | civitai.com/models/3025511 |
+| `h3-realism-people-t2v-i2v-r2v.safetensors` | 真人质感 | huggingface.co/fal/MiniMax-H3-Realism-People-LoRA |
+| `minimax_h3_lms_v1.0_r64.safetensors` | 清晰度（lms） | huggingface.co/Alissonerdx/Minimax-H3-ComfyUI 的 `loras/` 文件夹 |
 
 </details>
 
@@ -450,11 +465,11 @@ latent 重叠接续，704×1280，`lowres_anchor = 1`。每段都和第 1 段比
 | `minimax_h3_audio_vae_fp32.safetensors` | `vae` | huggingface.co/Comfy-Org/MiniMax-H3 |
 | `mmh3-4b-ClipProj-v3.1-mlp.safetensors` | `clip_projections` | huggingface.co/NicoLab28/ClipProj-MiniMax-H3 |
 | `h3_upscaler_lms_v0.1_fp32.safetensors` | `latent_upscale_models` | huggingface.co/Alissonerdx/Minimax-H3-ComfyUI 的 `latent_upscaler/` 文件夹（和旧名字 `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors` 是同一个文件，旧名字那份现在在 `experiments/`，sha256 相同；已经下载了哪个就用哪个） |
-| `H3 Motion_Repair_V2.safetensors` | `loras` | FourBunny 的「BUNNY General Motion Continuity Repair」V2：civitai.com/models/2890788，也在 huggingface.co/JOKER141/MiniMax-H3-General-Motion-Continuity-Repair（文件名 `Motion_Repair_V2.safetensors`，同一个文件，改名即可） |
+| `Motion_Repair_V2.safetensors` | `loras` | FourBunny 的「BUNNY General Motion Continuity Repair」V2：civitai.com/models/2890788（Hugging Face 上 JOKER141/MiniMax-H3-General-Motion-Continuity-Repair 放的是 V1，不是同一个文件） |
 | `H3_Combat_V2.safetensors` | `loras` | huggingface.co/JOKER141/MiniMax-H3-Combat-Base-V2 |
 | `minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors` | `loras` | huggingface.co/lightx2v/Minimax-h3-Turbo |
 | `sam3.1_multiplex_fp16.safetensors` | `checkpoints` | huggingface.co/Comfy-Org/sam3.1 |
-| `minimax_h3_lms_v1.0_r64_r.safetensors` | `loras` | huggingface.co/RunningHubAI/rh-minimax-h3-lms-v1.0-r64-lora |
+| `minimax_h3_lms_v1.0_r64.safetensors` | `loras` | huggingface.co/Alissonerdx/Minimax-H3-ComfyUI 的 `loras/` 文件夹（不是 RunningHubAI 的 `..._r64_r`，那是另一个文件） |
 
 每个模型有自己的许可证，使用前请看它的模型页。`ClipProjApply` 那条只有装了 ComfyUI-ClipProj 才显示。
 

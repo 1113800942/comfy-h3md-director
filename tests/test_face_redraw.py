@@ -140,7 +140,7 @@ def test_redraw_recipe_calls():
     by = {}
     for name, kw in _Node.calls:
         by.setdefault(name, []).append(kw)
-    assert by["Sched"][0] == {"model": "model", "scheduler": "beta", "steps": 6, "denoise": 0.8}
+    assert by["Sched"][0] == {"model": "model", "scheduler": "beta", "steps": 6, "denoise": 0.5}
     assert by["Guider"][0]["model"] == "dd-model" and by["KSS"][0]["sampler_name"] == "euler"
     assert by["Noise"][0]["noise_seed"] == 45
     assert by["R2V"][0]["prompt"] == "" and "ref_image_0" in by["R2V"][0]["ref_images"]
@@ -198,7 +198,7 @@ def test_save_node_inputs_and_canvas():
     opt = list(spec["optional"])
     assert opt[-len(F.REDRAW_INPUTS):] == list(F.REDRAW_INPUTS)
     assert "face_redraw" not in spec["optional"]            # replaces the restore-only refine, no switch
-    assert spec["optional"]["redraw_denoise"][1]["default"] == 0.8
+    assert spec["optional"]["redraw_denoise"][1]["default"] == 0.5
     kw, note = F.redraw_canvas({"canvas_mode": "manual", "canvas_width": 512, "canvas_height": 512})
     assert (kw["canvas_width"], kw["canvas_height"]) == (768, 768) and "768x768" in note
     kw, note = F.redraw_canvas({"canvas_mode": "manual", "canvas_width": 1024, "canvas_height": 1024})
@@ -237,7 +237,8 @@ def test_refiner_pastes_redrawn_frames_through_masks(tmp_path):
                  "weights": [1.0] * total, "detected": [True] * total}
     reg = {"VOSR2Upscale": Up, "H3FaceStitch": Stitch}
     VOSR2Model.__name__ = "VOSR2Model"
-    with mock.patch.object(F, "_registry", lambda: reg):
+    with mock.patch.object(F, "_registry", lambda: reg), \
+            mock.patch.object(F, "_stitch_class", lambda: reg["H3FaceStitch"]):   # 0.6.6: the stitch class is built in
         r = F.FaceRefiner(FR(), transform, VOSR2Model(), None, 1, {"undetected_frames": "fade_out", "blend": 1.0},
                           layer=layer, masks=masks)
         r.refine(torch.zeros(10, 16, 16, 3), 18)
@@ -328,3 +329,52 @@ def test_edge_safe_masks_fade_to_zero_at_the_crop_border():
     assert float(out[0, -1].max()) == 0.0 and float(out[0, -int(f)].max()) == 0.0   # nothing at the edge
     assert float(out[0, 64, 64]) == 1.0                                              # the middle untouched
     assert float(out[0, 40 - 3, 64]) == 1.0                                          # dilated as the stitch would
+
+
+# ---- 0.6.6: solid_masks (SAM3 masks that break up on a small face made the refined face flicker) ----
+def _disc(T=24, n=64, r=14):
+    yy, xx = torch.meshgrid(torch.arange(n), torch.arange(n), indexing="ij")
+    return (((yy - n // 2) ** 2 + (xx - n // 2) ** 2) <= r * r).to(torch.float32).unsqueeze(0).repeat(T, 1, 1)
+
+
+def test_066_solid_masks_keeps_a_good_mask():
+    m = _disc()
+    s = RD.solid_masks(m, close_px=3)
+    assert float((s - m).abs().max()) == 0.0
+
+
+def test_066_solid_masks_joins_frames_that_hold_different_halves():
+    m = _disc()
+    top, bottom = m.clone(), m.clone()
+    top[:, 32:, :] = 0.0
+    bottom[:, :32, :] = 0.0
+    broken = torch.stack([top[i] if i % 2 else bottom[i] for i in range(m.shape[0])])
+    s = RD.solid_masks(broken, close_px=3)
+    area = s.flatten(1).sum(1)
+    assert float((s > 0.5).to(torch.float32).sub(m).abs().mean()) < 0.01     # the whole head, every frame
+    assert float(area.max() - area.min()) <= 1.0                             # and steady
+
+
+def test_066_solid_masks_fills_holes_and_drops_a_speck():
+    m = _disc()
+    m[:, 28:36, 28:36] = 0.0                # a hole over the face, every frame
+    m[5, 2:5, 2:5] = 1.0                    # a speck in one frame
+    s = RD.solid_masks(m, close_px=3)
+    assert float(s[:, 28:36, 28:36].min()) == 1.0
+    assert float(s[5, 2:5, 2:5].max()) == 0.0
+
+
+def test_066_solid_masks_empty_stays_empty_and_soft_values_survive():
+    assert float(RD.solid_masks(torch.zeros(6, 32, 32)).max()) == 0.0
+    m = _disc() * 0.7
+    m[3] = 0.0                              # SAM3 lost the head in one frame: that frame stays empty
+    s = RD.solid_masks(m, close_px=3)
+    assert float(s[3].max()) == 0.0
+    assert abs(float(s[0, 32, 32]) - 0.7) < 1e-6
+
+
+def test_066_mask_cache_key_changes_with_the_mask_version():
+    import h3md_face_refine_save as FS
+    src = open(FS.__file__, encoding="utf-8").read()
+    assert '"mask_version": RD.MASK_VERSION' in src and RD.MASK_VERSION >= 2
+    assert RD.DENOISE == 0.5

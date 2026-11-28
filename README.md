@@ -29,7 +29,7 @@ part is kept on disk, and you repair only what went wrong — down to a few seco
 - **Long video in one run**: 2–3 minutes at 1080p (measured: a 2 min 20 s music video at 1920×1088 in 2 h 18 min on an RTX 5090).
 - **Watch it while it renders (0.6.5)**: the **H3MD Live Preview** window plays the model's current guess of the
   segment from the 3rd low-res step on - put it anywhere on the canvas, no wires; press Cancel if it goes wrong.
-- **Repair instead of re-render**: the **H3MD Redraw** node redraws just a few seconds of a finished video (you may
+- **Repair instead of re-render**: the Control Panel's **redraw** box (or the **H3MD Redraw** node) redraws just a few seconds of a finished video (you may
   change that shot's prompt or pictures first); `rerun_segments` re-renders whole segments, locked to their neighbours.
 - **Motion copy**: a reference video drives the motion (depth + SAM3 + Fun ControlNet); the look comes from your photos.
 - **No long-video drift**: `lowres_anchor` keeps colors and faces stable over a whole single-scene take.
@@ -120,7 +120,7 @@ changes:
   spin, back-to-front turn, a 22 s take with two hand-overs, a 12 s run along the sea). With `"chain": false` they can.
 * Switched off automatically: depth / pose control (the video stays a normal reference video; also off in motion copy)
   and RefMods (identity comes from the reference pictures).
-* Local redraw: see the steps below (node **H3MD Redraw**; the plan key `"redraw"` does the same when written by
+* Local redraw: see the steps below (the Control Panel's **redraw** box since 0.6.6, or the node **H3MD Redraw**; the plan key `"redraw"` does the same when written by
   hand). Watching a run: the **H3MD Live Preview** window (0.6.5; it replaces the old low-res-only `preview`).
 * Frame interpolation (48 / 60 fps) never blends two shots at a hard cut: the frame between them repeats the nearest
   original frame (0.4.0; before, every hard cut got one frame of the two shots melted together).
@@ -143,11 +143,12 @@ changes:
    Cancel - the finished steps stay in the cache. Settings: `live_preview` (low-res / low-res + high-res / off) and
    `live_preview_from_step` at the end of H3MD Loop Options. About 2 s per previewed step; tiny decoder taeh3
    (MIT, bundled), so the clip is softer than the result.
-3. *Fix a few seconds:* in the example workflow, the **H3MD Redraw** node sits between the Director and the Loop,
-   bypassed. Select it, press Ctrl+B and write the seconds into `redraw`, on the whole video's timeline: `20-24`,
+3. *Fix a few seconds:* write the seconds into the Control Panel's **redraw** box (0.6.6, above "trial"; the full
+   workflow has no Control Panel: there use the bypassed **H3MD Redraw** node between the Director and the Loop,
+   Ctrl+B to switch it on). The seconds are on the whole video's timeline: `20-24`,
    `1:12-1:15`, several ranges separated by commas. Run: only the windows that touch those seconds are rendered again,
    with a new seed; every other frame stays identical and the groups not touched come from the cache. Not happy? Run
-   again (a new seed each time). Happy? Clear `redraw` (or bypass the node): the redrawn take is kept.
+   again (a new seed each time). Happy? Clear the box (or bypass the node): the redrawn take is kept.
    You may also edit the shot first: change its prompt, add or replace a picture (for example a still of the outfit
    from a shot where it came out right), or change its reference video or audio. Only the redrawn seconds use the
    change; the rest keeps the take you have. Not possible with a redraw: another size or length, moving a hard cut,
@@ -328,7 +329,7 @@ videos or audio; untick **prompts** to leave the prompts out. It is only saved o
 
 **Example workflows**
 * `H3MD Director simple.json` — **start here** (v0.3): Control Panel + Director + preview; models / sampler / save in
-  subgraphs; no Crystools, easy-use, LayerStyle or TE-Speed nodes (rgthree only draws the title banner; without it the banner is missing, nothing else). Low VRAM: swap the 32B text encoder for 4B +
+  subgraphs; since 0.6.6 every node in it is H3MD's own or ComfyUI core (the bypassed TARA node for motion copy is the only third-party one). Low VRAM: swap the 32B text encoder for 4B +
   ClipProj (the full workflow has the ClipProj node bypassed; see the text encoder notes below).
 * `example_plans/h3md_silver_warrior_1min_v3.zip` — a ready-to-import **1-minute fight** plan (9 shots, 1280×704, no media
   needed): in the Director click **Import plan…**, pick the zip, choose "Plan only". Made for the Control Panel's "high
@@ -345,21 +346,37 @@ videos or audio; untick **prompts** to leave the prompts out. It is only saved o
 |---|---|---|---|
 | ComfyUI 0.43+ (core MiniMax H3 nodes; 0.44+ for Seamless long video) | models, sampler, VAE | **required** | — |
 | H3MD Director (this pack) | Director, Loop Sampler, Save Video Interp, depth / SAM3 motion copy | **required** | — |
-| [ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) | SageAttention and chunked feed-forward patches (less VRAM) | recommended (simple + full) | runs, but needs more VRAM; the SageAttention patch also needs the SageAttention package, otherwise bypass that node |
+| [ComfyUI-KJNodes](https://github.com/kijai/ComfyUI-KJNodes) + the SageAttention package (2.x) | SageAttention: faster attention with less VRAM. The `H3MD Sage Attention` node calls KJNodes' patch and shows on the node whether it is active; when it is not, its "How to install" button lists the steps. The chunked feed-forward patch is built into H3MD since 0.6.6 | recommended | no error: the node passes the model through, the render is slower and needs more VRAM |
 | [ComfyUI-ClipProj](https://github.com/nicolab28/ComfyUI-ClipProj) | 4B text encoder projection, saves 10+ GB VRAM | only with the 4B encoder | use the 32B encoder |
 | RIFE frame interpolation | `interpolate` in the Control Panel / `H3MD Save Video Interp` (24 → 30 / 48 / 60 fps) | **built in since 0.6.3** (network + weights ship with H3MD, MIT) | nothing to install; off as shipped |
-| [ComfyUI-VOSR2](https://github.com/ylchen333/ComfyUI-VOSR2) (simple) / TE-Speed-VOSR2 (full) | face refine in `H3MD Save Video Interp` | optional | keep `face_refine` off (default) |
+| VOSR 2.0 (face restore) | face refine in `H3MD Save Video Interp` | **built in since 0.6.6** (code from ComfyUI-VOSR2, Apache-2.0). The model files (about 7 GB) download on first use into `models/vosr2/VOSR2`; an external VOSR 2.0 loader can still be wired to `vosr2_model` (the full workflow does) | nothing to install; face refine is off as shipped. If the files cannot be downloaded the video is saved without the restore step and the report says why |
 | SAM3.1 (`sam3.1_multiplex_fp16.safetensors` in `checkpoints/`, ComfyUI core) | face refine (0.5.3): finds the head on the face crop; H3 then redraws inside it. The save node's `redraw_model` / `redraw_clip` / `redraw_vae` / `redraw_audio_vae` take the sampler's H3 model (with the 768 turbo LoRA), text encoder and VAEs (wired in the examples) | needed for face refine | keep `face_refine` off |
-| [ComfyUI-H3-FaceRefine](https://github.com/Carasibana/ComfyUI-H3-FaceRefine) + a face detector (e.g. `face_yolov8m.pt` / `face_yolov8n.pt`) in `models/ultralytics/bbox/` | face refine: finds and follows the face (`detector`), shot cuts (`cut_detection = auto`, needs its `scenedetect` requirement). Since 0.5.9 H3MD registers `models/ultralytics/bbox` itself, so ComfyUI-Impact-Subpack is not needed for the detector list. It needs a recent ComfyUI and its requirements (`ultralytics scipy insightface scenedetect`): an old ComfyUI or missing requirements make it fail to load (look for `IMPORT FAILED` in the startup log), and then `detector` / `cut_detection` only show what H3MD can offer | needed for face refine | since 0.5.9 the save node no longer stops: it saves the video WITHOUT face refine and says why (missing pack, `detector = none`, detector file not found); or keep `face_refine` off |
-| [ComfyUI-H3-FaceRefine-Plus](https://github.com/AnniCodex/ComfyUI-H3-FaceRefine-Plus) (AnniCodex, MIT) + ComfyUI-H3-FaceRefine | face refine save node, optional inputs `stitch_mode = plus` (antialiased paste, light from the original, detail from the refined face) and `flow_lock` (pins the refined features back onto the original frames, less face wobble); needs opencv-python | optional | leave both at their defaults (`standard` / off); if the pack is missing the node falls back and says so in the report |
+| Face tracking and paste-back (ComfyUI-H3-FaceRefine 1.1.2 by Carasibana, MIT) + face detector | face refine: finds and follows the lead face (`detector`), pastes the refined face back | **built in since 0.6.6**, with its own face detector (`face_yolov8n_v2`, ships with H3MD): no ultralytics / insightface install and no detector download. Only extras load on demand: another detector file from `models/ultralytics/bbox/` needs the `ultralytics` package, `cut_detection = auto` needs `scenedetect` | nothing to install |
+| [ComfyUI-H3-FaceRefine-Plus](https://github.com/AnniCodex/ComfyUI-H3-FaceRefine-Plus) (AnniCodex, MIT) | face refine save node, optional inputs `stitch_mode = plus` (antialiased paste, light from the original, detail from the refined face) and `flow_lock` (pins the refined features back onto the original frames, less face wobble); needs opencv-python | optional | leave both at their defaults (`standard` / off); if the pack is missing the node falls back and says so in the report |
 | [ComfyUI-SeedVR2_VideoUpscaler](https://github.com/numz/ComfyUI-SeedVR2_VideoUpscaler) | face refine with `refine_model = SeedVR2`: its DiT / VAE loaders go to `seedvr2_model` / `seedvr2_vae` (TE-Speed SeedVR2 also works) | optional | use VOSR2, or keep `face_refine` off |
 | T8 semantic bridge (MiniMax H3 prompt enhancer T8) | its "Semantic Bridge" config or multi-bridge stack can go straight into the Loop's `semantic_bridge` input (same math as our own bridge node) | optional | our H3MD Semantic Bridge node (in the example workflows: wired, bypassed - select it and press Ctrl+B to use it; the style buttons no longer switch a bridge on). The bridge's author does not recommend it with reference pictures or lip-sync to a reference audio |
-| [ComfyUI-YCNodes-MiniMax-H3](https://github.com/yichengup/ComfyUI-YCNodes-MiniMax-H3) | `H3SigmaRefiner`: one extra refine step | optional | plain `BasicScheduler` |
-| [rgthree-comfy](https://github.com/rgthree/rgthree-comfy) | Power Lora Loader (many LoRAs in one node) | full only, optional | the simple workflow's Control Panel loads LoRAs itself |
+| Sigma refiner (one extra refine step) | `H3MD Sigma Refiner` | **built in since 0.6.6** (same numbers as YCNodes' `H3SigmaRefiner`) | nothing to install |
+| [rgthree-comfy](https://github.com/rgthree/rgthree-comfy) | Power Lora Loader (many LoRAs in one node) and the title labels | full only, optional | the simple and Remake workflows use only H3MD and ComfyUI core nodes |
 | ComfyUI-Dehypnotic, Crystools, Easy-Use, LayerStyle, CRT-Nodes | aspect-ratio picker, switch, number, VRAM purge, timer | full only, optional | not needed to render |
 
-Frame interpolation and face refine are **off in every example workflow**; turn them on when you want them. Interpolation needs nothing else (built in since 0.6.3). The face-refine packs are looked up only when `face_refine` is on; if they are missing the video is saved without face refine.
+Frame interpolation and face refine are **off in every example workflow**; turn them on when you want them. Interpolation needs nothing else (built in since 0.6.3). Face refine needs no other pack since 0.6.6 (only SAM3.1 and, on first use, the VOSR 2.0 download); if something is missing the video is saved without face refine and the report says why.
 ComfyUI lists any missing pack when a workflow opens (ComfyUI-Manager → **Install Missing Custom Nodes**).
+
+**Recommended LoRAs (all optional).** The Control Panel's style buttons use these. They are suggestions, not
+requirements: a LoRA you do not have shows as "not downloaded" and is skipped (no error), and you can switch any row
+off or pick your own. Keep the authors' file names or rename them as you like - since 0.6.6 the panel recognises a
+file by its size and SHA256, not by its name. All go in `models/loras/`.
+
+| File (official name) | Used for | Source |
+|---|---|---|
+| `H3_Combat_V2.safetensors` | fights | huggingface.co/JOKER141/MiniMax-H3-Combat-Base-V2 |
+| `Bunny_weapon_combatV1.safetensors` | weapon fights | huggingface.co/JOKER141/MiniMax-H3-Weapon-Combat-LoRA |
+| `H3_Fight_Flow_V1.safetensors` | fight interaction | huggingface.co/JOKER141/H3-Fight-Flow-Fight-Interaction-LoRA |
+| `Motion_Repair_V2.safetensors` | motion continuity | civitai.com/models/2890788 (V2; the Hugging Face repo JOKER141/MiniMax-H3-General-Motion-Continuity-Repair holds V1, a different file) |
+| `H3-Licon-VBVR-I2V.safetensors` | motion / physics | huggingface.co/LiconStudio/Minimax-H3-VBVR |
+| `MiniMaxH3_Enhancer_minimaxh3_3432130_epoch_10.safetensors` | detail | civitai.com/models/3025511 |
+| `h3-realism-people-t2v-i2v-r2v.safetensors` | realistic people | huggingface.co/fal/MiniMax-H3-Realism-People-LoRA |
+| `minimax_h3_lms_v1.0_r64.safetensors` | sharpness (lms) | huggingface.co/Alissonerdx/Minimax-H3-ComfyUI, folder `loras/` |
 
 </details>
 
@@ -589,11 +606,11 @@ entry is not shown.
 | `minimax_h3_audio_vae_fp32.safetensors` | `vae` | huggingface.co/Comfy-Org/MiniMax-H3 |
 | `mmh3-4b-ClipProj-v3.1-mlp.safetensors` | `clip_projections` | huggingface.co/NicoLab28/ClipProj-MiniMax-H3 |
 | `h3_upscaler_lms_v0.1_fp32.safetensors` | `latent_upscale_models` | huggingface.co/Alissonerdx/Minimax-H3-ComfyUI, folder `latent_upscaler/` (the same file as the older name `h3_upscaler_sharpness_2000steps_v0.1_fp32.safetensors`, now in `experiments/` - same sha256; keep whichever you have) |
-| `H3 Motion_Repair_V2.safetensors` | `loras` | FourBunny's "BUNNY General Motion Continuity Repair" V2: civitai.com/models/2890788, also huggingface.co/JOKER141/MiniMax-H3-General-Motion-Continuity-Repair (`Motion_Repair_V2.safetensors`, same file - rename it) |
+| `Motion_Repair_V2.safetensors` | `loras` | FourBunny's "BUNNY General Motion Continuity Repair" V2: civitai.com/models/2890788 (the Hugging Face repo JOKER141/MiniMax-H3-General-Motion-Continuity-Repair holds V1, a different file) |
 | `H3_Combat_V2.safetensors` | `loras` | huggingface.co/JOKER141/MiniMax-H3-Combat-Base-V2 |
 | `minimax_h3_fl2v_turbo_4step_v1.2_768p_comfyui_bf16.safetensors` | `loras` | huggingface.co/lightx2v/Minimax-h3-Turbo |
 | `sam3.1_multiplex_fp16.safetensors` | `checkpoints` | huggingface.co/Comfy-Org/sam3.1 |
-| `minimax_h3_lms_v1.0_r64_r.safetensors` | `loras` | huggingface.co/RunningHubAI/rh-minimax-h3-lms-v1.0-r64-lora |
+| `minimax_h3_lms_v1.0_r64.safetensors` | `loras` | huggingface.co/Alissonerdx/Minimax-H3-ComfyUI, folder `loras/` (not the RunningHubAI `..._r64_r` file, which is a different file) |
 
 Each model has its own license; check its model page before use. The `ClipProjApply` entry only shows when ComfyUI-ClipProj is installed.
 

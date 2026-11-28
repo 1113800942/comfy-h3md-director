@@ -58,6 +58,7 @@ def _refiner(reg, **kw):
     reg = dict(reg, VOSR2Upscale=FakeUpscale)
     transform = {"canvas": [8, 8], "absent": [False] * 3, "boxes": [[0, 0, 4, 4]] * 3}
     with mock.patch.object(F, "_registry", lambda: reg), mock.patch.object(F, "paste_weights", lambda *a: [1.0] * 3), \
+            mock.patch.object(F, "_stitch_class", lambda: reg["H3FaceStitch"]), \
             mock.patch.object(F, "slice_transform", lambda t, idx, start, n: {"idx": list(idx)}):
         r = F.FaceRefiner(FakeFR, transform, VOSR2Model(), None, 1, STITCH_KW, **kw)
         r._upscale = lambda crops: crops + 1.0
@@ -124,7 +125,7 @@ def test_save_accepts_new_inputs_and_hands_them_over():
         return {"ui": {}, "result": ("p", 1, None, "r", None)}
 
     with mock.patch.object(F.H3MDSaveVideoFaceRefineInterp, "_save_refined", fake), \
-            mock.patch.object(F, "refine_blocker", lambda d: None):   # 0.5.9: refine assumed runnable here
+            mock.patch.object(F, "refine_blocker", lambda *a: None), mock.patch.object(F, "load_builtin_vosr2", lambda: (object(), None)):   # 0.5.9: refine assumed runnable here
         node.save(segments={"cache_dir": "x"}, stitch_mode="plus", flow_lock=True)
         assert seen["args"][-2:] == ("plus", True)
         node.save(segments={"cache_dir": "x"})

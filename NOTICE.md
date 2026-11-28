@@ -113,6 +113,59 @@ segment samples; the network class is ComfyUI's own (`comfy.taesd.taehv`), the p
 `h3md_preview/taeh3.safetensors` 是 Ollin Boer Bohan 的 MiniMax H3 小解码器 taeh3（原文件未改动），采用 MIT 许可，全文见
 `h3md_preview/LICENSE_TAEHV.txt`。只用于采样时的实时预览；网络结构用的是 ComfyUI 自带的类，预览代码是 H3MD 自己写的。
 
+## 2d. Face refine: tracking code and face detector (included since 0.6.6) / 修脸：跟脸代码和人脸检测模型（0.6.6 起内置）
+
+`h3md_facerefine/fr_nodes.py` is `nodes.py` of **ComfyUI-H3-FaceRefine 1.1.2** by Carasibana
+(<https://github.com/Carasibana/ComfyUI-H3-FaceRefine>, commit d8521d1), unchanged. **MIT License, Copyright (c) 2026
+Carasibana** - full text in `h3md_facerefine/LICENSE_FACEREFINE.txt`. H3MD calls its face tracking helpers and its
+H3 Face Stitch Back class from the save node; its node classes are not registered by H3MD.
+
+`h3md_facerefine/face_yolov8n_v2.torchscript` is the face detector `face_yolov8n_v2.pt` from Bingsu/adetailer
+(<https://huggingface.co/Bingsu/adetailer>, a YOLOv8n model trained for faces; the model card gives Apache-2.0,
+earlier AGPL-3.0), exported once to TorchScript with ultralytics (imgsz 640, fp32) so that it runs with PyTorch
+alone. The code around it (`h3md_facerefine/detector.py`: letterbox, NMS, boxes back on the frame) is H3MD's own.
+
+`h3md_facerefine/fr_nodes.py` 是 Carasibana 的 ComfyUI-H3-FaceRefine 1.1.2 的 `nodes.py`（原样未改），MIT 许可，全文见
+`h3md_facerefine/LICENSE_FACEREFINE.txt`；H3MD 只在保存节点里调用它的跟脸函数和贴回类，不注册它的节点。
+`h3md_facerefine/face_yolov8n_v2.torchscript` 是 Bingsu/adetailer 的人脸检测模型 `face_yolov8n_v2.pt`（模型页标注
+Apache-2.0，早期为 AGPL-3.0）导出成 TorchScript 的版本，只用 PyTorch 就能运行；周围的代码是 H3MD 自己写的。
+
+## 2e. VOSR 2.0 face restore code (included since 0.6.6) / VOSR 2.0 修脸代码（0.6.6 起内置）
+
+`h3md_vosr2/` (`color.py`, `inference.py`, `loader.py`, `tiled_vae.py`, `models/`) is **ComfyUI-VOSR2 0.4.2** by
+ylchen333 (<https://github.com/ylchen333/ComfyUI-VOSR2>, commit 6a21810; changed files: `loader.py`, three eval-mode calls written as `.train(False)`, same effect) - the ComfyUI port of VOSR 2.0
+(<https://github.com/cswry/VOSR>). **Apache License 2.0** - full text in `h3md_vosr2/LICENSE_VOSR2.txt`. Its nodes
+are not registered by H3MD; H3MD's save node calls its loader and its one-step upscale.
+
+The VOSR 2.0 **model files are not part of H3MD**: about 7 GB, downloaded from <https://huggingface.co/CSWRY/VOSR>
+into `ComfyUI/models/vosr2/VOSR2/` the first time face refine runs. That repository gives Apache-2.0 for the VOSR
+project's own checkpoints; the Qwen-Image 2D VAE and the DINOv2 encoder in it keep their upstream terms - see the
+model page before use.
+
+`h3md_vosr2/` 是 ylchen333 的 ComfyUI-VOSR2 0.4.2（只把 loader.py 里三处切换推理模式的调用写成等效的 .train(False)，Apache-2.0，全文见 `h3md_vosr2/LICENSE_VOSR2.txt`），
+H3MD 不注册它的节点，只在保存节点里调用。VOSR 2.0 的**模型文件不在 H3MD 包里**（约 7 GB），第一次修脸时从
+huggingface.co/CSWRY/VOSR 下载到 `ComfyUI/models/vosr2/VOSR2/`；模型各部分的许可见该模型页。
+
+## 2f. Sigma refiner (included since 0.6.6) / 末段加步节点（0.6.6 起内置）
+
+`h3md_sigma_refiner.py` (node H3MD Sigma Refiner) is a port of `H3SigmaRefiner` from **ComfyUI-YCNodes-MiniMax-H3**
+by yc (<https://github.com/yichengup/ComfyUI-YCNodes-MiniMax-H3>, **MIT License, Copyright (c) 2026 yc**): the same
+inputs and the same sigmas out, so the example workflows no longer need that pack.
+
+`h3md_sigma_refiner.py`（H3MD Sigma Refiner 节点）移植自 yc 的 ComfyUI-YCNodes-MiniMax-H3 里的 `H3SigmaRefiner`
+（MIT 许可），输入和算出的 sigma 完全相同，示例工作流不再需要装那个包。
+
+## 2g. Chunked feed-forward patch (included since 0.6.6) / 前馈分块补丁（0.6.6 起内置）
+
+`h3md_speed_patches.py` (node H3MD Chunk FeedForward) uses the method of `MiniMaxChunkFeedForward` from
+**ComfyUI-KJNodes** by Kijai (<https://github.com/kijai/ComfyUI-KJNodes>, **GPL-3.0**): the feed-forward of every
+MiniMax H3 block runs over the tokens in chunks. The node H3MD Sage Attention in the same file contains no KJNodes
+code: it calls KJNodes' own SageAttention patch node when that pack is installed and does nothing otherwise.
+
+`h3md_speed_patches.py` 里的 H3MD Chunk FeedForward 节点用的是 Kijai 的 ComfyUI-KJNodes（GPL-3.0）里
+`MiniMaxChunkFeedForward` 的做法。同一文件里的 H3MD Sage Attention 不含 KJNodes 的代码：装了 KJNodes 就调用它的
+SageAttention 补丁节点，没装就什么都不做。
+
 ## 3. Runtime dependencies (not included) / 运行时依赖（不包含在本包里）
 
 | Project | Status (checked 2026-10-19) | How H3MD uses it |
