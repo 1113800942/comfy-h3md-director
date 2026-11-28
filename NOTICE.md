@@ -130,6 +130,31 @@ alone. The code around it (`h3md_facerefine/detector.py`: letterbox, NMS, boxes 
 `h3md_facerefine/face_yolov8n_v2.torchscript` 是 Bingsu/adetailer 的人脸检测模型 `face_yolov8n_v2.pt`（模型页标注
 Apache-2.0，早期为 AGPL-3.0）导出成 TorchScript 的版本，只用 PyTorch 就能运行；周围的代码是 H3MD 自己写的。
 
+## 2e. VOSR 2.0 face restore code (included since 0.6.6) / VOSR 2.0 修脸代码（0.6.6 起内置）
+
+`h3md_vosr2/` (`color.py`, `inference.py`, `loader.py`, `tiled_vae.py`, `models/`) is **ComfyUI-VOSR2 0.4.2** by
+ylchen333 (<https://github.com/ylchen333/ComfyUI-VOSR2>, commit 6a21810; changed files: `loader.py`, three eval-mode calls written as `.train(False)`, same effect) - the ComfyUI port of VOSR 2.0
+(<https://github.com/cswry/VOSR>). **Apache License 2.0** - full text in `h3md_vosr2/LICENSE_VOSR2.txt`. Its nodes
+are not registered by H3MD; H3MD's save node calls its loader and its one-step upscale.
+
+The VOSR 2.0 **model files are not part of H3MD**: about 7 GB, downloaded from <https://huggingface.co/CSWRY/VOSR>
+into `ComfyUI/models/vosr2/VOSR2/` the first time face refine runs. That repository gives Apache-2.0 for the VOSR
+project's own checkpoints; the Qwen-Image 2D VAE and the DINOv2 encoder in it keep their upstream terms - see the
+model page before use.
+
+`h3md_vosr2/` 是 ylchen333 的 ComfyUI-VOSR2 0.4.2（只把 loader.py 里三处切换推理模式的调用写成等效的 .train(False)，Apache-2.0，全文见 `h3md_vosr2/LICENSE_VOSR2.txt`），
+H3MD 不注册它的节点，只在保存节点里调用。VOSR 2.0 的**模型文件不在 H3MD 包里**（约 7 GB），第一次修脸时从
+huggingface.co/CSWRY/VOSR 下载到 `ComfyUI/models/vosr2/VOSR2/`；模型各部分的许可见该模型页。
+
+## 2f. Sigma refiner (included since 0.6.6) / 末段加步节点（0.6.6 起内置）
+
+`h3md_sigma_refiner.py` (node H3MD Sigma Refiner) is a port of `H3SigmaRefiner` from **ComfyUI-YCNodes-MiniMax-H3**
+by yc (<https://github.com/yichengup/ComfyUI-YCNodes-MiniMax-H3>, **MIT License, Copyright (c) 2026 yc**): the same
+inputs and the same sigmas out, so the example workflows no longer need that pack.
+
+`h3md_sigma_refiner.py`（H3MD Sigma Refiner 节点）移植自 yc 的 ComfyUI-YCNodes-MiniMax-H3 里的 `H3SigmaRefiner`
+（MIT 许可），输入和算出的 sigma 完全相同，示例工作流不再需要装那个包。
+
 ## 3. Runtime dependencies (not included) / 运行时依赖（不包含在本包里）
 
 | Project | Status (checked 2026-10-19) | How H3MD uses it |

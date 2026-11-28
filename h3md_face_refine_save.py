@@ -178,9 +178,47 @@ def _vosr2_class():
     return cls
 
 
-def _vosr2_original():
-    """v0.3: the original ComfyUI-VOSR2 (github.com/ylchen333/ComfyUI-VOSR2) 'VOSR 2.0 Upscale' node, or None."""
-    return _registry().get("VOSR2Upscale")
+def _vosr2_builtin():
+    """0.6.6: H3MD's own copy of ComfyUI-VOSR2 (h3md_vosr2/, Apache-2.0).  Imported on first use only."""
+    try:
+        from . import h3md_vosr2 as VO
+    except ImportError:  # flat import (tests)
+        import h3md_vosr2 as VO
+    return VO
+
+
+def load_builtin_vosr2():
+    """(bundle, None), or (None, why) when the built-in VOSR 2.0 cannot be loaded (model files missing and the
+    download failed, ...).  The reason ends with where to put the files by hand."""
+    try:
+        VO = _vosr2_builtin()
+        return VO.load(), None
+    except Exception as exc:
+        try:
+            how = _vosr2_builtin().MANUAL_HELP
+        except Exception:
+            how = ""
+        return None, (f"the built-in VOSR 2.0 restore model could not be loaded ({type(exc).__name__}: {exc}). "
+                      f"内置的 VOSR 2.0 修复模型加载失败（多半是模型没下载下来）。 {how}")
+
+
+def _vosr2_original(model=None):
+    """The 'VOSR 2.0 Upscale' call for a VOSR2_MODEL bundle.  A bundle from H3MD's built-in loader runs on the
+    built-in code; one from the ComfyUI-VOSR2 pack's own loader runs on that pack's node (its version may differ),
+    and on the built-in code when the pack's node is not loaded."""
+    if model is not None:
+        try:
+            if _vosr2_builtin().is_builtin(model):
+                return _vosr2_builtin().Upscale
+        except Exception:
+            pass
+    cls = _registry().get("VOSR2Upscale")
+    if cls is not None:
+        return cls
+    try:
+        return _vosr2_builtin().Upscale
+    except Exception:
+        return None
 
 
 def is_original_vosr2(model) -> bool:
@@ -1007,7 +1045,7 @@ class FaceRefiner:
             self.sv_kw["attention_backend"] = "comfy_auto"  # TE-Speed sage path asserts on fp32 with no fallback
             self.vosr2 = None
         elif is_original_vosr2(vosr2_model):   # v0.3: original ComfyUI-VOSR2 node (no TE-Speed build needed)
-            orig = _vosr2_original()
+            orig = _vosr2_original(vosr2_model)
             if orig is None:
                 raise RuntimeError(f"{_TAG} the VOSR2 model comes from ComfyUI-VOSR2, but its 'VOSR 2.0 Upscale' node "
                                    "is not loaded")
@@ -1388,9 +1426,8 @@ def refine_blocker(detector, refine_model=None, vosr2_model=None, seedvr2_model=
         if why:
             return f"face detector '{detector}': {why}. 这个检测模型需要装 ultralytics；内置的 {FRP.BUILTIN} 不需要。"
     if refine_model == "VOSR2" and vosr2_model is None:
-        return ("no restore model: face refine needs a VOSR2 model on vosr2_model ('VOSR 2.0 Model Loader' of "
-                "ComfyUI-VOSR2 - a separate pack, install it to use face refine). "
-                "修脸需要 VOSR2 模型：把 ComfyUI-VOSR2 的 VOSR 2.0 Model Loader 接到 vosr2_model（要另装这个插件）。")
+        return ("no restore model: the built-in VOSR 2.0 was not loaded and nothing is wired to vosr2_model. "
+                "没有修复模型：内置的 VOSR 2.0 没加载上，vosr2_model 也没接。")
     if refine_model == "SeedVR2" and (seedvr2_model is None or seedvr2_vae is None):
         return ("no restore model: refine_model = SeedVR2 needs seedvr2_model + seedvr2_vae "
                 "(ComfyUI-SeedVR2_VideoUpscaler - a separate pack). 修脸选了 SeedVR2，但没接 seedvr2_model / seedvr2_vae。")
@@ -1475,9 +1512,12 @@ class H3MDSaveVideoFaceRefineInterp:
         req["vosr2_seed"] = ("INT", {"default": 42, "min": 0, "max": 0xFFFFFFFFFFFFFFFF, "tooltip":
                              "VOSR2 / SeedVR2 seed, the same for every chunk (scale is fixed at 1)."})
         opt = {
-            "vosr2_model": ("TE_SPEED_VOSR2_MODEL,VOSR2_MODEL", {"lazy": True, "tooltip": "VOSR2 model, used when "
-                            "refine_model = VOSR2: 'VOSR 2.0 Model Loader' of the original ComfyUI-VOSR2 (recommended) "
-                            "or the TE-Speed VOSR2 loader."}),
+            "vosr2_model": ("TE_SPEED_VOSR2_MODEL,VOSR2_MODEL", {"lazy": True, "tooltip": "Optional. Not connected "
+                            "(default): H3MD's built-in VOSR 2.0 is used when refine_model = VOSR2 - nothing to install; "
+                            "its model files (about 7 GB) download on the first face refine. Connect your own loader "
+                            "('VOSR 2.0 Model Loader' of ComfyUI-VOSR2, or the TE-Speed VOSR2 loader) to use that "
+                            "instead.\n可以不接（默认）：用 H3MD 内置的 VOSR 2.0，不用装别的插件，模型（约 7 GB）在"
+                            "第一次修脸时自动下载。也可以接自己的 VOSR2 加载器。"}),
             "vosr2_settings": ("TE_SPEED_VOSR2_SETTINGS", {"lazy": True, "tooltip": "Optional TE-Speed VOSR2 settings."}),
             "seedvr2_model": ("MODEL,SEEDVR2_DIT", {"lazy": True, "tooltip": "SeedVR2 model, used when refine_model "
                               "= SeedVR2: 'SeedVR2 (Down)Load DiT Model' of ComfyUI-SeedVR2_VideoUpscaler, or the "
@@ -1573,7 +1613,13 @@ class H3MDSaveVideoFaceRefineInterp:
             path, frames, video, preview = res["result"]
             return {"ui": res["ui"], "result": (path, frames, video, "face_refine off: saved like H3MD Save Video "
                                                                      f"Interp ({frames} frames) -> {path}", preview)}
+        vosr2_why = None
+        if refine_model == "VOSR2" and vosr2_model is None and track_kw.get("detector") not in (None, "", "none"):
+            # 0.6.6: nothing wired to vosr2_model -> H3MD's built-in VOSR 2.0 (first use downloads its model files)
+            vosr2_model, vosr2_why = load_builtin_vosr2()
         blocker = refine_blocker(track_kw.get("detector"), refine_model, vosr2_model, seedvr2_model, seedvr2_vae)
+        if blocker and vosr2_why:
+            blocker = vosr2_why
         if blocker:   # 0.5.9: a missing face-refine part never stops the save (Bilibili reports 2026-11-20)
             LOG.warning("%s face refine skipped: %s Saving the video WITHOUT face refine.", _TAG, blocker)
             res = S.H3MDSaveVideoInterp().save(segments=segments, prompt=prompt, extra_pnginfo=extra_pnginfo,
@@ -1699,7 +1745,9 @@ class H3MDSaveVideoFaceRefineInterp:
             vosr2_model = vosr2_settings = None
         else:
             if vosr2_model is None:
-                raise ValueError(f"{_TAG} refine_model=VOSR2 needs vosr2_model ('VOSR 2.0 Model Loader' of ComfyUI-VOSR2)")
+                vosr2_model, why = load_builtin_vosr2()      # 0.6.6 (save() does this first; kept for direct callers)
+                if vosr2_model is None:
+                    raise ValueError(f"{_TAG} refine_model=VOSR2: {why}")
             seedvr2_model = seedvr2_vae = None
         fr = _fr_module()
         _stitch_class()

@@ -22,7 +22,7 @@ class FallbackTests(unittest.TestCase):
         def boom(*a, **k):
             raise F.NothingToRefine("Every shot is marked as not containing the subject")
 
-        with patch.object(F, "refine_blocker", lambda *a: None), \
+        with patch.object(F, "refine_blocker", lambda *a: None), patch.object(F, "load_builtin_vosr2", lambda: (object(), None)), \
                 patch.object(F.H3MDSaveVideoFaceRefineInterp, "_save_refined", boom), \
                 patch.object(F.S.H3MDSaveVideoInterp, "save", lambda self, **k: PLAIN):
             res = node.save(segments={"cache_dir": "x"}, face_refine=True)
@@ -35,7 +35,7 @@ class FallbackTests(unittest.TestCase):
         def boom(*a, **k):
             raise ValueError("bad format")
 
-        with patch.object(F, "refine_blocker", lambda *a: None), \
+        with patch.object(F, "refine_blocker", lambda *a: None), patch.object(F, "load_builtin_vosr2", lambda: (object(), None)), \
                 patch.object(F.H3MDSaveVideoFaceRefineInterp, "_save_refined", boom):
             with self.assertRaises(ValueError):
                 node.save(segments={"cache_dir": "x"}, face_refine=True)
@@ -49,10 +49,42 @@ class FallbackTests(unittest.TestCase):
             raise AssertionError("refine must not run")
 
         with patch.object(F.H3MDSaveVideoFaceRefineInterp, "_save_refined", never), \
+                patch.object(F, "load_builtin_vosr2", lambda: (None, "the built-in VOSR 2.0 restore model could not "
+                                                                       "be loaded (download failed)")), \
                 patch.object(F.S.H3MDSaveVideoInterp, "save", lambda self, **k: PLAIN):
             res = node.save(segments={"cache_dir": "x"}, face_refine=True)
         self.assertIn("SKIPPED", res["result"][3])
-        self.assertIn("VOSR2", res["result"][3])
+        self.assertIn("VOSR 2.0", res["result"][3])
+        self.assertIn("download failed", res["result"][3])
+
+    def test_built_in_vosr2_is_used_when_nothing_is_wired(self):
+        """0.6.6: no loader node needed - the save node takes H3MD's built-in VOSR 2.0 bundle"""
+        node = F.H3MDSaveVideoFaceRefineInterp()
+        bundle, seen = object(), {}
+
+        def refined(self, segments, vosr2_model, *a, **k):
+            seen["model"] = vosr2_model
+            return {"ui": {}, "result": ("out.mp4", 1, None, "refined", None)}
+
+        with patch.object(F.H3MDSaveVideoFaceRefineInterp, "_save_refined", refined), \
+                patch.object(F, "load_builtin_vosr2", lambda: (bundle, None)):
+            node.save(segments={"cache_dir": "x"}, face_refine=True)
+            self.assertIs(seen["model"], bundle)
+            mine = object()
+            node.save(segments={"cache_dir": "x"}, face_refine=True, vosr2_model=mine)   # a wired model wins
+            self.assertIs(seen["model"], mine)
+
+    def test_built_in_vosr2_code_is_h3mds_own_copy(self):
+        import h3md_vosr2 as VO
+        self.assertEqual(VO.MODEL, "VOSR2")
+        self.assertFalse(hasattr(VO, "comfy_entrypoint"))            # the pack's nodes are not registered by H3MD
+        self.assertTrue(callable(VO.Upscale.execute) and callable(VO.missing_files))
+        self.assertIs(F._vosr2_original(VO.LD.VOSR2Model.__new__(VO.LD.VOSR2Model)), VO.Upscale)
+        with patch.object(F, "_registry", lambda: {}):
+            self.assertIs(F._vosr2_original(), VO.Upscale)               # pack not installed: built-in code
+        other = type("VOSR2Upscale", (), {})
+        with patch.object(F, "_registry", lambda: {"VOSR2Upscale": other}):
+            self.assertIs(F._vosr2_original(object()), other)            # the pack's own bundle: the pack's node
 
     def test_blocker_reasons(self):
         B = F.FRP.BUILTIN
@@ -60,7 +92,7 @@ class FallbackTests(unittest.TestCase):
         self.assertIn("none", F.refine_blocker("none"))
         self.assertIsNone(F.refine_blocker(B))                       # built in: no file, no pack, no pip package
         self.assertIsNone(F.refine_blocker(B, "VOSR2", object()))
-        self.assertIn("VOSR2", F.refine_blocker(B, "VOSR2", None))
+        self.assertIn("VOSR 2.0", F.refine_blocker(B, "VOSR2", None))
         self.assertIn("seedvr2", F.refine_blocker(B, "SeedVR2", None, object(), None))
         self.assertIsNone(F.refine_blocker(B, "SeedVR2", None, object(), object()))
         with patch.object(F.MP, "find_detector", lambda n: None):

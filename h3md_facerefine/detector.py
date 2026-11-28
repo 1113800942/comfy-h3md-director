@@ -70,7 +70,7 @@ def letterbox_geometry(h: int, w: int, size: int = IMGSZ):
 class BuiltinDetector:
     def __init__(self, path=None, device=None):
         self.device = torch.device(device) if device is not None else torch.device("cpu")
-        self.model = torch.jit.load(path or weights_path(), map_location=self.device).eval()
+        self.model = torch.jit.load(path or weights_path(), map_location=self.device).train(False)
 
     @torch.no_grad()
     def predict(self, source, conf=0.25, verbose=False, **_unused):

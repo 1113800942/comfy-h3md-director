@@ -335,8 +335,22 @@ def preflight(interpolate, face_refine):
             why = f"built-in RIFE not usable ({exc})"
         if why:
             raise RuntimeError(f"{_TAG} interpolate is on but {why}")
-    # 0.6.6: face refine's tracking code and face detector are built in; what it still needs (a VOSR2 / SeedVR2
-    # restore model wired to the save node) is checked there, and a missing one saves without face refine
+    # 0.6.6: face refine is built in (tracking code, face detector, VOSR 2.0 code).  The VOSR 2.0 model files are
+    # downloaded on first use by the save node; say so before the sampling starts, not after it
+    if face_refine:
+        try:
+            try:
+                from . import h3md_vosr2 as VO
+            except ImportError:
+                import h3md_vosr2 as VO
+            gone = VO.missing_files()
+            if gone:
+                LOG.warning("%s face_refine is on and the VOSR 2.0 model files are not on disk yet (%s): they are "
+                            "downloaded (about 7 GB) when the video is saved, unless your own restore model is wired "
+                            "to the save node. 修脸开着，VOSR 2.0 模型还没下载：保存时会自动下载（约 7 GB）。",
+                            _TAG, "; ".join(gone))
+        except Exception as exc:
+            LOG.info("%s VOSR 2.0 file check skipped (%s)", _TAG, exc)
 
 
 class H3MDControlPanel:
@@ -362,11 +376,11 @@ class H3MDControlPanel:
                 "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 240.0, "step": 1.0, "tooltip":
                         "Saved frame rate; only with interpolate on (e.g. 30, 48, 60). 插帧开时的目标帧数。"}),
                 "face_refine": ("BOOLEAN", {"default": False, "tooltip":
-                                "Off (default). On: sharpen small faces in wide shots while saving. Finding and following the "
-                                "face is built in (nothing to install); the sharpening itself uses a VOSR2 model from the "
-                                "ComfyUI-VOSR2 pack - without it the video is saved without face refine.\n"
-                                "关（默认）；开：保存时修脸。找脸、跟脸已内置，不用另装；修脸本身用 ComfyUI-VOSR2 的模型，"
-                                "没装就不修脸、照常保存。"}),
+                                "Off (default). On: sharpen small faces in wide shots while saving. Everything it needs is "
+                                "built into H3MD (nothing to install); the VOSR 2.0 model files (about 7 GB) download on "
+                                "the first use. If they cannot be downloaded the video is saved without face refine.\n"
+                                "关（默认）；开：保存时修脸。需要的东西都已内置，不用另装插件；VOSR 2.0 模型（约 7 GB）在"
+                                "第一次用时自动下载，下载不了就不修脸、照常保存。"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xFFFFFFFFFFFFFFFF, "control_after_generate": True,
                                  "tooltip": "Fixed or random (control after generate). 种子：固定或随机。"}),
                 "segments_to_run": ("STRING", {"default": "", "tooltip":
