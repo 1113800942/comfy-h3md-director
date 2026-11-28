@@ -155,6 +155,17 @@ inputs and the same sigmas out, so the example workflows no longer need that pac
 `h3md_sigma_refiner.py`（H3MD Sigma Refiner 节点）移植自 yc 的 ComfyUI-YCNodes-MiniMax-H3 里的 `H3SigmaRefiner`
 （MIT 许可），输入和算出的 sigma 完全相同，示例工作流不再需要装那个包。
 
+## 2g. Chunked feed-forward patch (included since 0.6.6) / 前馈分块补丁（0.6.6 起内置）
+
+`h3md_speed_patches.py` (node H3MD Chunk FeedForward) uses the method of `MiniMaxChunkFeedForward` from
+**ComfyUI-KJNodes** by Kijai (<https://github.com/kijai/ComfyUI-KJNodes>, **GPL-3.0**): the feed-forward of every
+MiniMax H3 block runs over the tokens in chunks. The node H3MD Sage Attention in the same file contains no KJNodes
+code: it calls KJNodes' own SageAttention patch node when that pack is installed and does nothing otherwise.
+
+`h3md_speed_patches.py` 里的 H3MD Chunk FeedForward 节点用的是 Kijai 的 ComfyUI-KJNodes（GPL-3.0）里
+`MiniMaxChunkFeedForward` 的做法。同一文件里的 H3MD Sage Attention 不含 KJNodes 的代码：装了 KJNodes 就调用它的
+SageAttention 补丁节点，没装就什么都不做。
+
 ## 3. Runtime dependencies (not included) / 运行时依赖（不包含在本包里）
 
 | Project | Status (checked 2026-10-19) | How H3MD uses it |
