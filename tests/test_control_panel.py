@@ -130,22 +130,77 @@ def test_styles_switch_no_semantic_bridge():
         assert res[9] is None, style
 
 
-def test_simple_workflow_bridge_wired_and_bypassed():
-    """The simple example workflow: a bypassed H3MD Semantic Bridge feeds the sampler's semantic_bridge input; the
-    Control Panel's semantic_bridge output is not connected."""
-    path = os.path.join(os.path.dirname(HERE), "example_workflows", "H3MD Director simple.json")
+def _example(name):
+    path = os.path.join(os.path.dirname(HERE), "example_workflows", name)
     wf = json.load(open(path, encoding="utf-8"))
-    nodes = {n["id"]: n for n in wf["nodes"]}
-    bridges = [n for n in wf["nodes"] if n["type"] == "H3MDSemanticBridge"]
-    assert len(bridges) == 1 and bridges[0]["mode"] == 4                  # 4 = bypassed
-    out = bridges[0]["outputs"][0]["links"]
-    assert len(out) == 1
-    link = [l for l in wf["links"] if l[0] == out[0]][0]
-    target = nodes[link[3]]
-    assert target["inputs"][link[4]]["name"] == "semantic_bridge"
-    panel = [n for n in wf["nodes"] if n["type"] == "H3MDControlPanel"][0]
-    assert not [o for o in panel["outputs"] if o["name"] == "semantic_bridge"][0]["links"]
+    subs = (wf.get("definitions") or {}).get("subgraphs") or []
+    return wf, subs
 
+
+def test_066_simple_and_remake_workflows_need_no_other_node_pack_to_open():
+    """0.6.6: a new user opens the default workflows without red nodes - no rgthree / YCNodes / KJNodes / VOSR2 node
+    is enabled in them; the bypassed Redraw and Semantic Bridge helper nodes are gone (the Loop keeps its input)."""
+    gone = {"Label (rgthree)", "H3SigmaRefiner", "MiniMaxChunkFeedForward", "VOSR2ModelLoader",
+            "MiniMaxH3MemoryEfficientSageAttentionPatch", "H3MDRedraw", "H3MDRedrawPreview", "H3MDSemanticBridge"}
+    core_or_ours = ("H3MD", "MarkdownNote", "Note", "UNETLoader", "VAELoader", "CLIPLoader", "KSamplerSelect",
+                    "BasicScheduler", "LoraLoaderModelOnly")
+    for name in ("H3MD Director simple.json", "H3MD Director Remake.json"):
+        wf, subs = _example(name)
+        sub_ids = {s["id"] for s in subs}
+        for g in [wf] + subs:
+            for n in g["nodes"]:
+                assert n["type"] not in gone, (name, n["type"])
+                if n.get("mode", 0) == 0 and n["type"] not in sub_ids:        # every ENABLED node is ours or core
+                    assert n["type"].startswith(core_or_ours), (name, n["type"])
+        types = [n["type"] for g in [wf] + subs for n in g["nodes"]]
+        assert types.count("H3MDSageAttention") == 2 and types.count("H3MDChunkFeedForward") == 2, name
+        assert types.count("H3MDSigmaRefiner") == 1, name
+        loop = [n for s in subs for n in s["nodes"] if n["type"].startswith("H3MDLoopSampler")][0]
+        assert [i for i in loop["inputs"] if i["name"] == "semantic_bridge"]      # the input stays for users' own bridge
+        roles = {(n.get("properties") or {}).get("h3md_role") for s in subs for n in s["nodes"]}
+        assert {"sage_low", "sage_high", "turbo768_low", "turbo768_high"} <= roles, name   # the panel's switches find them
+
+
+def test_066_redraw_runs_from_the_control_panel_to_the_loop():
+    for name in ("H3MD Director simple.json", "H3MD Director Remake.json"):
+        wf, subs = _example(name)
+        nodes = {n["id"]: n for n in wf["nodes"]}
+        panel = [n for n in wf["nodes"] if n["type"] == "H3MDControlPanel"][0]
+        out = [o for o in panel["outputs"] if o["name"] == "redraw"]
+        assert len(out) == 1 and panel["outputs"][-1]["name"] == "redraw" and len(out[0]["links"]) == 1
+        link = [l for l in wf["links"] if l[0] == out[0]["links"][0]][0]
+        inst = nodes[link[3]]
+        assert inst["inputs"][link[4]]["name"] == "redraw" and inst["inputs"][link[4]]["link"] == link[0]
+        sg = [s for s in subs if s["id"] == inst["type"]][0]
+        sg_in = [i for i in sg["inputs"] if i["name"] == "redraw"][0]
+        inner = [l for l in sg["links"] if l["id"] == sg_in["linkIds"][0]][0]
+        assert inner["origin_id"] == -10 and inner["origin_slot"] == sg["inputs"].index(sg_in)
+        loop = [n for n in sg["nodes"] if n["id"] == inner["target_id"]][0]
+        assert loop["type"].startswith("H3MDLoopSampler") and loop["inputs"][inner["target_slot"]]["name"] == "redraw"
+        # the plan goes from the Director straight to the sampler (no Redraw node in between any more)
+        plan_in = [i for i in inst["inputs"] if i["name"] == "plan"][0]
+        src = [l for l in wf["links"] if l[0] == plan_in["link"]][0]
+        assert nodes[src[1]]["type"].startswith("H3MDDirector") and src[5] == "H3MD_PLAN"
+        assert not [o for o in panel["outputs"] if o["name"] == "semantic_bridge"][0]["links"]
+
+
+def test_066_workflow_lora_lists_use_official_names():
+    for name in ("H3MD Director simple.json", "H3MD Director Remake.json"):
+        wf, _subs = _example(name)
+        panel = [n for n in wf["nodes"] if n["type"] == "H3MDControlPanel"][0]
+        vals = panel["widgets_values"]
+        assert vals[-1] == ""                                                    # redraw: empty
+        for text in (vals[-3], vals[-2]):
+            rows = json.loads(text)
+            assert rows and not [r for r in rows if r.get("key") in ("speed", "cinematic")]
+            for r in rows:
+                if r.get("key") in CP.FILES:
+                    assert r["lora"] == CP.FILES[r["key"]], (name, r)
+        note = [n for n in wf["nodes"] if n["type"] == "MarkdownNote" and "Model links" in (n.get("title") or "")][0]
+        text = note["widgets_values"][0]
+        for f in CP.FILES.values():
+            assert f in text, (name, f)
+        assert "speed_slider" not in text and "CSWRY/VOSR" in text and "sageattention" in text
 
 
 def test_lora_dropdowns_filled_on_open():

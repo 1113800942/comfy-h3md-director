@@ -169,14 +169,14 @@
   },
   {
    "id": 77,
-   "type": "H3SigmaRefiner",
+   "type": "H3MDSigmaRefiner",
    "pos": [
     470,
     1130
    ],
    "size": [
-    260,
-    140
+    280,
+    150
    ],
    "flags": {},
    "order": 48,
@@ -243,15 +243,7 @@
    ],
    "title": "H3 refine +1 · total 9 NFE",
    "properties": {
-    "aux_id": "yichengup/ComfyUI-YCNodes-MiniMax-H3",
-    "ver": "146207295c1d2bd6b64a6552484cb6ed8be1c9ef",
-    "Node name for S&R": "H3SigmaRefiner",
-    "ue_properties": {
-     "widget_ue_connectable": {},
-     "input_ue_unconnectable": {},
-     "version": "7.5.2"
-    },
-    "widget_ue_connectable": {}
+    "Node name for S&R": "H3MDSigmaRefiner"
    },
    "widgets_values": [
     1,
@@ -2010,14 +2002,14 @@
   },
   {
    "id": 299,
-   "type": "MiniMaxH3MemoryEfficientSageAttentionPatch",
+   "type": "H3MDSageAttention",
    "pos": [
     -160,
     -60
    ],
    "size": [
     330,
-    30
+    58
    ],
    "flags": {
     "collapsed": true
@@ -2044,14 +2036,12 @@
     }
    ],
    "properties": {
-    "cnr_id": "comfyui-kjnodes",
-    "ver": "d3cfe21625e5170126ce06fbfcfe1d88108688c3",
-    "Node name for S&R": "MiniMaxH3MemoryEfficientSageAttentionPatch"
+    "Node name for S&R": "H3MDSageAttention"
    }
   },
   {
    "id": 302,
-   "type": "MiniMaxChunkFeedForward",
+   "type": "H3MDChunkFeedForward",
    "pos": [
     -150,
     40
@@ -2101,9 +2091,7 @@
     }
    ],
    "properties": {
-    "cnr_id": "comfyui-kjnodes",
-    "ver": "d3cfe21625e5170126ce06fbfcfe1d88108688c3",
-    "Node name for S&R": "MiniMaxChunkFeedForward"
+    "Node name for S&R": "H3MDChunkFeedForward"
    },
    "widgets_values": [
     2,
@@ -2378,7 +2366,7 @@
   },
   {
    "id": 311,
-   "type": "MiniMaxChunkFeedForward",
+   "type": "H3MDChunkFeedForward",
    "pos": [
     -150,
     220
@@ -2427,9 +2415,7 @@
     }
    ],
    "properties": {
-    "cnr_id": "comfyui-kjnodes",
-    "ver": "d3cfe21625e5170126ce06fbfcfe1d88108688c3",
-    "Node name for S&R": "MiniMaxChunkFeedForward"
+    "Node name for S&R": "H3MDChunkFeedForward"
    },
    "widgets_values": [
     3,

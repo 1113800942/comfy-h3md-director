@@ -86,7 +86,7 @@ class NodeTests(unittest.TestCase):
 
 
 class WorkflowTests(unittest.TestCase):
-    """Example workflows: H3MD Redraw sits between the Director and the Loop, bypassed (mode 4)."""
+    """Full example workflow: H3MD Redraw sits between the Director and the Loop, bypassed (mode 4)."""
 
     def check(self, name, loop_id, loop_slot):
         w = json.loads((ROOT / "example_workflows" / name).read_text(encoding="utf-8"))
@@ -107,8 +107,11 @@ class WorkflowTests(unittest.TestCase):
         self.assertLessEqual(max(n["id"] for n in w["nodes"]), w["last_node_id"])
         self.assertLessEqual(max(links), w["last_link_id"])
 
-    def test_simple(self):
-        self.check("H3MD Director simple.json", 339, 2)
+    def test_simple_has_no_redraw_node(self):
+        """0.6.6: in the simple workflow redraw is a Control Panel row (tests/test_control_panel.py checks its wiring);
+        the full workflow has no Control Panel and keeps the node."""
+        w = json.loads((ROOT / "example_workflows" / "H3MD Director simple.json").read_text(encoding="utf-8"))
+        self.assertFalse([n for n in w["nodes"] if n["type"] in ("H3MDRedraw", "H3MDRedrawPreview")])
 
     def test_full(self):
         self.check("H3MD Director.json", 227, 0)
