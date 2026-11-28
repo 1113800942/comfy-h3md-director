@@ -15,17 +15,21 @@ two hidden STRING widgets, so a workflow saved with the panel loads anywhere.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
+import os
 
 import folder_paths
 
 try:
     from . import h3md_semantic_bridge as SB
     from . import h3md_lora as HL
+    from . import h3md_window as WIN
 except ImportError:  # flat import (tests)
     import h3md_semantic_bridge as SB
     import h3md_lora as HL
+    import h3md_window as WIN
 
 LOG = logging.getLogger("H3MD")
 _TAG = "[H3MD Control Panel]"
@@ -38,33 +42,96 @@ STYLE_LABELS = {"balanced": "均衡 Balanced", "high_motion": "高动态 High mo
 # Recommended LoRAs (11-02 measured mix, 0.3.4 rework 2026-11-05). key -> file.  Every panel row is a NORMAL LoRA
 # (ComfyUI LoraLoaderModelOnly): the one bypass speed LoRA (768 turbo) lives in the model subgraph, one per pass, so a
 # panel row can never replace it (ComfyUI keeps only the LAST bypass LoRA of a chain - measured 11-05, runs 0095-0098).
-FILES = {
-    "combat": "H3_Combat_V2.safetensors",
-    "weapon": "H3-Bunny_weapon_combatV1.safetensors",
-    "fightflow": "H3_Fight_Flow_V1-Unarmed combat interaction Melee weapon interaction Gun-fu interaction "
-                 "一采 0.65 - 二采 0.25.safetensors",
-    "motion_repair": "H3 Motion_Repair_V2.safetensors",
-    "speed": "H3_speed_slider_1.1.safetensors",
-    "cinematic": "Minimax H3 电影感0.1 cinematic texture.safetensors",
-    "vbvr": "H3-Licon-VBVR-I2V-1pass1.0-2pass0.3.safetensors",
-    "enhancer": "MiniMaxH3_Enhancer_0.5-1.0_3432130_epoch_10.safetensors",
-    "realism": "h3-realism-people-r34l1sm-1.0 strong 0.6-0.8 light.safetensors",
-    "lms": "minimax_h3_lms_v1.0_r64.safetensors",
+# 0.6.6: these rows are RECOMMENDED, never required - a file that is not there is skipped (see find_row / apply_rows).
+# Each LoRA is listed under its author's ORIGINAL file name (users could not find the renamed ones), with its size and
+# sha256 so a copy the user renamed is still recognised (all eight checked against the model pages, 2026-11-27).
+RECOMMENDED = {
+    "combat": {"file": "H3_Combat_V2.safetensors", "bytes": 155110280,
+               "sha256": "5b3edb09e9d6029439badf9bc9db4ba4a355ae679b0810888de82c4793c0bac8",
+               "url": "https://huggingface.co/JOKER141/MiniMax-H3-Combat-Base-V2"},
+    "weapon": {"file": "Bunny_weapon_combatV1.safetensors", "bytes": 155110272,
+               "sha256": "d49de2902f3ea5e6889d9489c031ed64694de93d6a77c111d164f83c0dc359df",
+               "url": "https://huggingface.co/JOKER141/MiniMax-H3-Weapon-Combat-LoRA"},
+    "fightflow": {"file": "H3_Fight_Flow_V1.safetensors", "bytes": 155110296,
+                  "sha256": "579e8eca67b6d70f4db94b2db67cd938751d576ee3d72aba875dae3d911f7398",
+                  "url": "https://huggingface.co/JOKER141/H3-Fight-Flow-Fight-Interaction-LoRA"},
+    "motion_repair": {"file": "Motion_Repair_V2.safetensors", "bytes": 155110272,
+                      "sha256": "edfa0e2858caeba7be9108883f61da8525d3c58af998c94ac7a449d9603d7574",
+                      "url": "https://civitai.com/models/2890788"},
+    "vbvr": {"file": "H3-Licon-VBVR-I2V.safetensors", "bytes": 149238584,
+             "sha256": "19ba9d18c06eaecebd11c1ca1d27a0277f414d43370124e3cfcb33a113e9f886",
+             "url": "https://huggingface.co/LiconStudio/Minimax-H3-VBVR"},
+    "enhancer": {"file": "MiniMaxH3_Enhancer_minimaxh3_3432130_epoch_10.safetensors", "bytes": 310170072,
+                 "sha256": "7e6b1dac779962f1aa795701ef2a199a300cc90840e347d1ee6d3a165754e002",
+                 "url": "https://civitai.com/models/3025511"},
+    "realism": {"file": "h3-realism-people-t2v-i2v-r2v.safetensors", "bytes": 131229656,
+                "sha256": "acc529601d2da117fb81179e76c56e488a3beab1171659d305f04fa3655b787e",
+                "url": "https://huggingface.co/fal/MiniMax-H3-Realism-People-LoRA"},
+    "lms": {"file": "minimax_h3_lms_v1.0_r64.safetensors", "bytes": 1239664536,
+            "sha256": "16f3195bc6bffa431c0598dc2031e520ba058b4fcbc9f104db9e3fdfdeacf60c",
+            "url": "https://huggingface.co/Alissonerdx/Minimax-H3-ComfyUI/tree/main/loras"},
 }
+FILES = {k: v["file"] for k, v in RECOMMENDED.items()}
+_KEY_OF_FILE = {v["file"]: k for k, v in RECOMMENDED.items()}
+_HASHES = {}   # (path, size, mtime_ns) -> sha256, for this ComfyUI session
+
+
+def _sha256(path: str) -> str:
+    st = os.stat(path)
+    key = (path, st.st_size, st.st_mtime_ns)
+    if key not in _HASHES:
+        h = hashlib.sha256()
+        with open(path, "rb") as f:
+            for chunk in iter(lambda: f.read(1 << 22), b""):
+                h.update(chunk)
+        _HASHES[key] = h.hexdigest()
+    return _HASHES[key]
+
+
+def find_lora(name: str):
+    """The name in models/loras that holds this LoRA, or None.  The name itself when that file is there; for a
+    recommended LoRA's official name also a renamed copy: same size in bytes, then the same sha256 (only files of
+    exactly that size are hashed, once per session)."""
+    if folder_paths.get_full_path("loras", name) is not None:
+        return name
+    spec = RECOMMENDED.get(_KEY_OF_FILE.get(name))
+    if spec is None:
+        return None
+    try:
+        names = folder_paths.get_filename_list("loras")
+    except Exception:
+        return None
+    for n in names:
+        try:
+            p = folder_paths.get_full_path("loras", n)
+            if p and os.path.getsize(p) == spec["bytes"] and _sha256(p) == spec["sha256"]:
+                return n
+        except OSError:
+            continue
+    return None
+
+
+def find_row(row: dict):
+    """find_lora for a panel row.  A recommended row (it has a key) saved under an older, renamed file name is also
+    looked up under the official name of its key."""
+    n = find_lora(row["lora"])
+    if n is None and row.get("key") in RECOMMENDED and RECOMMENDED[row["key"]]["file"] != row["lora"]:
+        n = find_lora(RECOMMENDED[row["key"]]["file"])
+    return n
 # 0.3.4: removed rows.  dasiwa was a bypass row (it replaced the model subgraph's speed LoRA), turbo (10ErosMax) was
 # stacked on top of it; both are dropped from saved lists when they run (logged), and by the editor.
 REMOVED = {"dasiwa", "turbo"}
 BYPASS = set()   # no bypass rows any more (kept as a name for old imports)
 BYPASS_STACK = {"remake"}   # exp multiswap: bypass rows stacked on top of the model subgraph's bypass speed LoRA
 ORDER = {   # application order (Combat first, where it sat in the old model subgraph)
-    "low": ["combat", "weapon", "fightflow", "motion_repair", "speed", "cinematic", "vbvr", "enhancer"],
-    "high": ["combat", "realism", "weapon", "fightflow", "motion_repair", "cinematic", "lms", "vbvr"],
+    "low": ["combat", "weapon", "fightflow", "motion_repair", "vbvr", "enhancer"],
+    "high": ["combat", "realism", "weapon", "fightflow", "motion_repair", "lms", "vbvr"],
 }
 # style -> pass -> {key: strength}; recommended keys not listed are switched off
 PRESETS = {
     "balanced": {
-        "low": {"combat": 0.7, "motion_repair": 0.75, "speed": 3.0, "cinematic": 0.5, "vbvr": 1.0, "enhancer": 0.55},
-        "high": {"combat": 0.49, "realism": 0.6, "motion_repair": 0.25, "cinematic": 0.2, "lms": 0.2, "vbvr": 0.5},
+        "low": {"combat": 0.7, "motion_repair": 0.75, "vbvr": 1.0, "enhancer": 0.55},
+        "high": {"combat": 0.49, "realism": 0.6, "motion_repair": 0.25, "lms": 0.2, "vbvr": 0.5},
     },
     # 0.4.6: one weapon LoRA per pass is enough (YJ's 1-minute fight, 11-12: low 0.85 / high 0.5, nothing else on)
     "high_motion": {
@@ -187,18 +254,30 @@ class _LoraCache:
                 del self.files[p]
 
 
-def apply_rows(model, rows: list, cache: _LoraCache, which: str):
-    """Apply the active rows in order. Missing files -> one error listing all of them."""
+def apply_rows(model, rows: list, cache: _LoraCache, which: str, skipped: list = None):
+    """Apply the active rows in order.  0.6.6: a row whose file is not in models/loras is SKIPPED (the LoRAs are
+    recommendations, the run goes on without it) - logged once with where to get it, and appended to `skipped`."""
     import comfy.sd
-    active = [r for r in rows if r["on"] and r["strength"] != 0]
-    missing = [r["lora"] for r in active if folder_paths.get_full_path("loras", r["lora"]) is None]
-    if missing:
-        raise ValueError(f"{_TAG} {which}-res LoRA file(s) not found in models/loras: {missing}. Download them (see "
-                         f"the Model links note) or switch the row off. {which} 清单里这些 LoRA 文件找不到："
-                         f"{missing}，请下载到 models/loras，或把这一行关掉。")
+    active, gone = [], []
+    for r in rows:
+        if not (r["on"] and r["strength"] != 0):
+            continue
+        n = find_row(r)
+        if n is None:
+            gone.append(r)
+        else:
+            active.append(dict(r, file=n))
+    if gone:
+        names = [r["lora"] for r in gone]
+        urls = sorted({RECOMMENDED[r["key"]]["url"] for r in gone if r.get("key") in RECOMMENDED})
+        LOG.warning("%s %s-res: %d optional LoRA(s) not in models/loras, skipped - the run continues without them: %s%s"
+                    " 这几个可选 LoRA 没下载，已跳过，照常出片。", _TAG, which, len(gone), names,
+                    f" (download: {', '.join(urls)})" if urls else "")
+        if skipped is not None:
+            skipped.extend(n for n in names if n not in skipped)
     used = []
     for r in active:
-        path = folder_paths.get_full_path("loras", r["lora"])
+        path = folder_paths.get_full_path("loras", r["file"])
         used.append(path)
         lora = cache.get(path)
         if r.get("key") in BYPASS:
@@ -309,23 +388,33 @@ class H3MDControlPanel:
                 "lora_low": ("STRING", {"default": lo, "multiline": True, "tooltip": "Low-res LoRA list (JSON)."}),
                 "lora_high": ("STRING", {"default": hi, "multiline": True, "tooltip": "High-res LoRA list (JSON)."}),
             },
+            # 0.6.6: declared LAST and optional, so workflows and API prompts saved before it still load; the editor
+            # draws it one row above the trial box
+            "optional": {
+                "redraw": ("STRING", {"default": "", "tooltip":
+                           "重画 / Redraw. " + WIN.REDRAW_TIP + "\nOnly with the Director's Seamless long video switch on "
+                           "(greyed out otherwise). 只在导演台开了「无接缝长视频」时可用，没开时是灰的。"}),
+            },
         }
 
-    RETURN_TYPES = ("MODEL", "MODEL", "INT", "INT", "BOOLEAN", "FLOAT", "BOOLEAN", "INT", "STRING", SB.TYPE)
+    RETURN_TYPES = ("MODEL", "MODEL", "INT", "INT", "BOOLEAN", "FLOAT", "BOOLEAN", "INT", "STRING", SB.TYPE, "STRING")
     RETURN_NAMES = ("low_res_model", "high_res_model", "width", "height", "interpolate", "fps", "face_refine",
-                    "seed", "segments_to_run", "semantic_bridge")
+                    "seed", "segments_to_run", "semantic_bridge", "redraw")   # 0.6.6: redraw appended LAST
     FUNCTION = "run"
     CATEGORY = CATEGORY
-    DESCRIPTION = ("H3MD Control Panel: resolution, fps / interpolation, face refine, seed, 试镜 trial (which parts to run), "
+    DESCRIPTION = ("H3MD Control Panel: resolution, fps / interpolation, face refine, seed, 重画 redraw (seconds to render again), 试镜 trial (which parts to run), "
                    "style (balanced / high motion / motion copy / remake 多人互换) and the low-res + high-res LoRA lists in one place.")
 
     def run(self, low_res_model, high_res_model, width, height, interpolate, fps, face_refine, seed,
-            segments_to_run, style, lora_low, lora_high):
+            segments_to_run, style, lora_low, lora_high, redraw=""):
         style = style if style in STYLES else "balanced"
+        redraw = str(redraw or "").strip()
+        WIN.parse_redraw(redraw)                 # 0.6.6: wrong writing -> error now, before any sampling
         preflight(interpolate, face_refine)      # 0.6.3: before any sampling, not when the video is saved
         lo, hi = parse_rows(lora_low), parse_rows(lora_high)
-        low, used_lo = apply_rows(low_res_model, lo, self.cache, "low")
-        high, used_hi = apply_rows(high_res_model, hi, self.cache, "high")
+        skipped = []
+        low, used_lo = apply_rows(low_res_model, lo, self.cache, "low", skipped)
+        high, used_hi = apply_rows(high_res_model, hi, self.cache, "high", skipped)
         self.cache.keep_only(set(used_lo) | set(used_hi))
         fps = float(fps) if interpolate else 24.0
         bridge = bridge_for(style)
@@ -333,8 +422,9 @@ class H3MDControlPanel:
                  f"{fps:g}", " (interpolated)" if interpolate else "", "on" if face_refine else "off", seed, style,
                  segments_to_run.strip() or "all")
         result = (low, high, int(width), int(height), bool(interpolate), fps, bool(face_refine), int(seed),
-                  str(segments_to_run or "").strip(), bridge)
-        return {"ui": {"h3md_panel": [{"segments_to_run": str(segments_to_run or "").strip()}]}, "result": result}
+                  str(segments_to_run or "").strip(), bridge, redraw)
+        return {"ui": {"h3md_panel": [{"segments_to_run": str(segments_to_run or "").strip(), "skipped": skipped}]},
+                "result": result}
 
 
 def register_routes() -> bool:
@@ -354,7 +444,11 @@ def register_routes() -> bool:
         return web.json_response({
             "styles": STYLES,
             "presets": {s: {w: preset_rows(s, w) for w in ("low", "high")} for s in STYLES},
-            "installed": {k: f in installed for k, f in FILES.items()},
+            # 0.6.6: per recommended LoRA - the file found for it in models/loras (official name, or a renamed copy
+            # recognised by size + sha256), or null: the editor shows such a row switched off, "not downloaded"
+            "found": (found := {k: find_lora(f) for k, f in FILES.items()}),
+            "installed": {k: v is not None for k, v in found.items()},
+            "info": {k: {"file": v["file"], "url": v["url"]} for k, v in RECOMMENDED.items()},
             "removed": sorted(REMOVED),
             "turbo_high": TURBO_HIGH,
             "turbo_file": TURBO_FILE,

@@ -66,7 +66,7 @@ def test_loop_inputs_appended_last_and_popped_before_cache_key():
     import h3md_loop as L
     opt = L.H3MDLoopSampler.INPUT_TYPES()["optional"]
     keys = list(opt)
-    assert keys[-2:] == ["live_preview", "live_preview_from_step"]
+    assert keys[-3:] == ["live_preview", "live_preview_from_step", "redraw"]   # 0.6.6 appended redraw after them
     assert opt["live_preview"][1]["default"] == "low-res"
     import h3md_loop_split as LS
     assert "live_preview" in LS.option_defaults() and "live_preview_from_step" in LS.option_defaults()

@@ -876,6 +876,10 @@ class H3MDLoopSampler:
             "First low-res step that is shown (the first steps are mostly noise). 1 = from the start.\n"
             "低清从第几步开始显示（前几步基本是噪点）。1 = 从头显示。"})
         # hidden 'prompt' (no widget / no slot): only to warn when 'images' (now a placeholder) is used downstream
+        # 0.6.6 redraw by seconds from the H3MD Control Panel, appended LAST (old workflows load).  Same writing and
+        # rules as the H3MD Redraw node; used with seamless long video (window mode) only, ignored otherwise.
+        opt["redraw"] = ("STRING", {"default": "", "tooltip": WIN.REDRAW_TIP + "\nSeamless long video (window mode) only; "
+                                    "ignored in segmented mode. 只在「无接缝长视频」下有用，分段模式下忽略。"})
         return {"required": req, "optional": opt, "hidden": {"unique_id": "UNIQUE_ID", "prompt": "PROMPT"}}
 
     RETURN_TYPES = ("LATENT", "IMAGE", "AUDIO", "INT", "STRING", SS.SEGMENTS_TYPE)  # 'long video' appended LAST
@@ -897,6 +901,13 @@ class H3MDLoopSampler:
         for gone in ("start_index", "end_index", "previous_latent"):  # removed 2026-10-30 (API-format prompts)
             if sampler_kwargs.pop(gone, None) is not None:
                 LOG.warning("%s '%s' was removed: use rerun_segments / stop_after", _TAG, gone)
+        redraw_text = str(sampler_kwargs.pop("redraw", "") or "").strip()   # 0.6.6 Control Panel row (never a sampler option)
+        if redraw_text:
+            if isinstance(plan, dict) and plan.get("windowMode"):
+                plan = WIN.redraw_plan(plan, redraw_text)
+            else:   # segmented mode / multi-person swap: a time left in the box is not an error
+                LOG.info("%s redraw '%s' ignored: local redraw works with seamless long video (window mode) only. "
+                         "重画秒数只在「无接缝长视频」下有用，这次已忽略。", _TAG, redraw_text)
         if isinstance(plan, dict) and plan.get("windowMode"):   # window-exp: core context windows + H3MD additions
             low_res_model, high_res_model = WIN.wrap_models(plan["windowMode"], low_res_model, high_res_model)
         run_text = str(sampler_kwargs.pop("segments_to_run", "") or "").strip()   # v0.3 Control Panel box

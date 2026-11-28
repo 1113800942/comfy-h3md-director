@@ -34,11 +34,31 @@ function applyStyle(rows, style, which, P) {
   const out = [], seen = new Set(), removed = new Set(P.removed || ["dasiwa", "turbo"]);
   for (const r of rows) {
     if (r.key && removed.has(r.key)) continue;   // 0.3.4: Dasiwa / 10ErosMax rows removed (speed LoRA = model-area 768)
-    if (r.key && rec[r.key]) { out.push({ ...r, on: rec[r.key].on, strength: rec[r.key].strength }); seen.add(r.key); }
+    if (r.key && rec[r.key]) { out.push(recRow({ ...r, on: rec[r.key].on, strength: rec[r.key].strength }, P)); seen.add(r.key); }
     else out.push({ ...r });
   }
-  for (const [k, r] of Object.entries(rec)) if (!seen.has(k)) out.push({ ...r });
+  for (const [k, r] of Object.entries(rec)) if (!seen.has(k)) out.push(recRow({ ...r }, P));
   return out;
+}
+// 0.6.6: the recommended LoRAs are optional.  A recommended row points at the file found for it on this machine (the
+// official name, or the user's renamed copy the server recognised by sha256); when there is none it shows the official
+// name, switched OFF ("not downloaded") - never an error.
+const notDownloaded = (r, P) => !!r.key && P?.installed?.[r.key] === false;
+function recRow(r, P) {
+  if (!r.key || !P?.info?.[r.key]) return r;
+  const found = P.found?.[r.key];
+  return found ? { ...r, lora: found } : { ...r, lora: P.info[r.key].file, on: false };
+}
+// rows of a saved workflow: the same rule, applied when the panel is drawn (returns true when something changed)
+function tidyRows(node, P) {
+  if (!P?.info) return false;
+  let any = false;
+  for (const which of ["low", "high"]) {
+    const rows = rowsOf(node, which);
+    const next = rows.map((r) => recRow(r, P));
+    if (JSON.stringify(next) !== JSON.stringify(rows)) { setRows(node, which, next); any = true; }
+  }
+  return any;
 }
 
 // 0.3.4: the style buttons also set the HIGH-res 768 turbo (bypass) loader in the model subgraph
@@ -232,6 +252,25 @@ export function setPanelsFromRemake(on) {
     }
   }
 }
+// 0.6.6 redraw row: usable only while the Director's Seamless long video switch is on (plan.windowMode; the
+// multi-person swap style drops it).  true / false, or null when no Director plan can be read (row left usable).
+function seamlessOn() {
+  let seen = false;
+  for (const n of directorNodes()) {
+    try {
+      let plan = n.__h3md?.plan;
+      if (!plan) {
+        const text = n.widgets?.find((x) => x.name === "plan_json")?.value;
+        if (typeof text !== "string" || !text.trim()) continue;
+        plan = JSON.parse(text);
+      }
+      if (!plan || typeof plan !== "object" || Array.isArray(plan)) continue;
+      seen = true;
+      if (plan.windowMode && plan.swapEngine !== "remake") return true;
+    } catch { /* a broken plan is the Director's to report */ }
+  }
+  return seen ? false : null;
+}
 function planWantsRemake() {
   return directorNodes().some((n) => {
     try {
@@ -347,6 +386,9 @@ function el(tag, attrs = {}, ...kids) {
 
 const CSS = `
 .h3mdcp{font:12px sans-serif;color:#ddd;display:flex;flex-direction:column;gap:6px;padding:2px 2px 6px}
+.h3mdcp .field{display:flex;align-items:center;gap:6px;padding:0 4px}.h3mdcp .field label{width:78px;flex:none;color:#bcd;font-size:11px}
+.h3mdcp .field input{flex:1;min-width:0;background:#1e1e1e;color:#ddd;border:1px solid #444;border-radius:3px;font-size:12px;padding:3px 5px}
+.h3mdcp .field.off{opacity:.45}.h3mdcp .field.off input{cursor:not-allowed}
 .h3mdcp .hint{font-size:11px;color:#9ab;padding:0 4px;display:flex;align-items:center;gap:6px}.h3mdcp .hint.bad{color:#fff;background:#8a2a2a;border-radius:4px;padding:4px 6px}
 .h3mdcp .hint.set{color:#1a1a1a;background:#f0a020;border-radius:4px;padding:4px 6px;font-weight:bold}
 .h3mdcp .trials{display:flex;flex-wrap:wrap;gap:4px;padding:2px 4px}.h3mdcp .trials button{font-size:11px;padding:2px 7px;border:1px solid #556;border-radius:10px;background:#2a3540;color:#cde;cursor:pointer}.h3mdcp .trials button.on{background:#f0a020;color:#111;border-color:#f0a020;font-weight:bold}
@@ -359,7 +401,8 @@ const CSS = `
 .h3mdcp .row{display:flex;align-items:center;gap:4px;margin:2px 0}.h3mdcp .row select{flex:1;min-width:0;background:#1e1e1e;color:#ddd;border:1px solid #444;border-radius:3px;font-size:11px}
 .h3mdcp .row input[type=number]{width:52px;background:#1e1e1e;color:#ddd;border:1px solid #444;border-radius:3px;font-size:11px}
 .h3mdcp .row.off select,.h3mdcp .row.off input[type=number]{opacity:.45}.h3mdcp .row .x{cursor:pointer;color:#999;padding:0 3px}
-.h3mdcp .row.missing select{border-color:#c44;color:#f99}.h3mdcp .rec{font-size:10px;color:#7a9;width:10px}`;
+.h3mdcp .row.missing select{border-style:dashed;color:#999}.h3mdcp .row .nd{font-size:10px;color:#9aa;white-space:nowrap;text-decoration:none;border:1px solid #556;border-radius:8px;padding:0 5px}.h3mdcp a.nd:hover{color:#cde;border-color:#8ab}
+.h3mdcp .skipnote{margin:2px 0;padding:4px 6px;border-radius:5px;background:rgba(120,120,120,.2);border:1px solid #667;color:#ccd;font-size:11px;line-height:1.4}.h3mdcp .rec{font-size:10px;color:#7a9;width:10px}`;
 function injectCss() { if (document.getElementById("h3mdcp-css")) return; document.head.append(el("style", { id: "h3mdcp-css" }, CSS)); }
 
 class Panel {
@@ -374,7 +417,9 @@ class Panel {
     this.widget.serialize = false;
     this.styleBeforeRemake = "balanced";
     ensureStyleChoices(node);
-    for (const n of ["style", "lora_low", "lora_high"]) { const w = W(node, n); if (w) w.hidden = true; }
+    // 0.6.6: the trial box and the new redraw box are drawn by the panel (redraw one row above trial); their widgets
+    // stay as the stored values, in the declared order, so saved workflows keep loading
+    for (const n of ["style", "lora_low", "lora_high", "segments_to_run", "redraw"]) { const w = W(node, n); if (w) w.hidden = true; }
     const seg = W(node, "segments_to_run");
     if (seg) seg.label = "试镜 trial";
     if (seg) { const cb = seg.callback; seg.callback = (...a) => { const r = cb?.apply(seg, a); this.render(); return r; }; }
@@ -419,9 +464,11 @@ class Panel {
         el("button", { title: "back to the recommended values of the selected style (your own rows stay)",
           onclick: () => { setRows(this.node, which, applyStyle(rows, style, which, P)); this.render(); } }, "恢复推荐 Reset")));
     rows.forEach((r, i) => {
-      const missing = P.loras?.length && !installed.has(r.lora);
+      const optional = notDownloaded(r, P);
+      const missing = optional || ((!r.key || !P.info?.[r.key]) && P.loras?.length && !installed.has(r.lora));
+      const info = optional ? P.info?.[r.key] : null;
       const upd = (patch) => { const rs = rowsOf(this.node, which); rs[i] = { ...rs[i], ...patch }; setRows(this.node, which, rs); this.render(); };
-      const sel = el("select", { title: r.lora + (missing ? "\n(not found in models/loras)" : ""), onchange: (e) => upd({ lora: e.target.value, key: null }) });
+      const sel = el("select", { title: r.lora + (optional ? "\n未下载（可选推荐，没有也能跑）· not downloaded - optional, the run works without it" : missing ? "\n找不到这个文件，运行时会跳过 · not found in models/loras, skipped when run" : ""), onchange: (e) => upd({ lora: e.target.value, key: null }) });
       // 0.4.3: only this row's LoRA at first; the full list (every file in models/loras - hundreds, times 16-18 rows =
       // thousands of <option>s, ~76 ms per panel re-render) is filled in when this dropdown is opened or focused
       sel.append(loraOption(r.lora));
@@ -438,6 +485,8 @@ class Panel {
         el("span", { class: "rec", title: r.key ? "recommended (follows the style buttons)" : "your own LoRA" }, r.key ? "★" : ""),
         el("input", { type: "checkbox", checked: !!r.on, onchange: (e) => upd({ on: e.target.checked }) }),
         sel,
+        ...(optional ? [el("a", { class: "nd", href: info?.url || null, target: "_blank", rel: "noopener", title: `可选推荐，没下载：${info?.file || r.lora}\n点这里打开下载页；没有也能跑 · optional, not downloaded - click for the download page` }, "未下载·可选")]
+          : missing ? [el("span", { class: "nd", title: "找不到这个文件，运行时会跳过 · file not found, skipped when run" }, "找不到")] : []),
         el("input", { type: "number", step: "0.05", value: String(r.strength), onchange: (e) => upd({ strength: Number(e.target.value) || 0 }) }),
         el("span", { class: "x", title: "remove this row", onclick: () => { const rs = rowsOf(this.node, which); rs.splice(i, 1); setRows(this.node, which, rs); this.render(); } }, "✕")));
     });
@@ -451,10 +500,34 @@ class Panel {
     return box;
   }
 
+  // 0.6.6: one labelled text box bound to a hidden widget (value kept in the widget, so it is saved with the workflow)
+  fieldRow(label, name, placeholder, tip, off) {
+    const w = W(this.node, name);
+    const inp = el("input", { type: "text", placeholder, title: tip, disabled: off ? true : null,
+      onchange: (e) => { const v = e.target.value.trim(); if (w) { w.value = v; w.callback?.(v); } this.render(); } });
+    inp.value = String(w?.value ?? "");
+    return el("div", { class: `field${off ? " off" : ""}`, title: tip }, el("label", {}, label), inp);
+  }
+  redrawEls() {
+    const on = seamlessOn();
+    this.seamless = on;
+    const off = on === false, w = W(this.node, "redraw"), v = String(w?.value ?? "").trim();
+    const tip = "重画：把成片里的某几秒用新种子再画一遍，其余一帧不动。写成片上的时间，如 4-8 或 4-8, 1:12-1:15。先完整跑过一次才能重画；每运行一次换一个新种子，满意后清空。只在导演台开了「无接缝长视频」时可用。\nRedraw: render chosen seconds of a finished run again with a new seed (time on the whole video). Seamless long video only.";
+    const out = [this.fieldRow("重画 redraw", "redraw", off ? "导演台没开「无接缝长视频」，这一栏不可用" : "空 = 不重画；例 4-8 或 4-8, 1:12-1:15（成片上的秒数）", tip, off)];
+    if (v && !off) {
+      const box = el("div", { class: "hint set" }, el("span", {}, `↑ ⚠ 重画中：只重画 ${v} 秒，其余不动，每次运行换新种子。满意后请清空 · Redraw: only these seconds, new seed each run. Clear when done`));
+      box.append(el("button", { title: "clear the redraw box", onclick: () => { if (w) { w.value = ""; w.callback?.(""); } this.render(); } }, "清空 Clear"));
+      out.push(box);
+    } else if (v && off) {
+      out.push(el("div", { class: "hint" }, el("span", {}, `↑ 填着 ${v}，但没开「无接缝长视频」，这次运行会忽略它 · ignored: Seamless long video is off`)));
+    }
+    return out;
+  }
+
   // hint under the "which segments" box: grey = run all; orange banner + Clear = only some segments are set (kept
   // after the run on purpose, so the same segment can be generated again); red = wrong / out of range
   hintEl(h) {
-    const cls = `hint${h.bad ? " bad" : h.set ? " set" : ""}`;
+    const cls = `hint trialhint${h.bad ? " bad" : h.set ? " set" : ""}`;
     const box = el("div", { class: cls }, el("span", {}, "↑ " + h.t));
     if (h.set || h.bad) box.append(el("button", { title: "clear the box: run everything (cached segments reused)",
       onclick: () => { const w = W(this.node, "segments_to_run"); if (w) { w.value = ""; w.callback?.(""); } this.render(); } }, "清空 Clear"));
@@ -481,7 +554,8 @@ class Panel {
 
   // cheap refresh of the hint line only (the Director's auto-split count arrives later / changes)
   updateHint() {
-    const old = this.root.querySelector(".hint");
+    if (seamlessOn() !== this.seamless) { this.render(); return; }   // 0.6.6: the redraw row follows the Director's switch
+    const old = this.root.querySelector(".hint.trialhint");
     if (!old) return;
     const h = hintText(W(this.node, "segments_to_run")?.value);
     let changed = false;
@@ -495,15 +569,19 @@ class Panel {
 
   render() {
     injectCss();
+    tidyRows(this.node, presetCache);
     const h = hintText(W(this.node, "segments_to_run")?.value);
     const style = W(this.node, "style")?.value || "balanced";
     this.root.replaceChildren(
+      ...this.redrawEls(),
+      this.fieldRow("试镜 trial", "segments_to_run", "空 = 出整片；例 2 或 1-2 或 3, 6-7", W(this.node, "segments_to_run")?.options?.tooltip || "试镜：只跑填的这几段；空 = 出整片 · Trial: only these parts; empty = the whole video", false),
       this.hintEl(h),
       this.trialsEl(),
       el("div", { class: "styles" }, ...STYLE_ORDER.map((s) =>
         el("button", { class: s === style ? "on" : "", title: STYLE_TIP[s], onclick: () => this.setStyle(s) }, STYLE_LABEL[s]))),
       ...(this.taraNote ? [el("div", { class: "taranote" }, this.taraNote)] : []),
       ...(this.remakeNote ? [el("div", { class: "taranote" }, this.remakeNote)] : []),
+      ...(this.skipNote ? [el("div", { class: "skipnote" }, this.skipNote)] : []),
       this.table("low"), this.table("high"));
     this.fit();
   }
@@ -571,6 +649,17 @@ app.registerExtension({
       const r = created?.apply(this, arguments);
       this.__h3mdPanel = new Panel(this);
       if (!this.size || this.size[0] < 360) this.setSize?.([400, this.size?.[1] || 600]);
+      return r;
+    };
+    // 0.6.6: the run skipped LoRA rows whose file is not there (optional recommendations) - say which, once per run
+    const executed = nodeType.prototype.onExecuted;
+    nodeType.prototype.onExecuted = function (out) {
+      const r = executed?.apply(this, arguments);
+      const p = this.__h3mdPanel, sk = out?.h3md_panel?.[0]?.skipped;
+      if (p && Array.isArray(sk)) {
+        const note = sk.length ? `上次运行跳过了 ${sk.length} 个没下载的可选 LoRA，照常出片：${sk.map((n) => n.replace(/\.safetensors$/i, "")).join("、")} · skipped (not downloaded, optional)` : "";
+        if (note !== (p.skipNote || "")) { p.skipNote = note; p.render(); }
+      }
       return r;
     };
     const configure = nodeType.prototype.onConfigure;

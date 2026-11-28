@@ -14,14 +14,16 @@ def test_presets_match_measured_mix():
     lo = {r["key"]: r for r in CP.preset_rows("balanced", "low")}
     hi = {r["key"]: r for r in CP.preset_rows("balanced", "high")}
     assert lo["enhancer"]["on"] and lo["enhancer"]["strength"] == 0.55
-    assert hi["realism"]["strength"] == 0.6 and hi["cinematic"]["on"]
+    assert hi["realism"]["strength"] == 0.6 and hi["lms"]["on"]
+    # 0.6.6: the paid speed slider and the cinematic LoRA are no longer recommended rows
+    assert "speed" not in CP.FILES and "cinematic" not in CP.FILES and "speed" not in lo and "cinematic" not in hi
     assert not lo["fightflow"]["on"] and not lo["weapon"]["on"]
     # 0.4.6: high motion = one weapon LoRA per pass, nothing else on (YJ's 1-minute fight, 11-12)
     for which, strength in (("low", 0.85), ("high", 0.5)):
         on = {r["key"]: r["strength"] for r in CP.preset_rows("high_motion", which) if r["on"]}
         assert on == {"weapon": strength}
     off = {r["key"] for r in CP.preset_rows("high_motion", "low") if not r["on"]}
-    assert {"combat", "fightflow", "motion_repair", "speed", "cinematic", "vbvr", "enhancer"} <= off
+    assert {"combat", "fightflow", "motion_repair", "vbvr", "enhancer"} <= off
     # the weapon row switched off keeps the tested strength, so turning it on again starts from it
     bal = {r["key"]: r for r in CP.preset_rows("balanced", "low")}
     assert not bal["weapon"]["on"] and bal["weapon"]["strength"] == 0.85
@@ -56,7 +58,7 @@ def test_style_button_keeps_user_rows():
     out = CP.apply_style(rows, "motion_copy", "low")
     mine = [r for r in out if r["lora"] == "my_anime.safetensors"][0]
     assert mine["on"] and mine["strength"] == 0.8
-    assert not [r for r in out if r.get("key") == "cinematic"][0]["on"]
+    assert not [r for r in out if r.get("key") == "vbvr"][0]["on"]
 
 
 def test_parse_rows():
@@ -75,12 +77,37 @@ def test_missing_lora_listed_and_off_rows_skipped():
     out, used = CP.apply_rows(model, [{"key": None, "lora": "nope.safetensors", "on": False, "strength": 1}],
                               CP._LoraCache(), "low")
     assert out is model and used == []
-    try:
-        CP.apply_rows(model, [{"key": None, "lora": "nope.safetensors", "on": True, "strength": 1}],
-                      CP._LoraCache(), "low")
-        raise AssertionError("missing file accepted")
-    except ValueError as exc:
-        assert "nope.safetensors" in str(exc)
+    # 0.6.6: the LoRAs are recommendations - a switched-on row whose file is missing is skipped, the run goes on
+    skipped = []
+    out, used = CP.apply_rows(model, [{"key": None, "lora": "nope.safetensors", "on": True, "strength": 1},
+                                      {"key": "vbvr", "lora": CP.FILES["vbvr"], "on": True, "strength": 1}],
+                              CP._LoraCache(), "low", skipped)
+    assert out is model and used == [] and skipped == ["nope.safetensors", CP.FILES["vbvr"]]
+
+
+def test_066_official_names_and_renamed_copy_found_by_sha256(tmp_path, monkeypatch):
+    import hashlib
+    # official file names only: no strengths / trigger words / Chinese in a recommended file name
+    for key, spec in CP.RECOMMENDED.items():
+        assert spec["file"].endswith(".safetensors") and " " not in spec["file"] and spec["file"].isascii()
+        assert len(spec["sha256"]) == 64 and spec["bytes"] > 0 and spec["url"].startswith("https://")
+    data = b"renamed lora bytes"
+    (tmp_path / "my renamed 0.6-0.8.safetensors").write_bytes(data)
+    (tmp_path / "same size other.safetensors").write_bytes(b"x" * len(data))
+    files = {p.name: str(p) for p in tmp_path.iterdir()}
+    monkeypatch.setattr(CP.folder_paths, "get_full_path", lambda kind, name: files.get(name))
+    monkeypatch.setattr(CP.folder_paths, "get_filename_list", lambda kind: sorted(files))
+    monkeypatch.setitem(CP.RECOMMENDED, "vbvr", dict(CP.RECOMMENDED["vbvr"], bytes=len(data),
+                                                     sha256=hashlib.sha256(data).hexdigest()))
+    official = CP.FILES["vbvr"]
+    assert CP.find_lora(official) == "my renamed 0.6-0.8.safetensors"      # same bytes under another name
+    assert CP.find_lora(CP.FILES["combat"]) is None                        # not there at all
+    assert CP.find_lora("someone elses.safetensors") is None               # not a recommended file: name only
+    # a recommended row saved under an older renamed name is looked up by its key's official file
+    assert CP.find_row({"key": "vbvr", "lora": "H3-Licon-VBVR-I2V-1pass1.0-2pass0.3.safetensors"}) \
+        == "my renamed 0.6-0.8.safetensors"
+    files[official] = str(tmp_path / "same size other.safetensors")        # the official name wins when present
+    assert CP.find_lora(official) == official
 
 
 def test_outputs_and_fps_lock():
@@ -286,3 +313,42 @@ if __name__ == "__main__":
         if n.startswith("test_"):
             f()
     print("ok")
+
+
+def test_066_redraw_row_output_and_loop_input():
+    """0.6.6: redraw by seconds is a Control Panel row.  Declared last + optional (old workflows / API prompts load),
+    handed on as the LAST output; wrong writing stops the run at the panel; the Loop takes it as its last input."""
+    spec = CP.H3MDControlPanel.INPUT_TYPES()
+    assert list(spec["optional"]) == ["redraw"] and "redraw" not in spec["required"]
+    assert CP.H3MDControlPanel.RETURN_NAMES[-1] == "redraw" and CP.H3MDControlPanel.RETURN_NAMES[9] == "semantic_bridge"
+    node = CP.H3MDControlPanel()
+    m1, m2 = object(), object()
+    res = node.run(m1, m2, 704, 1280, False, 24.0, False, 7, "", "balanced", "[]", "[]")["result"]
+    assert len(res) == 11 and res[10] == ""                      # not given (older workflow): empty
+    res = node.run(m1, m2, 704, 1280, False, 24.0, False, 7, "", "balanced", "[]", "[]", " 4-8, 1:12-1:15 ")["result"]
+    assert res[10] == "4-8, 1:12-1:15"
+    try:
+        node.run(m1, m2, 704, 1280, False, 24.0, False, 7, "", "balanced", "[]", "[]", "eight")
+        raise AssertionError("wrong redraw writing accepted")
+    except ValueError as exc:
+        assert "redraw" in str(exc)
+    import h3md_loop as L
+    import h3md_loop_split as LS
+    assert list(L.H3MDLoopSampler.INPUT_TYPES()["optional"])[-1] == "redraw"
+    main = LS.H3MDLoopSampler2.INPUT_TYPES()["optional"]
+    assert list(main)[-2:] == ["segments_to_run", "redraw"] and "redraw" not in LS.option_defaults()
+    import inspect
+    src = inspect.getsource(L.H3MDLoopSampler.run)
+    assert src.index('pop("redraw"') < src.index("WIN.wrap_models")      # applied to the plan before anything runs
+
+
+def test_066_redraw_ignored_without_window_mode():
+    import h3md_window as WIN
+    plan = {"segments": [{"startFrame": 0, "length": 243}], "windowMode": {"length": 243, "overlap": 22}}
+    out = WIN.redraw_plan(plan, "4-8")
+    assert out["windowMode"]["redraw"] == [[4.0, 8.0]] and "redraw" not in plan["windowMode"]
+    try:                                                         # the Redraw NODE still says why (it was added on purpose)
+        WIN.redraw_plan({"segments": plan["segments"]}, "4-8")
+        raise AssertionError("redraw without window mode accepted by the node")
+    except ValueError:
+        pass
