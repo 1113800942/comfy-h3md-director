@@ -73,6 +73,10 @@ try:
     from . import h3md_model_paths as MP
 except ImportError:  # flat import (tests)
     import h3md_model_paths as MP
+try:
+    from . import h3md_facerefine as FRP   # 0.6.6: H3MD's own copy of the FaceRefine code + built-in detector
+except ImportError:  # flat import (tests)
+    import h3md_facerefine as FRP
 
 LOG = logging.getLogger("H3MD")
 _TAG = "[H3MD FaceRefineSave]"
@@ -106,23 +110,13 @@ def _registry():
 
 
 def _fr_module():
-    """The loaded ComfyUI-H3-FaceRefine nodes module (helpers are called from it, not copied)."""
-    cls = _registry().get("H3FaceTrackCrop")
-    if cls is None:
-        raise RuntimeError(f"{_TAG} face_refine needs ComfyUI-H3-FaceRefine (H3 Face Track + Crop) installed")
-    mod = sys.modules.get(cls.__module__)
-    missing = [n for n in _FR_NEEDED if mod is None or not hasattr(mod, n)]
-    if missing:
-        raise RuntimeError(f"{_TAG} the loaded ComfyUI-H3-FaceRefine is older than 1.1.2 (missing {missing[:4]}"
-                           f"{' ...' if len(missing) > 4 else ''}); update it and restart ComfyUI")
-    return mod
+    """The FaceRefine helpers module.  0.6.6: H3MD's own copy (h3md_facerefine/fr_nodes.py, ComfyUI-H3-FaceRefine
+    1.1.2, MIT) - until 0.6.5 the module of the installed pack, which most users could not get installed."""
+    return FRP.FR
 
 
 def _stitch_class():
-    cls = _registry().get("H3FaceStitch")
-    if cls is None:
-        raise RuntimeError(f"{_TAG} face_refine needs ComfyUI-H3-FaceRefine (H3 Face Stitch Back) installed")
-    return cls
+    return FRP.FR.H3FaceStitch
 
 
 PLUS_TOOLS = ("H3FaceStitchPlus", "H3FaceFlowLock")   # ComfyUI-H3-FaceRefine-Plus (AnniCodex, MIT), optional
@@ -1323,7 +1317,7 @@ REDRAW_INPUTS = ("redraw_model", "redraw_clip", "redraw_vae", "redraw_audio_vae"
 PLUS_INPUTS = ("stitch_mode", "flow_lock")   # 0.4.7
 CANVAS_DEFAULT = 512
 
-# used only when ComfyUI-H3-FaceRefine is not loaded (the node then shows, but face_refine needs it)
+# defaults behind the FaceRefine widget specs (used for a widget the copied code does not list)
 _FALLBACK_TRACK = {
     "detector": (["none"], {}),
     "confidence": ("FLOAT", {"default": 0.35, "min": 0.05, "max": 0.95, "step": 0.05}),
@@ -1360,44 +1354,46 @@ _FALLBACK_STITCH = {
 }
 
 
-FR_MISSING_TIP = ("ComfyUI-H3-FaceRefine is not loaded, so face refine is skipped (the video is still saved). "
-                  "Install it, update ComfyUI (an old ComfyUI makes it fail to load), install its requirements, "
-                  "restart, and look for 'IMPORT FAILED' in the startup log. 修脸插件 ComfyUI-H3-FaceRefine 没加载："
-                  "装上它、更新 ComfyUI、装它的依赖后重启；启动日志里搜 IMPORT FAILED。视频照常保存，只是不修脸。")
+DETECTOR_TIP = (f"Face detector. {FRP.BUILTIN} is built into H3MD: nothing to install or download. Other files from "
+                "models/ultralytics/bbox need the ultralytics package. none = no face refine.\n"
+                f"人脸检测模型。{FRP.BUILTIN} 已内置在 H3MD 里，不用装任何东西、不用下载；models/ultralytics/bbox 里的"
+                "其他文件需要装 ultralytics。none = 不修脸。")
 
 
 def _fallback_track():
-    """0.5.9: the widgets when ComfyUI-H3-FaceRefine is not loaded. Same choices it would give (detector files from
-    the folders H3MD registers, both cut modes), so a saved workflow still loads instead of turning red; running
-    then saves without face refine and says why."""
-    out = dict(_FALLBACK_TRACK)
-    try:
-        files = MP.detector_files()
-    except Exception:
-        files = []
-    out["detector"] = (["none"] + files, {"default": files[0] if files else "none", "tooltip": FR_MISSING_TIP})
-    out["fallback_detector"] = (["none"] + files, {"default": "none", "tooltip": FR_MISSING_TIP})
-    out["cut_detection"] = (["none", "auto (pyscenedetect)"], {"default": "none", "tooltip": FR_MISSING_TIP})
-    return out
+    """The widgets if the FaceRefine specs cannot be read (not expected: the code ships with H3MD)."""
+    return dict(_FALLBACK_TRACK)
 
 
-def refine_blocker(detector):
-    """0.5.9: why face refine cannot run (None = it can): FaceRefine missing or too old, no detector, or the
-    detector file not found. The node then saves the video without refine instead of failing."""
-    try:
-        _fr_module()
-    except RuntimeError as exc:
-        return FR_MISSING_TIP if "Track + Crop" in str(exc) else str(exc)
+def refine_blocker(detector, refine_model=None, vosr2_model=None, seedvr2_model=None, seedvr2_vae=None):
+    """Why face refine cannot run (None = it can).  The node then saves the video without refine instead of failing
+    (0.5.9).  0.6.6: the tracking code and the default detector are built in, so what can still be missing is a
+    detector the user picked themselves, or the restore model (VOSR2 / SeedVR2 are separate packs)."""
     if not detector or detector == "none":
-        return ("no face detector chosen (detector = none): pick a face detector, e.g. face_yolov8m.pt in "
-                "models/ultralytics/bbox. 没选人脸检测模型。")
-    try:
-        found = MP.find_detector(detector)
-    except Exception:
-        found = True    # cannot check here: leave it to the detector loader
-    if not found:
-        return (f"face detector '{detector}' not found: put it in models/ultralytics/bbox and restart ComfyUI. "
-                f"找不到人脸检测模型 {detector}：放进 models/ultralytics/bbox 后重启。")
+        return (f"no face detector chosen (detector = none): pick {FRP.BUILTIN} (built in). "
+                f"没有选人脸检测模型：选 {FRP.BUILTIN}（已内置）。")
+    if detector == FRP.BUILTIN:
+        why = FRP.DET.problem()
+        if why:
+            return f"built-in face detector: {why}"
+    else:
+        try:
+            found = MP.find_detector(detector)
+        except Exception:
+            found = True    # cannot check here: leave it to the detector loader
+        if not found:
+            return (f"face detector '{detector}' not found in models/ultralytics/bbox: pick {FRP.BUILTIN} (built in). "
+                    f"找不到人脸检测模型 {detector}：请改选 {FRP.BUILTIN}（已内置）。")
+        why = FRP.ultralytics_problem()
+        if why:
+            return f"face detector '{detector}': {why}. 这个检测模型需要装 ultralytics；内置的 {FRP.BUILTIN} 不需要。"
+    if refine_model == "VOSR2" and vosr2_model is None:
+        return ("no restore model: face refine needs a VOSR2 model on vosr2_model ('VOSR 2.0 Model Loader' of "
+                "ComfyUI-VOSR2 - a separate pack, install it to use face refine). "
+                "修脸需要 VOSR2 模型：把 ComfyUI-VOSR2 的 VOSR 2.0 Model Loader 接到 vosr2_model（要另装这个插件）。")
+    if refine_model == "SeedVR2" and (seedvr2_model is None or seedvr2_vae is None):
+        return ("no restore model: refine_model = SeedVR2 needs seedvr2_model + seedvr2_vae "
+                "(ComfyUI-SeedVR2_VideoUpscaler - a separate pack). 修脸选了 SeedVR2，但没接 seedvr2_model / seedvr2_vae。")
     return None
 
 
@@ -1410,17 +1406,19 @@ def _copy_spec(spec, **override):
 
 
 def _fr_specs():
-    """Widget specs (with tooltips) of the loaded H3 Face Track + Crop / H3 Face Stitch Back, else the fallback."""
+    """Widget specs (with tooltips) of H3 Face Track + Crop / H3 Face Stitch Back (H3MD's own copy)."""
     try:
-        reg = _registry()
-        tc = reg["H3FaceTrackCrop"].INPUT_TYPES()
-        st = reg["H3FaceStitch"].INPUT_TYPES()
+        tc = FRP.FR.H3FaceTrackCrop.INPUT_TYPES()
+        st = FRP.FR.H3FaceStitch.INPUT_TYPES()
         track = dict(tc.get("required", {}), **tc.get("optional", {}))
         stitch = dict(st.get("required", {}), **st.get("optional", {}))
         out_t = {k: track.get(k, _FALLBACK_TRACK[k]) for k in TRACK_REQUIRED + TRACK_OPTIONAL}
         out_s = {k: stitch.get(k, _FALLBACK_STITCH[k]) for k in STITCH_REQUIRED + STITCH_OPTIONAL}
-    except Exception:
+    except Exception as exc:
+        LOG.warning("%s face refine widget specs not readable (%s); using the built-in list", _TAG, exc)
         out_t, out_s = _fallback_track(), dict(_FALLBACK_STITCH)
+    # 0.6.6: the built-in detector first and the default; "none" stays a valid saved value (= no face refine)
+    out_t["detector"] = (FRP.detector_names() + ["none"], {"default": FRP.BUILTIN, "tooltip": DETECTOR_TIP})
     for k in ("canvas_width", "canvas_height"):
         out_t[k] = _copy_spec(out_t[k], default=CANVAS_DEFAULT)
     return out_t, out_s
@@ -1575,7 +1573,7 @@ class H3MDSaveVideoFaceRefineInterp:
             path, frames, video, preview = res["result"]
             return {"ui": res["ui"], "result": (path, frames, video, "face_refine off: saved like H3MD Save Video "
                                                                      f"Interp ({frames} frames) -> {path}", preview)}
-        blocker = refine_blocker(track_kw.get("detector"))
+        blocker = refine_blocker(track_kw.get("detector"), refine_model, vosr2_model, seedvr2_model, seedvr2_vae)
         if blocker:   # 0.5.9: a missing face-refine part never stops the save (Bilibili reports 2026-11-20)
             LOG.warning("%s face refine skipped: %s Saving the video WITHOUT face refine.", _TAG, blocker)
             res = S.H3MDSaveVideoInterp().save(segments=segments, prompt=prompt, extra_pnginfo=extra_pnginfo,

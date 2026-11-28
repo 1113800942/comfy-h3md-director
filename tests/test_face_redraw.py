@@ -237,7 +237,8 @@ def test_refiner_pastes_redrawn_frames_through_masks(tmp_path):
                  "weights": [1.0] * total, "detected": [True] * total}
     reg = {"VOSR2Upscale": Up, "H3FaceStitch": Stitch}
     VOSR2Model.__name__ = "VOSR2Model"
-    with mock.patch.object(F, "_registry", lambda: reg):
+    with mock.patch.object(F, "_registry", lambda: reg), \
+            mock.patch.object(F, "_stitch_class", lambda: reg["H3FaceStitch"]):   # 0.6.6: the stitch class is built in
         r = F.FaceRefiner(FR(), transform, VOSR2Model(), None, 1, {"undetected_frames": "fade_out", "blend": 1.0},
                           layer=layer, masks=masks)
         r.refine(torch.zeros(10, 16, 16, 3), 18)

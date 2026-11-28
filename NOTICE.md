@@ -113,6 +113,23 @@ segment samples; the network class is ComfyUI's own (`comfy.taesd.taehv`), the p
 `h3md_preview/taeh3.safetensors` 是 Ollin Boer Bohan 的 MiniMax H3 小解码器 taeh3（原文件未改动），采用 MIT 许可，全文见
 `h3md_preview/LICENSE_TAEHV.txt`。只用于采样时的实时预览；网络结构用的是 ComfyUI 自带的类，预览代码是 H3MD 自己写的。
 
+## 2d. Face refine: tracking code and face detector (included since 0.6.6) / 修脸：跟脸代码和人脸检测模型（0.6.6 起内置）
+
+`h3md_facerefine/fr_nodes.py` is `nodes.py` of **ComfyUI-H3-FaceRefine 1.1.2** by Carasibana
+(<https://github.com/Carasibana/ComfyUI-H3-FaceRefine>, commit d8521d1), unchanged. **MIT License, Copyright (c) 2026
+Carasibana** - full text in `h3md_facerefine/LICENSE_FACEREFINE.txt`. H3MD calls its face tracking helpers and its
+H3 Face Stitch Back class from the save node; its node classes are not registered by H3MD.
+
+`h3md_facerefine/face_yolov8n_v2.torchscript` is the face detector `face_yolov8n_v2.pt` from Bingsu/adetailer
+(<https://huggingface.co/Bingsu/adetailer>, a YOLOv8n model trained for faces; the model card gives Apache-2.0,
+earlier AGPL-3.0), exported once to TorchScript with ultralytics (imgsz 640, fp32) so that it runs with PyTorch
+alone. The code around it (`h3md_facerefine/detector.py`: letterbox, NMS, boxes back on the frame) is H3MD's own.
+
+`h3md_facerefine/fr_nodes.py` 是 Carasibana 的 ComfyUI-H3-FaceRefine 1.1.2 的 `nodes.py`（原样未改），MIT 许可，全文见
+`h3md_facerefine/LICENSE_FACEREFINE.txt`；H3MD 只在保存节点里调用它的跟脸函数和贴回类，不注册它的节点。
+`h3md_facerefine/face_yolov8n_v2.torchscript` 是 Bingsu/adetailer 的人脸检测模型 `face_yolov8n_v2.pt`（模型页标注
+Apache-2.0，早期为 AGPL-3.0）导出成 TorchScript 的版本，只用 PyTorch 就能运行；周围的代码是 H3MD 自己写的。
+
 ## 3. Runtime dependencies (not included) / 运行时依赖（不包含在本包里）
 
 | Project | Status (checked 2026-10-19) | How H3MD uses it |

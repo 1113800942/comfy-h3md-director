@@ -322,8 +322,8 @@ def bridge_for(style: str):
 
 def preflight(interpolate, face_refine):
     """0.6.3: the Control Panel runs first, so problems with the save-time options show before the sampling starts.
-    interpolate on + RIFE not usable -> error now.  face_refine on + FaceRefine pack missing -> warning now (the
-    save node then writes the video without face refine, as since 0.5.9)."""
+    interpolate on + RIFE not usable -> error now.  face_refine needs no check here since 0.6.6 (built in; the save
+    node writes the video without face refine when its restore model is missing)."""
     if interpolate:
         try:
             try:
@@ -335,15 +335,8 @@ def preflight(interpolate, face_refine):
             why = f"built-in RIFE not usable ({exc})"
         if why:
             raise RuntimeError(f"{_TAG} interpolate is on but {why}")
-    if face_refine:
-        try:
-            import nodes as comfy_nodes
-            if "H3FaceTrackCrop" not in comfy_nodes.NODE_CLASS_MAPPINGS:
-                LOG.warning("%s face_refine is on but the ComfyUI-H3-FaceRefine pack is not loaded: the video will be "
-                            "saved WITHOUT face refine. Install it (see the README) or turn face_refine off. "
-                            "修脸开着但没装 ComfyUI-H3-FaceRefine：会不修脸照常保存。", _TAG)
-        except Exception:
-            pass
+    # 0.6.6: face refine's tracking code and face detector are built in; what it still needs (a VOSR2 / SeedVR2
+    # restore model wired to the save node) is checked there, and a missing one saves without face refine
 
 
 class H3MDControlPanel:
@@ -369,10 +362,11 @@ class H3MDControlPanel:
                 "fps": ("FLOAT", {"default": 24.0, "min": 1.0, "max": 240.0, "step": 1.0, "tooltip":
                         "Saved frame rate; only with interpolate on (e.g. 30, 48, 60). 插帧开时的目标帧数。"}),
                 "face_refine": ("BOOLEAN", {"default": False, "tooltip":
-                                "Off (default). On: sharpen small faces in wide shots while saving - needs the "
-                                "ComfyUI-H3-FaceRefine pack and a face detector model; if they are missing the video is "
-                                "saved without face refine.\n关（默认）；开：保存时修脸，需要另装 ComfyUI-H3-FaceRefine "
-                                "和人脸检测模型，缺了就不修脸照常保存。"}),
+                                "Off (default). On: sharpen small faces in wide shots while saving. Finding and following the "
+                                "face is built in (nothing to install); the sharpening itself uses a VOSR2 model from the "
+                                "ComfyUI-VOSR2 pack - without it the video is saved without face refine.\n"
+                                "关（默认）；开：保存时修脸。找脸、跟脸已内置，不用另装；修脸本身用 ComfyUI-VOSR2 的模型，"
+                                "没装就不修脸、照常保存。"}),
                 "seed": ("INT", {"default": 0, "min": 0, "max": 0xFFFFFFFFFFFFFFFF, "control_after_generate": True,
                                  "tooltip": "Fixed or random (control after generate). 种子：固定或随机。"}),
                 "segments_to_run": ("STRING", {"default": "", "tooltip":
