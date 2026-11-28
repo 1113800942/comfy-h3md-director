@@ -52,6 +52,16 @@ Dates are development dates (2026). / 日期为开发日期（2026 年）。
   总控台开跑前的检查不再要求 FaceRefine 包。
 
 ### Fixed / 修复
+- **Face refine: the face no longer flickers on small faces, and a profile stays a profile.** Two long-standing
+  faults of the H3 head redraw (0.5.3) that only show on a small face (about 45 px, enlarged 7x): (1) SAM3's head
+  mask broke up from frame to frame (hair only, then face only, speckled holes), and since the redraw and the paste
+  follow it the refined pixels changed every frame - the masks are now made solid and steady in time before use
+  (a pixel is head when a quarter of a 17-frame window says so, gaps closed, holes and row gaps filled);
+  (2) `redraw_denoise` 0.8 redrew a profile as a front face with a dark halo - the default is back at the published
+  baseline 0.5 (0.8 is still there for a large front face). The example workflows use 0.5.
+  修脸：小脸不再闪烁，侧脸不会被画成正脸。两个 0.5.3 起就有、只在小脸（约 45 像素）上才暴露的问题：(1) SAM3 的头部遮罩
+  一帧一个样（这帧只有头发、下帧只有脸、满是麻点洞），重画和贴回都跟着它，修过的像素每帧都在变——现在遮罩先补实并在时间上稳定
+  再用；(2) 重画强度 0.8 会把侧脸画成正脸并带一圈暗边——默认值改回公开基准 0.5（大的正脸仍可调到 0.8）。示例工作流用 0.5。
 - README model list: `Motion_Repair_V2.safetensors` is on Civitai (the Hugging Face repo named before holds V1), and
   the lms LoRA is `minimax_h3_lms_v1.0_r64.safetensors` from Alissonerdx's repo (the `..._r64_r` file named before is
   a different file).

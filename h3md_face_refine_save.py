@@ -1685,7 +1685,8 @@ class H3MDSaveVideoFaceRefineInterp:
         text = str(redraw.get("redraw_mask_text") or RD.MASK_TEXT).strip()
         unit = int(redraw.get("redraw_unit", RD.UNIT_FRAMES))
         denoise = float(redraw.get("redraw_denoise", RD.DENOISE))
-        mask_set = {"text": text, "unit": unit, "sam3": [RD.SAM3_CKPT, RD.SAM3_THRESHOLD, RD.SAM3_MAX_OBJECTS]}
+        mask_set = {"text": text, "unit": unit, "sam3": [RD.SAM3_CKPT, RD.SAM3_THRESHOLD, RD.SAM3_MAX_OBJECTS],
+                    "mask_version": RD.MASK_VERSION}
         draw_set = dict(mask_set, denoise=denoise, steps=int(redraw.get("redraw_steps", RD.STEPS)),
                         seed=int(redraw.get("redraw_seed", RD.SEED)), prompt=str(redraw.get("redraw_prompt") or ""),
                         recipe=[RD.SCHEDULER, RD.SAMPLER, RD.CLEAN_THRESHOLD, RD.CLEAN_SHRINK, RD.CLEAN_MIN_FRAMES,
