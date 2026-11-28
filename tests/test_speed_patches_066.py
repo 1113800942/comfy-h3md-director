@@ -97,3 +97,33 @@ def test_sage_attention_is_used_when_there_and_skipped_without_error(monkeypatch
     monkeypatch.setattr(SP, "_kj_sage_class", lambda: KjNoSage)                 # the package missing / too old
     assert SP.H3MDSageAttention().run(model)[0] is model
     assert set(SP.NODE_CLASS_MAPPINGS) == {"H3MDChunkFeedForward", "H3MDSageAttention"}
+
+
+def test_sage_status_and_install_steps_for_this_machine(monkeypatch):
+    """0.6.6 (user 00:41): show the state, and tell the user what to install - never install anything ourselves."""
+    import sys
+    import types
+    monkeypatch.setattr(SP, "_kj_sage_class", lambda: None)
+    monkeypatch.setattr(SP, "_sage2_importable", lambda: False)
+    info = SP.sage_info()
+    assert info["active"] is False and info["missing"] == ["ComfyUI-KJNodes", "sageattention 2.x"]
+    assert "KJNodes" in info["how_zh"] and "1.0.6" in info["how_zh"] and info["python"] in info["how_zh"]
+    assert "未加速" in info["status_zh"] and "Restart ComfyUI" in info["how_en"]
+    win = SP.install_steps({"kjnodes": True, "sageattention": False, "windows": True, "python": "C:/py/python.exe",
+                            "torch": "2.13.0", "cuda": "13.0"})
+    assert "triton-windows" in win["zh"] and "cu130" in win["zh"] and "woct0rdho" in win["zh"] and "KJNodes" not in win["zh"]
+    lin = SP.install_steps({"kjnodes": True, "sageattention": False, "windows": False, "python": "/venv/bin/python",
+                            "torch": "2.13.0", "cuda": "13.0"})
+    assert "thu-ml/SageAttention" in lin["en"] and "triton-windows" not in lin["en"]
+    assert SP.install_steps({"kjnodes": True, "sageattention": True}) == {"zh": "", "en": ""}
+
+    kj = types.ModuleType("fake_kj_ltxv")
+    kj._cuda_archs, kj._ck = ["sm120"], object()
+    cls = type("Kj", (), {"__module__": "fake_kj_ltxv"})
+    monkeypatch.setitem(sys.modules, "fake_kj_ltxv", kj)
+    monkeypatch.setattr(SP, "_kj_sage_class", lambda: cls)
+    on = SP.sage_info()
+    assert on["active"] is True and on["missing"] == [] and on["how_zh"] == "" and "已加速" in on["status_zh"]
+    kj._cuda_archs = None                                   # KJNodes there, the package missing or too old
+    off = SP.sage_info()
+    assert off["active"] is False and off["missing"] == ["sageattention 2.x"] and "KJNodes" not in off["how_en"]

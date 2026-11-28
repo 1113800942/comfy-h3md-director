@@ -15,6 +15,7 @@ nodes when ComfyUI-KJNodes is not installed.
 from __future__ import annotations
 
 import logging
+import sys
 import types
 
 import torch
@@ -119,6 +120,102 @@ def sage_status():
         return False, ("ComfyUI-KJNodes is not installed (its MiniMax H3 SageAttention patch is what drives the "
                        "sageattention package)")
     return True, None
+
+
+KJNODES_URL = "https://github.com/kijai/ComfyUI-KJNodes"
+SAGE_WINDOWS_URL = "https://github.com/woct0rdho/SageAttention/releases"
+SAGE_SOURCE_URL = "https://github.com/thu-ml/SageAttention"
+
+
+def _sage2_importable() -> bool:
+    """SageAttention 2.x is installed (the 1.0.6 on PyPI has no CUDA kernels and is not enough)."""
+    try:
+        from sageattention.core import get_cuda_arch_versions  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+def install_steps(info: dict) -> dict:
+    """What to install on THIS machine to get SageAttention, in Chinese and English ('' when nothing is missing)."""
+    py, tv, cv = info.get("python") or "python", info.get("torch") or "?", info.get("cuda") or "?"
+    cu = "cu" + cv.replace(".", "") if cv and cv != "?" else "cuXXX"
+    zh, en = [], []
+    if not info.get("kjnodes"):
+        zh.append(f"装 ComfyUI-KJNodes：在 ComfyUI Manager 里搜 KJNodes 安装（{KJNODES_URL}）。")
+        en.append(f"Install ComfyUI-KJNodes with ComfyUI Manager ({KJNODES_URL}).")
+    if not info.get("sageattention"):
+        if info.get("windows"):
+            zh.append(f"装 sageattention 2.x（不要直接 pip install sageattention，那样装到的是旧的 1.0.6，用不了）："
+                      f"先运行  \"{py}\" -m pip install triton-windows  ；再到 {SAGE_WINDOWS_URL} 下载文件名里带 {cu} 、"
+                      f"并且标的 torch 版本不高于你的 {tv} 的那个 .whl，运行  \"{py}\" -m pip install 下载的文件.whl 。")
+            en.append(f"Install sageattention 2.x (plain 'pip install sageattention' gives the old 1.0.6, which does not "
+                      f"work here): run  \"{py}\" -m pip install triton-windows  ; then download from {SAGE_WINDOWS_URL} "
+                      f"the .whl whose name has {cu} and a torch version not above your {tv}, and run  "
+                      f"\"{py}\" -m pip install <that file>.whl .")
+        else:
+            zh.append(f"装 sageattention 2.x（不要直接 pip install sageattention，那是旧的 1.0.6）：按 {SAGE_SOURCE_URL} 的"
+                      f"说明从源码安装，或装和你的 PyTorch {tv} / CUDA {cv} 对应的预编译包；用这个 Python 装：{py}")
+            en.append(f"Install sageattention 2.x (not the 1.0.6 on PyPI): build it from {SAGE_SOURCE_URL}, or use a "
+                      f"prebuilt wheel for PyTorch {tv} / CUDA {cv}; install it with this Python: {py}")
+    if zh:
+        zh.append("装完重启 ComfyUI。不装也能出片，只是更慢、更吃显存。")
+        en.append("Restart ComfyUI afterwards. Without it the run still works, only slower and with more VRAM.")
+    number = lambda rows: " ".join(f"{i}) {r}" for i, r in enumerate(rows, 1))  # noqa: E731
+    return {"zh": number(zh), "en": number(en)}
+
+
+def sage_info() -> dict:
+    """What the editor shows about SageAttention: is it used on this install, and if not, what is missing and how to
+    install it here.  'active' follows the very checks KJNodes' patch node makes before it runs."""
+    info = {"kjnodes": False, "sageattention": False, "h3_kernel": True, "active": False,
+            "windows": sys.platform.startswith("win"), "python": sys.executable or "python",
+            "torch": str(torch.__version__).split("+")[0], "cuda": getattr(torch.version, "cuda", None) or ""}
+    try:
+        cls = _kj_sage_class()
+    except Exception:
+        cls = None
+    info["kjnodes"] = cls is not None
+    kj_mod = sys.modules.get(getattr(cls, "__module__", "")) if cls is not None else None
+    if kj_mod is not None and hasattr(kj_mod, "_cuda_archs"):
+        info["sageattention"] = getattr(kj_mod, "_cuda_archs", None) is not None
+        info["h3_kernel"] = getattr(kj_mod, "_ck", True) is not None
+    else:
+        info["sageattention"] = _sage2_importable()
+    info["active"] = bool(info["kjnodes"] and info["sageattention"] and info["h3_kernel"])
+    missing = [n for n, ok in (("ComfyUI-KJNodes", info["kjnodes"]), ("sageattention 2.x", info["sageattention"]))
+               if not ok]
+    info["missing"] = missing
+    steps = install_steps(info)
+    info["how_zh"], info["how_en"] = steps["zh"], steps["en"]
+    if info["active"]:
+        info["status_zh"], info["status_en"] = "已加速（SageAttention）", "SageAttention on"
+    else:
+        what = "、".join(missing) or "ComfyUI 版本不支持"
+        info["status_zh"] = f"未加速：没装 {what}（照常能跑，更慢、更吃显存）"
+        info["status_en"] = f"SageAttention off: {', '.join(missing) or 'not supported by this ComfyUI'} not installed"
+    return info
+
+
+def register_routes() -> bool:
+    try:
+        from aiohttp import web
+        from server import PromptServer
+        routes = PromptServer.instance.routes
+    except Exception:
+        return False
+
+    @routes.get("/h3md/speed/sage_status")
+    async def h3md_sage_status(request):
+        return web.json_response(sage_info())
+
+    return True
+
+
+try:
+    register_routes()
+except Exception as _exc:  # never blocks node loading
+    LOG.warning("%s routes not registered: %s", _TAG, _exc)
 
 
 def apply_sage(model):

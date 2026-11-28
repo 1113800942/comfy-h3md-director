@@ -3,6 +3,7 @@
 // The LoRA lists live in two hidden STRING widgets (lora_low / lora_high, JSON); the style in a hidden combo.
 import { app } from "../../scripts/app.js";
 import { api } from "../../scripts/api.js";
+import { sageStatus, sageHelp } from "./h3md_speed_patches.js";
 
 const NODE = "H3MDControlPanel";
 export const REMAKE_STYLE = "remake";
@@ -271,6 +272,14 @@ function seamlessOn() {
   }
   return seen ? false : null;
 }
+// 0.6.6: the workflow has an enabled H3MD Sage Attention node (usually inside the Models & speed subgraph, out of
+// sight) - the panel says so when SageAttention is not installed, since that is why the run is slower
+function sageNodeOn() {
+  for (const g of allGraphs()) for (const n of g._nodes || g.nodes || []) {
+    if (n.type === "H3MDSageAttention" && n.mode !== 4 && n.mode !== 2) return true;
+  }
+  return false;
+}
 function planWantsRemake() {
   return directorNodes().some((n) => {
     try {
@@ -427,7 +436,18 @@ class Panel {
     if (interp) { const cb = interp.callback; interp.callback = (...a) => { const r = cb?.apply(interp, a); this.syncFps(); return r; }; }
     this.syncFps();
     presets().then(() => this.render());
+    sageStatus().then((s) => { this.sage = s; this.render(); });
     this.render();
+  }
+
+  // 0.6.6: one grey line when SageAttention is not installed (optional, the run works without it), with the steps
+  sageEl() {
+    const s = this.sage;
+    if (!s || s.active !== false || !sageNodeOn()) return [];
+    const box = el("div", { class: "skipnote" }, el("span", {}, "⚡ " + s.status_zh + " "),
+      el("a", { href: "#", style: { color: "#9cf" }, onclick: (e) => { e.preventDefault(); this.sageOpen = !this.sageOpen; this.render(); } }, this.sageOpen ? "收起" : "怎么装 · How to install"));
+    if (this.sageOpen) box.append(el("div", { style: { marginTop: "4px", userSelect: "text", whiteSpace: "pre-wrap" } }, [s.how_zh, s.how_en].filter(Boolean).join("\n")));
+    return [box];
   }
 
   syncFps() {
@@ -582,6 +602,7 @@ class Panel {
       ...(this.taraNote ? [el("div", { class: "taranote" }, this.taraNote)] : []),
       ...(this.remakeNote ? [el("div", { class: "taranote" }, this.remakeNote)] : []),
       ...(this.skipNote ? [el("div", { class: "skipnote" }, this.skipNote)] : []),
+      ...this.sageEl(),
       this.table("low"), this.table("high"));
     this.fit();
   }
